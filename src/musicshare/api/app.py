@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse
 
 from musicshare import taste
 from musicshare.spotify import SpotifyClient, SpotifyError
-from musicshare.spotify.client import ALL_KINDS
+from musicshare.spotify.client import ALL_KINDS, SEARCH_MAX
 from musicshare.web.render import render
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -44,7 +44,7 @@ def health() -> dict[str, object]:
 def search(
     q: str = Query(..., min_length=1, description="free text"),
     types: str = Query("track,artist,album", description="comma separated"),
-    limit: int = Query(8, ge=1, le=50),
+    limit: int = Query(8, ge=1, le=SEARCH_MAX),
 ) -> dict[str, object]:
     kinds = [k.strip() for k in types.split(",") if k.strip() in ALL_KINDS]
     if not kinds:

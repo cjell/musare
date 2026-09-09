@@ -940,6 +940,121 @@ details[open] summary .chev{transform:rotate(180deg)}
 .playin .anim{animation:rise .45s cubic-bezier(.2,.7,.3,1)}
 @keyframes rise{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.playin .anim{animation:none}*{transition:none!important}}
+
+/* ================= edit mode =================
+   The profile edits in place rather than in a form. "Edit profile" flips the
+   page into edit mode; empty slots become the affordance, so nothing has to be
+   added to the resting layout to advertise that it is editable. */
+.editing .sec{position:relative}
+
+/* A slot is the same box as a filled item, drawn as an outline. Tapping it
+   opens the picker; there is deliberately no separate "+" button. */
+.slot{
+  border:1.5px dashed var(--line);background:rgba(244,241,250,.02);
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  color:var(--ink-3);transition:border-color .15s ease,background .15s ease;
+}
+.slot:hover,.slot:focus-visible{border-color:var(--accent);background:var(--accent-tint);color:var(--accent);outline:none}
+.slot svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round}
+.slot-row{height:58px;border-radius:9px;margin:0 -8px}
+.slot-sq{width:100%;aspect-ratio:1/1;border-radius:8px}
+.slot-ci{width:100%;aspect-ratio:1/1;border-radius:50%}
+
+/* Remove control, only in edit mode. Sits on the artwork corner so it reads as
+   attached to the item rather than to the row. */
+.unpin{
+  position:absolute;width:20px;height:20px;border-radius:50%;
+  border:1px solid var(--line-2);background:#15121D;color:var(--ink-2);
+  display:none;align-items:center;justify-content:center;cursor:pointer;
+  font-family:inherit;font-size:13px;line-height:1;padding:0 0 1px;z-index:3;
+}
+.editing .unpin{display:flex}
+.unpin:hover{border-color:#FF4D6D;color:#FF4D6D}
+.unpin:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* .art sets overflow:hidden, so the control cannot live inside the artwork -
+   it hangs off the item box instead, which also reads as attached to the whole
+   item rather than to its picture. */
+.pinbox{position:relative}
+.row.pinbox .unpin{right:0;top:50%;transform:translateY(-50%)}
+.artist.pinbox .unpin{right:-2px;top:-2px}
+.pl.pinbox .unpin{right:-6px;top:-6px}
+
+/* Photos share the procedural artwork's box, so only the image layer changes. */
+.art.photo{background-size:cover;background-position:center}
+.art.photo::after{opacity:.06}
+
+/* Fixed above the tab bar: a user editing the artists grid is scrolled far past
+   the header, so Done cannot live up there with the profile actions. */
+.editbar{
+  position:fixed;left:50%;transform:translateX(-50%);z-index:60;
+  bottom:calc(64px + env(safe-area-inset-bottom) + 12px);
+  width:100%;max-width:420px;padding:0 var(--pad);
+  display:flex;gap:9px;pointer-events:none;
+}
+.editbar[hidden]{display:none}
+.editbar button{
+  pointer-events:auto;flex:1;height:42px;border-radius:11px;cursor:pointer;
+  font-family:inherit;font-size:13.5px;font-weight:600;letter-spacing:-.01em;
+  border:1px solid var(--line);background:rgba(21,18,29,.92);color:var(--ink);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+}
+.editbar .primary{background:var(--accent);border-color:var(--accent);color:#120E1B}
+.editbar button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ================= pin picker ================= */
+.pick-wrap{position:fixed;inset:0;z-index:80;display:flex;align-items:flex-end;justify-content:center}
+.pick-wrap[hidden]{display:none}
+.pick-sheet{
+  position:relative;width:100%;max-width:420px;max-height:88vh;
+  background:#15121D;border:1px solid var(--line);border-bottom:0;
+  border-radius:18px 18px 0 0;padding:10px 18px 18px;
+  display:flex;flex-direction:column;
+}
+.pick-head{
+  font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:19px;
+  letter-spacing:-.02em;margin:6px 0 2px;
+}
+.pick-sub{font-size:12px;color:var(--ink-3);margin-bottom:12px}
+.pick-search{display:flex;gap:8px;align-items:center;margin-bottom:4px}
+.pick-search input{
+  flex:1;height:40px;border-radius:10px;padding:0 12px;
+  border:1px solid var(--line);background:var(--raise);color:var(--ink);
+  font-family:inherit;font-size:14px;
+}
+.pick-search input:focus{outline:none;border-color:var(--accent)}
+.pick-tabs{display:flex;gap:6px;margin:11px 0 6px}
+.pick-tabs button{
+  font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  padding:6px 11px;border-radius:99px;cursor:pointer;
+  border:1px solid var(--line);background:transparent;color:var(--ink-3);
+}
+.pick-tabs button[aria-pressed="true"]{border-color:var(--accent-line);background:var(--accent-tint);color:var(--accent)}
+.pick-list{overflow-y:auto;scrollbar-width:none;margin:0 -18px;padding:4px 18px 0;flex:1;min-height:120px}
+.pick-list::-webkit-scrollbar{display:none}
+.pick-note{
+  font-size:12.5px;color:var(--ink-3);line-height:1.5;padding:22px 0;text-align:center;
+}
+.pick-item{
+  display:flex;align-items:center;gap:12px;padding:8px;margin:0 -8px;
+  border-radius:9px;cursor:pointer;width:calc(100% + 16px);
+  border:0;background:transparent;color:inherit;text-align:left;font-family:inherit;
+}
+.pick-item:hover{background:rgba(244,241,250,.05)}
+.pick-item:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.pick-item .thumb{width:44px;height:44px;border-radius:6px;flex:none;background:#221C33 center/cover no-repeat}
+.pick-item.artist .thumb{border-radius:50%}
+/* .pi-m is a flex item so it blockifies, but its own children are plain
+   inline spans - without this the title and the artist share a line. */
+.pick-item .pi-m{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+.pick-item .pi-n,.pick-item .pi-s{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pick-item .pi-n{font-size:13.5px;font-weight:500}
+.pick-item .pi-s{font-size:11.5px;color:var(--ink-3)}
+.pick-item .pi-y{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);flex:none}
+.pick-group{
+  font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ink-3);margin:14px 0 6px;
+}
+.pick-group:first-child{margin-top:4px}
 </style>
 </head>
 <body>
@@ -1169,6 +1284,11 @@ details[open] summary .chev{transform:rotate(180deg)}
       <div class="agrid" id="artists"></div>
     </section>
 
+    <section class="sec anim a3" id="albumSection">
+      <div class="sec-label"><span>Albums</span><span class="aux" id="albumAux"></span></div>
+      <div class="plgrid" id="albums"></div>
+    </section>
+
     <!-- "Most underground" lived here; pinned, not deleted. The `ug` data is
          still on every profile so it can come back cheaply. -->
 
@@ -1307,6 +1427,32 @@ details[open] summary .chev{transform:rotate(180deg)}
           <button class="btn btn-primary" type="button" id="ssGo">Going</button>
           <button class="btn btn-ghost" type="button">Tickets</button>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="editbar" id="editBar" hidden>
+    <button type="button" id="editAppearance">Appearance</button>
+    <button type="button" class="primary" id="editDone">Done</button>
+  </div>
+
+  <div class="pick-wrap" id="pickWrap" hidden role="dialog" aria-modal="true" aria-label="Pin to your profile">
+    <div class="sheet-bg" id="pickBg"></div>
+    <div class="pick-sheet">
+      <div class="mf-grab" aria-hidden="true"></div>
+      <div class="pick-head" id="pickHead">Pin a song</div>
+      <div class="pick-sub" id="pickSub">Your most played, or search for anything.</div>
+      <div class="pick-search">
+        <input id="pickInput" type="search" autocomplete="off" spellcheck="false" placeholder="Search Spotify">
+      </div>
+      <div class="pick-tabs" id="pickTabs">
+        <button type="button" data-k="track" aria-pressed="true">Songs</button>
+        <button type="button" data-k="artist" aria-pressed="false">Artists</button>
+        <button type="button" data-k="album" aria-pressed="false">Albums</button>
+      </div>
+      <div class="pick-list" id="pickList"></div>
+      <div class="sheet-actions">
+        <button type="button" id="pickCancel">Cancel</button>
       </div>
     </div>
   </div>
@@ -1953,23 +2099,18 @@ function render(i){
   $("artistAux").textContent = p.aux.artists;
 
   $("artists").className = "agrid " + (c.frame || p.frame);
-  $("artists").innerHTML = p.artists.map(function(a){
-    return '<div class="artist" tabindex="0" role="button">' +
-           '<div class="ring"><div class="art" style="' + artStyle(a[0], p.artHue) + '"></div></div>' +
-           '<div class="an">' + a[0] + '</div><div class="ameta">' + a[1] + "</div></div>";
-  }).join("");
-
-  $("tracks").innerHTML = p.tracks.map(function(t, n){
-    return '<div class="row" tabindex="0" role="button">' +
-      '<span class="idx">' + (n + 1) + "</span>" +
-      '<div class="art" style="' + artStyle(t[0], p.artHue) + '"></div>' +
-      '<div class="meta"><div class="tt">' + t[0] + '</div><div class="ta">' + t[1] + "</div></div>" +
-      '<span class="plays">' + t[2] + "</span></div>";
-  }).join("");
+  /* Tracks, artists and albums are drawn from pins first and the sample data
+     second, so they all share one code path. */
+  renderPins(p);
 
   /* profile 0 is you; everyone else is someone you're visiting */
   var self = i === 0;
-  $("actionsSelf").hidden = !self;
+  /* Visiting someone else while editing would leave the edit bar over their
+     profile, so switching away ends the session. */
+  if(!self && document.body.classList.contains("editing")) document.body.classList.remove("editing");
+  var editing = document.body.classList.contains("editing");
+  $("editBar").hidden = !(self && editing);
+  $("actionsSelf").hidden = !self || editing;
   $("actionsOther").hidden = self;
   $("simSection").hidden = self;      /* you can't match with yourself */
   $("reachSection").hidden = !self;   /* and nobody else sees your reach */
@@ -2635,9 +2776,17 @@ function syncSheet(){
 }
 
 function openCust(){ $("custWrap").hidden = false; syncSheet(); document.body.style.overflow = "hidden"; }
-function closeCust(){ $("custWrap").hidden = true; document.body.style.overflow = ""; $("editBtn").focus(); }
+function closeCust(){
+  $("custWrap").hidden = true;
+  document.body.style.overflow = "";
+  /* editBtn is hidden while editing, and focusing a hidden element drops
+     focus to the body, losing the user's place. */
+  var back = document.body.classList.contains("editing") ? $("editAppearance") : $("editBtn");
+  if(back && !back.hidden) back.focus();
+}
 
-$("editBtn").addEventListener("click", openCust);
+/* Edit profile now enters edit mode; appearance moved to a button inside
+   the edit bar, so content and looks are edited in different places. */
 $("custDone").addEventListener("click", closeCust);
 $("custBg").addEventListener("click", closeCust);
 document.addEventListener("keydown", function(e){
@@ -2711,9 +2860,289 @@ $("badges").addEventListener("click", function(e){
   }).join("");
 });
 
+/* ================= pinning =================
+   Pinned items are references, not copies: an id, a name, a picture URL. They
+   live beside the rest of the personalization in localStorage, so testing costs
+   nobody an account. When auth exists they move to Postgres unchanged. */
+var PIN_SLOTS = { tracks: 5, artists: 8, albums: 6 };
+var PIN_KIND = { tracks: "track", artists: "artist", albums: "album" };
+
+function esc(v){
+  return String(v == null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function pinList(kind){
+  var c = CUSTOM[current] || {}, src = (c.pins && c.pins[kind]) || [], out = [];
+  for(var i = 0; i < PIN_SLOTS[kind]; i++) out.push(src[i] || null);
+  return out;
+}
+function setPin(kind, idx, item){
+  var c = cust();
+  if(!c.pins) c.pins = {};
+  var list = pinList(kind);
+  list[idx] = item;
+  c.pins[kind] = list;
+  saveCustom();
+}
+
+/* A pinned item brings a real photo; anything else falls back to the procedural
+   artwork, so a half-filled section still reads as one designed thing. */
+function artAttr(item, fallbackName, hue){
+  if(item && item.image) return 'class="art photo" style="background-image:url(' + item.image + ')"';
+  return 'class="art" style="' + artStyle(fallbackName, hue) + '"';
+}
+function unpinBtn(kind, idx){
+  return '<button class="unpin" type="button" data-unpin="' + kind + '" data-idx="' + idx +
+         '" aria-label="Remove" tabindex="-1">&#215;</button>';
+}
+var PLUS = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+function slotBtn(kind, idx, shape){
+  return '<button class="slot ' + shape + '" type="button" data-slot="' + kind + '" data-idx="' + idx +
+         '" aria-label="Add to ' + kind + '">' + PLUS + "</button>";
+}
+
+/* Sections render pins when any exist, and the sample data when none do, so a
+   profile nobody has customized still looks like a profile. Edit mode always
+   shows the truth - your pins and the gaps between them. */
+function renderPins(p){
+  var editing = document.body.classList.contains("editing");
+  var hue = p.artHue, self = current === 0;
+
+  var tp = pinList("tracks"), tAny = self && tp.some(Boolean), th = "";
+  for(var i = 0; i < PIN_SLOTS.tracks; i++){
+    var pin = self ? tp[i] : null;
+    var demo = (!tAny && p.tracks[i]) ? p.tracks[i] : null;
+    if(pin){
+      th += '<div class="row pinbox" tabindex="0" role="button">' +
+        '<span class="idx">' + (i + 1) + "</span>" +
+        "<div " + artAttr(pin, pin.name, hue) + "></div>" +
+        '<div class="meta"><div class="tt">' + esc(pin.name) + '</div><div class="ta">' +
+        esc(pin.artist_name) + "</div></div>" +
+        '<span class="plays">' + esc(pin.your_plays || "") + "</span>" +
+        unpinBtn("tracks", i) + "</div>";
+    } else if(demo && !editing){
+      th += '<div class="row" tabindex="0" role="button">' +
+        '<span class="idx">' + (i + 1) + "</span>" +
+        '<div class="art" style="' + artStyle(demo[0], hue) + '"></div>' +
+        '<div class="meta"><div class="tt">' + esc(demo[0]) + '</div><div class="ta">' +
+        esc(demo[1]) + "</div></div>" +
+        '<span class="plays">' + esc(demo[2]) + "</span></div>";
+    } else if(editing && self){
+      th += slotBtn("tracks", i, "slot-row");
+    }
+  }
+  $("tracks").innerHTML = th;
+
+  var ap = pinList("artists"), aAny = self && ap.some(Boolean), ah = "";
+  for(var j = 0; j < PIN_SLOTS.artists; j++){
+    var apin = self ? ap[j] : null;
+    var ademo = (!aAny && p.artists[j]) ? p.artists[j] : null;
+    if(apin){
+      ah += '<div class="artist pinbox" tabindex="0" role="button">' +
+        '<div class="ring"><div ' + artAttr(apin, apin.name, hue) + "></div></div>" +
+        '<div class="an">' + esc(apin.name) + '</div><div class="ameta">' +
+        (apin.your_hours ? esc(apin.your_hours) + "h" : "") + "</div>" +
+        unpinBtn("artists", j) + "</div>";
+    } else if(ademo && !editing){
+      ah += '<div class="artist" tabindex="0" role="button">' +
+        '<div class="ring"><div class="art" style="' + artStyle(ademo[0], hue) + '"></div></div>' +
+        '<div class="an">' + esc(ademo[0]) + '</div><div class="ameta">' + esc(ademo[1]) + "</div></div>";
+    } else if(editing && self){
+      ah += slotBtn("artists", j, "slot-ci");
+    }
+  }
+  $("artists").innerHTML = ah;
+
+  /* Albums have no sample data - the section only exists once you pin one, and
+     in edit mode where its empty slots are the invitation. */
+  var bp = pinList("albums"), bAny = self && bp.some(Boolean), bh = "";
+  for(var k = 0; k < PIN_SLOTS.albums; k++){
+    var bpin = self ? bp[k] : null;
+    if(bpin){
+      bh += '<div class="pl pinbox" tabindex="0" role="button">' +
+        "<div " + artAttr(bpin, bpin.name, hue) + "></div>" +
+        '<div class="pn">' + esc(bpin.name) + '</div><div class="pm">' +
+        esc((bpin.release_date || "").slice(0, 4)) + "</div>" +
+        unpinBtn("albums", k) + "</div>";
+    } else if(editing && self){
+      bh += slotBtn("albums", k, "slot-sq");
+    }
+  }
+  $("albums").innerHTML = bh;
+  $("albumSection").hidden = !bAny && !(editing && self);
+  $("albumAux").textContent = bAny ? bp.filter(Boolean).length + " pinned" : "";
+}
+
+/* ================= edit mode ================= */
+function setEditing(on){
+  document.body.classList.toggle("editing", on);
+  $("editBar").hidden = !on;
+  $("actionsSelf").hidden = on || current !== 0;
+  renderPins(PROFILES[current]);
+  if(!on) $("editBtn").focus();
+}
+
+/* ================= pin picker ================= */
+var pickKind = "track", pickTarget = null, pickSeed = null, pickTimer = null, pickSeq = 0;
+var PICK_CACHE = {};
+
+function pickRow(item, note){
+  var img = item.image ? ' style="background-image:url(' + item.image + ')"' : "";
+  var sub = item.kind === "artist"
+    ? (item.your_hours ? item.your_hours + " hours" : "Artist")
+    : (item.artist_name || "");
+  return '<button class="pick-item ' + item.kind + '" type="button" data-pick="' + esc(item.id) + '">' +
+    '<span class="thumb"' + img + "></span>" +
+    '<span class="pi-m"><span class="pi-n">' + esc(item.name) + "</span>" +
+    '<span class="pi-s">' + esc(sub) + "</span></span>" +
+    (note ? '<span class="pi-y">' + esc(note) + "</span>" : "") + "</button>";
+}
+
+function showResults(items, heading){
+  var list = $("pickList");
+  if(!items.length){
+    list.innerHTML = '<div class="pick-note">Nothing found.</div>';
+    return;
+  }
+  PICK_CACHE = {};
+  var html = heading ? '<div class="pick-group">' + esc(heading) + "</div>" : "";
+  html += items.map(function(i){
+    PICK_CACHE[i.id] = i;
+    return pickRow(i, i.your_plays ? i.your_plays + " plays" : "");
+  }).join("");
+  list.innerHTML = html;
+}
+
+/* The same page is published as a static Artifact with no server behind it, so
+   a failed fetch is an expected state rather than an error to swallow. */
+function offline(){
+  $("pickList").innerHTML = '<div class="pick-note">Search needs the local server.<br>' +
+    "Start it with <b>python -m uvicorn musicshare.api.app:app --port 8000</b><br>" +
+    "and open this page from there.</div>";
+}
+
+function loadSeed(){
+  var list = $("pickList");
+  var mine = ++pickSeq;
+  function done(){
+    if(mine !== pickSeq) return;
+    var items = pickKind === "artist" ? (pickSeed.artists || []) : (pickSeed.tracks || []);
+    if(pickKind === "album" || !items.length){
+      list.innerHTML = '<div class="pick-note">Search above to find ' +
+        (pickKind === "album" ? "an album" : "something") + ".</div>";
+      return;
+    }
+    showResults(items.slice(0, 40), "your most played");
+  }
+  if(pickSeed) return done();
+  list.innerHTML = '<div class="pick-note">Loading your top ' +
+    (pickKind === "artist" ? "artists" : "songs") + "...</div>";
+  fetch("/api/seed").then(function(r){
+    if(!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(function(d){
+    pickSeed = d;
+    done();
+  }).catch(function(){
+    pickSeed = { tracks: [], artists: [] };
+    if(mine === pickSeq) offline();
+  });
+}
+
+function runSearch(q){
+  var mine = ++pickSeq;
+  $("pickList").innerHTML = '<div class="pick-note">Searching...</div>';
+  fetch("/api/search?q=" + encodeURIComponent(q) + "&types=" + pickKind + "&limit=10")
+    .then(function(r){
+      if(!r.ok) throw new Error(r.status);
+      return r.json();
+    })
+    .then(function(d){
+      if(mine !== pickSeq) return;   /* a later keystroke already won */
+      showResults((d.results && d.results[pickKind + "s"]) || [], "");
+    })
+    .catch(function(){ if(mine === pickSeq) offline(); });
+}
+
+function openPicker(kind, idx){
+  pickTarget = { kind: kind, idx: idx };
+  pickKind = PIN_KIND[kind];
+  [].forEach.call($("pickTabs").children, function(b){
+    b.setAttribute("aria-pressed", b.dataset.k === pickKind ? "true" : "false");
+  });
+  $("pickHead").textContent = pickKind === "artist" ? "Pin an artist"
+    : pickKind === "album" ? "Pin an album" : "Pin a song";
+  $("pickInput").value = "";
+  $("pickWrap").hidden = false;
+  document.body.style.overflow = "hidden";
+  loadSeed();
+  setTimeout(function(){ $("pickInput").focus(); }, 60);
+}
+function closePicker(){
+  $("pickWrap").hidden = true;
+  document.body.style.overflow = "";
+  pickTarget = null;
+}
+
+$("editBtn").addEventListener("click", function(){ setEditing(true); });
+$("editDone").addEventListener("click", function(){ setEditing(false); });
+$("editAppearance").addEventListener("click", openCust);
+$("pickBg").addEventListener("click", closePicker);
+$("pickCancel").addEventListener("click", closePicker);
+
+$("pickTabs").addEventListener("click", function(e){
+  var b = e.target.closest("button[data-k]");
+  if(!b) return;
+  pickKind = b.dataset.k;
+  [].forEach.call($("pickTabs").children, function(x){
+    x.setAttribute("aria-pressed", x === b ? "true" : "false");
+  });
+  var q = $("pickInput").value.trim();
+  if(q) runSearch(q); else loadSeed();
+});
+
+$("pickInput").addEventListener("input", function(){
+  clearTimeout(pickTimer);
+  var q = this.value.trim();
+  /* 220ms: typing a word is one request, and it still feels live */
+  pickTimer = setTimeout(function(){ if(q) runSearch(q); else loadSeed(); }, 220);
+});
+
+$("pickList").addEventListener("click", function(e){
+  var b = e.target.closest("button[data-pick]");
+  if(!b || !pickTarget) return;
+  var item = PICK_CACHE[b.dataset.pick];
+  if(!item) return;
+  setPin(pickTarget.kind, pickTarget.idx, item);
+  closePicker();
+  renderPins(PROFILES[current]);
+});
+
+/* One listener on the page rather than per item, because slots and unpin
+   buttons are rebuilt on every render. */
+document.addEventListener("click", function(e){
+  var slot = e.target.closest("[data-slot]");
+  if(slot){ openPicker(slot.dataset.slot, +slot.dataset.idx); return; }
+  var un = e.target.closest("[data-unpin]");
+  if(un){
+    e.stopPropagation();
+    setPin(un.dataset.unpin, +un.dataset.idx, null);
+    renderPins(PROFILES[current]);
+  }
+});
+
+document.addEventListener("keydown", function(e){
+  if(e.key !== "Escape") return;
+  if(!$("pickWrap").hidden) closePicker();
+  else if(document.body.classList.contains("editing")) setEditing(false);
+});
+
 renderHome();
 render(0);
 showScreen("home");
+
 
 var t;
 window.addEventListener("resize", function(){ clearTimeout(t); t = setTimeout(paint, 140); });

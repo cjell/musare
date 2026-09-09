@@ -31,6 +31,8 @@ log = logging.getLogger(__name__)
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 API = "https://api.spotify.com/v1"
 
+SEARCH_MAX = 10  # hard cap enforced by the API, despite the docs saying 50
+
 Kind = Literal["track", "artist", "album"]
 ALL_KINDS: tuple[Kind, ...] = ("track", "artist", "album")
 
@@ -168,8 +170,10 @@ class SpotifyClient:
         out: dict[str, list[dict[str, Any]]] = {f"{k}s": [] for k in kinds}
         if not q.strip():
             return out
+        # Spotify documents a max of 50 here and rejects anything over 10 with
+        # "Invalid limit". Measured, not read.
         data = self._get(
-            "/search", {"q": q, "type": ",".join(kinds), "limit": max(1, min(limit, 50))}
+            "/search", {"q": q, "type": ",".join(kinds), "limit": max(1, min(limit, SEARCH_MAX))}
         )
         for k in kinds:
             items = (data.get(f"{k}s") or {}).get("items") or []
