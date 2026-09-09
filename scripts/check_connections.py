@@ -77,8 +77,13 @@ def check_postgres(env: dict[str, str]) -> None:
                 where table_schema = 'public' order by table_name
             """)
             tables = [r[0] for r in cur.fetchall()]
-            record("Tables", OK, f"{len(tables)} in public" + (f": {', '.join(tables)}" if tables else " (empty, as expected)"))
-    except Exception as e:  # noqa: BLE001 - report any failure, do not crash the run
+            record(
+                "Tables",
+                OK,
+                f"{len(tables)} in public"
+                + (f": {', '.join(tables)}" if tables else " (empty, as expected)"),
+            )
+    except Exception as e:  # report any failure, never crash the run
         record("Postgres", BAD, f"{type(e).__name__}: {str(e).strip()[:160]}")
 
 
@@ -102,7 +107,7 @@ def check_supabase_rest(env: dict[str, str]) -> None:
             record("Supabase REST", BAD, f"401 rejected | key {mask(key)}")
         else:
             record("Supabase REST", OK, f"key accepted (HTTP {r.status_code}) | {mask(key)}")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # report it, keep the other checks running
         record("Supabase REST", BAD, f"{type(e).__name__}: {str(e)[:120]}")
 
 
@@ -122,7 +127,7 @@ def check_ticketmaster(env: dict[str, str]) -> None:
             record("Ticketmaster", OK, f"HTTP 200 | {total} music events near Raleigh")
         else:
             record("Ticketmaster", BAD, f"HTTP {r.status_code} | {r.text[:110]}")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # report it, keep the other checks running
         record("Ticketmaster", BAD, f"{type(e).__name__}: {str(e)[:120]}")
 
 
@@ -143,7 +148,7 @@ def check_spotify(env: dict[str, str]) -> None:
             record("Spotify", OK, f"token issued, expires in {r.json().get('expires_in')}s")
         else:
             record("Spotify", BAD, f"HTTP {r.status_code} | {r.text[:110]}")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # report it, keep the other checks running
         record("Spotify", BAD, f"{type(e).__name__}: {str(e)[:120]}")
 
 
@@ -167,7 +172,7 @@ def check_openai(env: dict[str, str]) -> None:
             print()
         else:
             record("OpenAI", BAD, f"HTTP {r.status_code} | {r.text[:110]}")
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:  # report it, keep the other checks running
         record("OpenAI", BAD, f"{type(e).__name__}: {str(e)[:120]}")
 
 
@@ -180,9 +185,15 @@ def main() -> int:
     print(f"Reading {ENV}\n")
     print("Variables set:")
     for k in [
-        "SUPABASE_URL", "SUPABASE_ANON_KEY", "SUPABASE_SERVICE_ROLE_KEY", "DATABASE_URL",
-        "TICKETMASTER_API_KEY", "SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET",
-        "SPOTIFY_REDIRECT_URI", "OPENAI_API_KEY",
+        "SUPABASE_URL",
+        "SUPABASE_ANON_KEY",
+        "SUPABASE_SERVICE_ROLE_KEY",
+        "DATABASE_URL",
+        "TICKETMASTER_API_KEY",
+        "SPOTIFY_CLIENT_ID",
+        "SPOTIFY_CLIENT_SECRET",
+        "SPOTIFY_REDIRECT_URI",
+        "OPENAI_API_KEY",
     ]:
         v = env.get(k, "")
         flag = "set  " if v and "xxxx" not in v and "PASSWORD" not in v else "MISSING"

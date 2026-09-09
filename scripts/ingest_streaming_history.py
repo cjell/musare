@@ -94,12 +94,16 @@ def main() -> int:
     written = sum(f.stat().st_size for f in args.out.rglob("*.parquet"))
     print(f"read     {total_rows:>9,} rows from the export")
     print(f"kept     {music_rows:>9,} music plays ({total_rows - music_rows:,} non-music dropped)")
-    print(f"dropped  ip_addr and other PII columns")
+    print("dropped  ip_addr and other PII columns")
     print(f"wrote    {args.out}  ({written / 1024 / 1024:.1f} MB parquet, partitioned by year)")
 
     print("\nsanity check - reading it back:")
-    con.execute(f"create view check_plays as select * from read_parquet('{(args.out / '**' / '*.parquet').as_posix()}')")
-    n, lo, hi = con.execute("select count(*), min(played_at), max(played_at) from check_plays").fetchone()
+    con.execute(
+        f"create view check_plays as select * from read_parquet('{(args.out / '**' / '*.parquet').as_posix()}')"
+    )
+    n, lo, hi = con.execute(
+        "select count(*), min(played_at), max(played_at) from check_plays"
+    ).fetchone()
     print(f"  {n:,} rows, {lo:%Y-%m-%d} to {hi:%Y-%m-%d}")
     assert n == music_rows, f"round-trip mismatch: wrote {music_rows}, read {n}"
     print("  round-trip OK")
