@@ -1,0 +1,130 @@
+[build-system]
+requires = ["hatchling>=1.32"]
+build-backend = "hatchling.build"
+
+[project]
+name = "musicshare"
+version = "0.1.0"
+description = "Taste as identity - a campus music social network, and the pipelines behind it."
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+
+# Floors, not pins. Exact versions belong in the lockfile so this file stays
+# readable and CI stays reproducible. See requirements.lock.
+dependencies = [
+  # spec grammar, validation, settings-from-env
+  "pydantic>=2.11",
+  "pydantic-settings>=2.15",
+  # LLM calls + outbound HTTP (Ticketmaster, Spotify, iTunes) with retries
+  "openai>=3.11",
+  "anthropic>=1.4",
+  "httpx>=0.28",
+  "tenacity>=9.1",
+  # the spec service
+  "fastapi>=0.117",
+  "uvicorn[standard]>=0.37",
+  # data: DuckDB over Parquet locally, psycopg straight to Postgres
+  "duckdb>=1.5",
+  "pyarrow>=25.0",
+  "psycopg[binary]>=3.3",
+  # tracing, cost, latency + structured logs that pair with it
+  "langfuse>=4.15",
+  "structlog>=26.1",
+]
+
+[project.optional-dependencies]
+# The embedding pipeline is phase 7 and pulls ~400MB of wheels (numba, llvmlite).
+# Keeping it out of the default install means CI installs in seconds.
+ml = [
+  "scikit-learn>=1.9",
+  "umap-learn>=0.5.12",
+  "pandas>=2.2",
+]
+dev = [
+  "pytest>=9.1",
+  "pytest-asyncio>=1.4",
+  "pytest-cov>=7.1",
+  "respx>=0.23",          # mock httpx so tests never hit a real API
+  "ruff>=0.16",
+  "mypy>=2.3",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/musicshare"]
+
+# ---------------------------------------------------------------- ruff
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+extend-exclude = ["mscs", "dist"]
+
+[tool.ruff.lint]
+select = [
+  "E",      # pycodestyle errors
+  "F",      # pyflakes: unused imports, undefined names
+  "I",      # import sorting
+  "UP",     # pyupgrade: modern syntax for the target version
+  "B",      # bugbear: mutable defaults, silent except, loop-variable capture
+  "SIM",    # needless complexity
+  "C4",     # comprehension rewrites
+  "ASYNC",  # blocking calls inside async defs
+  "PTH",    # os.path -> pathlib
+  "RUF",    # ruff's own checks
+]
+# The formatter owns line breaking; it will not split long strings or URLs,
+# so E501 would only ever fire on lines it deliberately left alone.
+ignore = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["musicshare"]
+
+[tool.ruff.lint.per-file-ignores]
+# Notebooks and scratch scripts import after setup; tests use bare asserts.
+"notebooks/**" = ["E402"]
+"tests/**" = ["B011"]
+
+# ---------------------------------------------------------------- pytest
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# --strict-markers turns a typo'd marker into an error instead of a silent
+# no-op, which is the whole reason markers are worth having here.
+addopts = "-q --strict-markers --strict-config"
+asyncio_mode = "auto"
+markers = [
+  "llm: hits a real model endpoint - costs money, excluded from default runs",
+  "integration: hits a real third-party API (Ticketmaster, Spotify)",
+  "eval: golden-set eval case, run by the eval harness rather than unit CI",
+]
+
+# ---------------------------------------------------------------- mypy
+
+[tool.mypy]
+python_version = "3.13"
+files = ["src"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+no_implicit_optional = true
+# Deliberately not --strict yet. The spec grammar is the module where types
+# carry real weight, so it is held to a higher bar than the rest.
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "musicshare.spec.*"
+disallow_untyped_defs = true
+disallow_any_generics = true
+
+[[tool.mypy.overrides]]
+module = ["umap.*", "sklearn.*", "duckdb.*", "langfuse.*"]
+ignore_missing_imports = true
+
+# ---------------------------------------------------------------- coverage
+
+[tool.coverage.run]
+source = ["src/musicshare"]
+branch = true
+
+[tool.coverage.report]
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]

@@ -1,0 +1,32 @@
+# conda env lives in the project dir - never commit a Python install
+mscs/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# data: the Last.fm corpus and any derived artifacts are far too large for git
+data/
+*.parquet
+*.duckdb
+*.sqlite
+
+# node / next, once the web app lands
+node_modules/
+.next/
+out/
+
+# editor + os
+.vscode/*
+!.vscode/settings.json
+.DS_Store
+Thumbs.db

@@ -1,0 +1,2724 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="MusicShare - taste as identity.">
+<meta name="theme-color" content="#0B0A0F">
+<meta name="color-scheme" content="dark">
+<!-- lets "Add to Home Screen" launch without browser chrome on iOS -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MusicShare">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<style>html,body{background:#0B0A0F}</style>
+<title>MusicShare Profile</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500;600&display=swap">
+
+<style>
+:root{
+  --page:#08070B;
+  --ground:#0B0A0F;
+  --raise:#17131F;
+  --line:rgba(244,241,250,.075);
+  --line-2:rgba(244,241,250,.14);
+  --ink:#F4F1FA;
+  --ink-2:#A9A2BE;
+  --ink-3:#635C7A;
+  --pad:22px;
+  /* per-profile, set inline on .phone */
+  --accent:#FF9D2E;
+  --accent-tint:rgba(255,157,46,.13);
+  --accent-line:rgba(255,157,46,.30);
+  --gen:#9B8CFF;
+  --gen-tint:rgba(155,140,255,.13);
+  --gen-line:rgba(155,140,255,.34);
+  --grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+*{box-sizing:border-box}
+/* any class that sets `display` outranks the UA's [hidden] rule, so hiding by
+   attribute silently fails on .actions, .segs, .icon-btn and friends. The
+   Artifact wrapper supplies this; a standalone build does not. */
+[hidden]{display:none!important}
+body{
+  margin:0;background:var(--page);color:var(--ink);
+  font-family:"Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ---- demo chrome (not part of the app) ---- */
+.demo{
+  position:fixed;top:0;left:0;right:0;height:38px;z-index:50;
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  background:#050409;border-bottom:1px solid var(--line);
+  font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);
+}
+.demo .lab{opacity:.65}
+.demo button{
+  font:inherit;letter-spacing:.09em;text-transform:uppercase;
+  background:transparent;border:1px solid var(--line-2);color:var(--ink-3);
+  padding:4px 9px;border-radius:5px;cursor:pointer;
+}
+.demo button:hover{color:var(--ink-2)}
+.demo button[aria-pressed="true"]{color:#0B0A0F;background:var(--ink);border-color:var(--ink)}
+.demo button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---- device column ---- */
+.phone{
+  position:relative;max-width:420px;margin:0 auto;min-height:100vh;
+  background:var(--ground);padding:38px 0 96px;isolation:isolate;
+  /* no overflow:hidden here -- it would become the scroll container for
+     position:sticky, and the home tabs would never stick. .wall and .banner
+     each clip themselves, so nothing needs clipping at this level. */
+}
+@media (min-width:460px){
+  .phone{border-left:1px solid var(--line);border-right:1px solid var(--line)}
+}
+/* personalized wallpaper: atmosphere only, heavily scrimmed so type keeps full contrast */
+/* z-index:-1 sits above .phone's own background but below its content, because
+   .phone isolates. Lets content stack over the wallpaper without a blanket
+   `position:relative` on every child -- which would clobber position:fixed. */
+.wall{position:absolute;top:0;left:0;right:0;height:620px;z-index:-1;overflow:hidden;pointer-events:none}
+.wall canvas{width:100%;height:100%;filter:blur(48px) saturate(1.3);opacity:.55;transform:scale(1.3)}
+.wall::after{
+  content:"";position:absolute;inset:0;
+  background:linear-gradient(180deg,
+    rgba(11,10,15,.78) 0%,
+    rgba(11,10,15,.90) 28%,
+    rgba(11,10,15,.97) 62%,
+    var(--ground) 100%);
+}
+.pad{padding-left:var(--pad);padding-right:var(--pad)}
+
+/* ---- banner ---- */
+.banner{position:relative;height:154px;overflow:hidden}
+.banner canvas{display:block;width:100%;height:100%}
+.banner::after{
+  content:"";position:absolute;inset:0;
+  background:
+    var(--grain),
+    linear-gradient(180deg,rgba(5,4,9,.55) 0%,rgba(5,4,9,0) 34%,rgba(11,10,15,.72) 82%,var(--ground) 100%);
+  background-size:120px,auto;
+  background-blend-mode:overlay,normal;
+}
+.icon-btn{
+  background:rgba(5,4,9,.42);backdrop-filter:blur(6px);
+  border:0;width:30px;height:30px;border-radius:50%;
+  display:grid;place-items:center;color:var(--ink);cursor:pointer;
+}
+.icon-btn:hover{background:rgba(5,4,9,.68)}
+.icon-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---- identity ---- */
+/* avatar and actions share a row, bottom-aligned: the picture runs down to the
+   buttons instead of stopping short of them */
+.head{margin-top:-44px}
+.toprow{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+.avatar{
+  width:98px;height:98px;flex:none;border-radius:50%;
+  border:3px solid var(--ground);
+  display:grid;place-items:center;
+  font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:30px;
+  color:rgba(255,255,255,.94);position:relative;overflow:hidden;
+}
+.avatar span{position:relative;z-index:1}
+.avatar::after{
+  content:"";position:absolute;inset:0;background-image:var(--grain);
+  background-size:120px;opacity:.16;mix-blend-mode:overlay;
+}
+.name{
+  font-family:"Bricolage Grotesque","Public Sans",sans-serif;
+  font-weight:700;font-size:clamp(25px,6.8vw,30px);line-height:1.05;
+  letter-spacing:-.025em;margin:15px 0 0;text-wrap:balance;
+}
+/* handle and badges share one wrapping line: the badges read as credentials
+   on the name, the way a byline carries them */
+.idrow{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:8px}
+.handle{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-3);margin-right:2px}
+
+/* ---- badge tiers ---- */
+/* contents, not flex: the badges wrap as part of the handle line */
+.badges{display:contents}
+.bdg{
+  display:inline-flex;align-items:center;gap:4px;
+  font-family:"IBM Plex Mono",monospace;font-size:9px;font-weight:500;
+  letter-spacing:.07em;text-transform:uppercase;
+  padding:4px 7px;border-radius:5px;border:1px solid transparent;white-space:nowrap;
+}
+.bdg-rank{background:var(--accent-tint);border-color:var(--accent-line);color:var(--accent)}
+.bdg-rank .pip{
+  width:3.5px;height:3.5px;border-radius:50%;background:var(--accent);
+  box-shadow:0 0 6px 1px var(--accent-line);flex:none;
+}
+.bdg-mile{border-color:var(--line-2);color:var(--ink-2)}
+.bdg-id{background:var(--raise);color:var(--ink-3)}
+/* an affordance, not an item: no box, smaller, quieter */
+.bdg-more{
+  border-color:transparent;background:none;cursor:pointer;font:inherit;
+  font-size:8.5px;letter-spacing:.04em;color:var(--ink-3);opacity:.75;
+  padding:4px 2px;align-self:center;
+}
+.bdg-more:hover{color:var(--ink-2);opacity:1}
+.bdg-more:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+/* ---- top genres ----
+   Separated from badges on three axes at once, so they never read as one family:
+   POSITION  badges sit on the name, genres sit below the bio
+   TYPE      badges are mono / uppercase / square; genres are body / sentence / pill
+   COLOUR    badges use --accent (status, earned); genres use --gen (taste, chosen)
+   Each hue has exactly one job, so adding a second colour costs no clarity. */
+.genres-top{display:flex;flex-wrap:wrap;gap:7px;margin-top:18px}
+.gen{
+  font-family:"Public Sans",sans-serif;font-size:13px;font-weight:500;
+  padding:6px 13px;border-radius:999px;cursor:pointer;
+  background:var(--gen-tint);border:1px solid transparent;color:var(--gen);
+  transition:background .15s ease,border-color .15s ease;
+}
+.gen:hover{border-color:var(--gen-line)}
+.gen-1{border-color:var(--gen-line)}
+.gen:focus-visible{outline:2px solid var(--gen);outline-offset:2px}
+
+.bio{margin:16px 0 0;font-size:14.5px;line-height:1.52;color:var(--ink-2);max-width:34em}
+
+/* ---- stats ---- */
+.stats{display:flex;margin-top:19px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.stat{flex:1;padding:14px 0}
+.stat + .stat{border-left:1px solid var(--line);padding-left:16px}
+.stat .n{
+  font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  font-size:19px;font-weight:500;letter-spacing:-.01em;display:block;
+}
+.stat .l{
+  font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-3);margin-top:5px;display:block;
+}
+
+/* ---- actions ---- */
+.actions{display:flex;gap:7px;flex:none}
+.btn{
+  font-family:"Public Sans",sans-serif;font-size:13px;font-weight:600;
+  border-radius:8px;border:1px solid transparent;cursor:pointer;height:34px;
+  display:inline-flex;align-items:center;justify-content:center;transition:opacity .15s ease;
+}
+.btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn-primary{background:var(--ink);color:#0B0A0F;padding:0 15px}
+.btn-primary:hover{opacity:.88}
+.btn-ghost{width:34px;background:transparent;border-color:var(--line-2);color:var(--ink-2)}
+.btn-ghost:hover{color:var(--ink);border-color:var(--ink-3)}
+
+/* ---- section rhythm ---- */
+.sec{margin-top:34px}
+.sec-label{
+  font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);
+  display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:13px;
+}
+.sec-label .aux{opacity:.72;letter-spacing:.08em}
+
+.art{
+  position:relative;border-radius:10px;overflow:hidden;
+  background:
+    radial-gradient(115% 110% at 18% 12%,var(--a),transparent 62%),
+    radial-gradient(120% 125% at 86% 92%,var(--b),transparent 64%),
+    #171326;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.055);
+}
+.art::after{
+  content:"";position:absolute;inset:0;background-image:var(--grain);
+  background-size:120px;opacity:.17;mix-blend-mode:overlay;pointer-events:none;
+}
+/* ---- top artists: circles ----
+   Shape language: circles are people, squares are collections. Artists read as
+   faces, playlists as objects, and neither needs a label to tell them apart. */
+.agrid{display:grid;grid-template-columns:repeat(4,1fr);gap:17px 10px}
+.artist{text-align:center;cursor:pointer;min-width:0;display:flex;flex-direction:column}
+.artist:focus-visible{outline:none}
+.artist:focus-visible .ring{outline:2px solid var(--accent);outline-offset:3px}
+.ring{
+  width:100%;aspect-ratio:1/1;border-radius:50%;padding:2.5px;
+  border:1.5px solid var(--line);transition:border-color .15s ease;
+}
+.ring .art{width:100%;height:100%;border-radius:50%}
+/* Frames are a cosmetic the user picks, applied to all their artists.
+   Set once on the grid so a profile reads as one consistent choice. */
+.fr-thin .ring{border-color:var(--accent-line)}
+.fr-double .ring{
+  border-color:var(--accent-line);
+  box-shadow:0 0 0 2.5px var(--ground),0 0 0 4px var(--accent-line);
+}
+.fr-thick .ring{border-width:3px;border-color:var(--accent-line)}
+.artist:hover .ring{border-color:var(--accent)}
+.artist .an{
+  font-size:10.5px;font-weight:500;margin-top:9px;line-height:1.3;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+}
+/* pushed to the cell floor: grid rows stretch, so play counts line up across a
+   row without reserving a blank line under every single-line name */
+.artist .ameta{
+  font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3);
+  margin-top:auto;padding-top:3px;
+}
+
+/* ---- top tracks: classic rows ---- */
+.rows{display:flex;flex-direction:column;gap:3px}
+.row{
+  display:flex;align-items:center;gap:12px;padding:7px 8px;
+  margin:0 -8px;border-radius:9px;cursor:pointer;
+}
+.row:hover{background:rgba(244,241,250,.045)}
+.row:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.row .idx{
+  font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  font-size:11px;color:var(--ink-3);width:16px;flex:none;text-align:right;
+}
+.row .art{width:44px;height:44px;border-radius:6px;flex:none}
+.row .meta{min-width:0;flex:1}
+.row .tt{font-size:14px;font-weight:500;line-height:1.25;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .ta{font-size:12px;color:var(--ink-3);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .plays{
+  font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  font-size:11px;color:var(--ink-3);flex:none;
+}
+
+/* ---- underground ---- */
+.under{
+  margin-top:34px;padding:16px;border-radius:13px;
+  background:linear-gradient(180deg,var(--accent-tint),rgba(0,0,0,0)),var(--raise);
+  border:1px solid var(--accent-line);
+}
+.under-label{
+  font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--accent);
+  display:flex;align-items:center;gap:7px;
+}
+.under-row{display:flex;gap:14px;align-items:center;margin-top:13px}
+.under-row .art{width:58px;height:58px;border-radius:9px;flex:none}
+.under-name{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:22px;letter-spacing:-.02em;line-height:1.05}
+.under-sub{font-size:13px;color:var(--ink-2);margin-top:6px;line-height:1.4}
+.under-foot{
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--accent);opacity:.82;
+  margin-top:13px;padding-top:12px;border-top:1px solid var(--accent-line);
+}
+
+/* ---- playlists: expanding grid, third content shape after rails and rows ---- */
+.plgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px 10px}
+.plgrid:not(.open) .pl:nth-child(n+7){display:none}
+.pl{cursor:pointer;min-width:0}
+.pl .art{width:100%;aspect-ratio:1/1;border-radius:8px}
+/* reserve two lines so the track counts sit on a common baseline across a row */
+.pl .pn{font-size:11.5px;font-weight:500;margin-top:8px;line-height:1.32;min-height:2.64em}
+.pl .pm{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3);margin-top:3px}
+.sec-toggle{
+  background:none;border:0;padding:0;cursor:pointer;
+  font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);
+}
+.sec-toggle:hover{color:var(--ink-2)}
+.sec-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+/* collapse control repeated at the foot of the expanded grid, so you can
+   close it from where you actually are rather than scrolling back up */
+.pl-collapse{
+  width:100%;margin-top:16px;padding:11px 0;cursor:pointer;
+  background:none;border:1px solid var(--line);border-radius:9px;
+  font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.13em;
+  text-transform:uppercase;color:var(--ink-3);
+}
+.pl-collapse:hover{color:var(--ink-2);border-color:var(--line-2)}
+.pl-collapse:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pl-collapse[hidden]{display:none}
+
+/* ---- taste map ---- */
+.map{position:relative;border:1px solid var(--line-2);border-radius:13px;overflow:hidden;background:rgba(13,11,20,.72);cursor:pointer}
+.map:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.map canvas{display:block;width:100%;height:158px}
+.map-ax{position:absolute;font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.ax-l{left:11px;top:44%;transform:translateY(-50%)}
+.ax-r{right:11px;top:44%;transform:translateY(-50%)}
+.map-foot{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:11px 13px;border-top:1px solid var(--line);
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);
+}
+.map-foot .go{color:var(--ink-2)}
+
+/* ---- screens ---- */
+.screen{position:relative}
+.screen[hidden]{display:none}
+
+/* ---- home ----
+   The app chrome is neutral on purpose. Colour belongs to people: a profile is
+   someone's space, home is the street they're all on. */
+.home-top{
+  position:sticky;top:38px;z-index:12;background:var(--ground);
+  border-bottom:1px solid var(--line);
+}
+.home-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:16px var(--pad) 12px;
+}
+/* no segmented control under it, so the bar carries the spacing itself */
+.home-top.solo .home-bar{padding-bottom:16px}
+.wordmark{
+  font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:20px;
+  letter-spacing:-.03em;
+}
+.bell{background:none;border:0;padding:6px;margin:-6px;color:var(--ink-2);cursor:pointer;position:relative;line-height:0;border-radius:8px}
+.bell:hover{color:var(--ink)}
+.bell:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.bell i{
+  position:absolute;top:3px;right:4px;width:7px;height:7px;border-radius:50%;
+  background:#FF6B5E;border:1.5px solid var(--ground);
+}
+.sbar{display:flex;gap:10px;align-items:center;padding:0 var(--pad) 14px}
+.sbar[hidden]{display:none}
+.sbar input{
+  flex:1;min-width:0;height:38px;border-radius:9px;padding:0 12px;
+  background:var(--raise);border:1px solid var(--line-2);color:var(--ink);
+  font-family:"Public Sans",sans-serif;font-size:14px;
+}
+.sbar input::placeholder{color:var(--ink-3)}
+.sbar input:focus{outline:2px solid var(--ink);outline-offset:1px;border-color:transparent}
+.sbar button{
+  flex:none;background:none;border:0;cursor:pointer;padding:0;
+  font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);
+}
+.sbar button:hover{color:var(--ink)}
+.search-empty{
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);padding:22px 0;
+}
+
+.segs{display:flex;gap:0;padding:0 var(--pad)}
+.seg{
+  flex:1;background:none;border:0;cursor:pointer;padding:0 0 11px;
+  font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);
+  border-bottom:2px solid transparent;margin-bottom:-1px;
+}
+.seg[aria-pressed="true"]{color:var(--ink);border-bottom-color:var(--ink)}
+.seg:hover{color:var(--ink-2)}
+.seg:focus-visible{outline:2px solid var(--ink);outline-offset:-4px;border-radius:4px}
+
+/* ---- the person row: one primitive behind every list in the app ---- */
+.prow{
+  display:flex;align-items:center;gap:12px;padding:9px 8px;margin:0 -8px;
+  border-radius:10px;cursor:pointer;width:calc(100% + 16px);text-align:left;
+  background:none;border:0;color:inherit;font:inherit;
+}
+.prow:hover{background:rgba(244,241,250,.045)}
+.prow:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
+.pav{width:44px;height:44px;border-radius:50%;flex:none;padding:2px;border:1.5px solid var(--line-2)}
+.pav span{
+  display:grid;place-items:center;width:100%;height:100%;border-radius:50%;
+  font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:14px;
+  color:rgba(255,255,255,.92);
+}
+.pmeta{flex:1;min-width:0}
+.pname{display:block;font-size:14px;font-weight:600;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.psub{
+  display:block;font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);
+  margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.pnum{flex:none;text-align:right;min-width:44px}
+.pnum b{
+  font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:14px;
+  font-variant-numeric:tabular-nums;display:block;
+}
+.pnum s{
+  display:block;text-decoration:none;font-family:"IBM Plex Mono",monospace;
+  font-size:8.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);margin-top:4px;
+}
+.up{color:#5FD08A}
+
+.plist{display:flex;flex-direction:column;gap:2px}
+
+/* ---- shows ----
+   A fourth shape, because a show is not a person, a collection or a ranking.
+   Date-led like a calendar entry, with the social proof carried inline: the
+   "who here is going" line is the part no other app can render. */
+/* Time runs down the page. Phones scroll vertically, so the axis gets the long
+   dimension and every show gets the full width for its artist and its people. */
+/* The timeline scrolls inside itself and stops about two thirds down, so what
+   sits under it -- who you match with, and where they're going -- never gets
+   pushed past the end of an endless list. */
+.vt-outer{position:relative}
+/* reserve the chrome below (matches section + tab bar) rather than trusting a
+   flat vh, so the section under the timeline survives short phones too */
+.vt-wrap{
+  max-height:max(260px, min(58vh, calc(100vh - 430px)));
+  overflow-y:auto;overflow-x:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;
+  /* setting overflow-y makes overflow-x compute to auto, and the rows hang 10px
+     past each edge for their hover highlight -- take that overhang into this
+     box's own padding so there is nothing to scroll sideways */
+  margin:0 -10px;padding:0 10px;
+}
+.vt-wrap::-webkit-scrollbar{display:none}
+.vt-fade{
+  position:absolute;left:-10px;right:-10px;bottom:0;height:46px;pointer-events:none;
+  background:linear-gradient(180deg,rgba(11,10,15,0),var(--ground));
+}
+.vt{position:relative}
+.vt::before{
+  content:"";position:absolute;left:47px;top:14px;bottom:14px;
+  width:1px;background:var(--line-2);
+}
+.vrow{
+  position:relative;display:flex;align-items:flex-start;
+  padding:15px 10px;margin:0 -10px;border-radius:12px;cursor:pointer;
+  transition:background .14s ease;
+}
+.vrow:hover{background:rgba(244,241,250,.05)}
+.vrow:hover .ring{border-color:var(--ink-3)}
+.vrow:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
+/* connector from the rail to the artist, so nothing has to be inferred from
+   vertical alignment alone (+10 to clear the row's negative margin) */
+.vrow::after{
+  content:"";position:absolute;left:57px;top:49px;width:26px;height:1px;
+  background:var(--line-2);
+}
+.vt-date{width:40px;flex:none;text-align:right;padding-top:32px}
+.vt-date b{
+  display:block;font-family:"IBM Plex Mono",monospace;font-size:8.5px;font-weight:500;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
+}
+.vt-date i{
+  display:block;font-style:normal;font-family:"IBM Plex Mono",monospace;
+  font-size:19px;font-weight:500;font-variant-numeric:tabular-nums;margin-top:3px;line-height:1;
+}
+.vt-dot{
+  position:absolute;left:50px;top:42px;width:9px;height:9px;border-radius:50%;
+  background:var(--ink-3);border:2.5px solid var(--ground);box-sizing:content-box;
+}
+.vrow.big .vt-dot{background:var(--ink)}
+.vt-body{margin-left:33px;flex:1;min-width:0;display:flex;gap:14px;align-items:flex-start}
+.vt-art{width:68px;flex:none;cursor:pointer}
+.vt-art .ring{display:block;border-color:var(--line-2);padding:2.5px}
+.vt-art:hover .ring{border-color:var(--ink-3)}
+.vt-meta{flex:1;min-width:0;padding-top:2px}
+.vt-name{font-size:16px;font-weight:600;line-height:1.22}
+.vt-ven{
+  display:block;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);
+  margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.vt-go{display:flex;align-items:center;gap:8px;margin-top:10px}
+.vt-btn{margin-top:12px;height:30px;padding:0 15px;font-size:12.5px}
+/* the month interrupts the rail, so scrolling reads as moving through a
+   calendar -- it is the strongest structural cue in the list, so it is loud */
+.vt-month{position:relative;display:flex;align-items:center;gap:14px;padding:32px 0 12px 73px}
+.vt-month:first-child{padding-top:6px}
+.vt-month b{
+  font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:500;
+  letter-spacing:.2em;text-transform:uppercase;color:var(--ink);
+}
+.vt-month i{flex:1;height:1px;background:var(--line-2)}
+.vt-month::before{
+  content:"";position:absolute;left:40px;top:30px;width:15px;height:15px;
+  border-radius:50%;background:var(--ground);border:1.5px solid var(--ink-3);
+}
+.vt-month:first-child::before{top:4px}
+.tl-clear{
+  background:none;border:0;padding:0;cursor:pointer;
+  font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2);
+}
+.tl-clear:hover{color:var(--ink)}
+.tl-clear:focus-visible{outline:2px solid var(--ink);outline-offset:3px;border-radius:4px}
+
+.stack{display:flex;flex:none}
+.stack span{
+  width:17px;height:17px;border-radius:50%;border:1.5px solid var(--ground);
+  margin-left:-6px;display:block;
+}
+.stack span:first-child{margin-left:0}
+.sgo{font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3)}
+.sbtn{
+  flex:none;height:30px;padding:0 13px;border-radius:8px;cursor:pointer;
+  background:none;border:1px solid var(--line-2);color:var(--ink-2);
+  font-family:"Public Sans",sans-serif;font-size:12.5px;font-weight:600;
+}
+.sbtn:hover{color:var(--ink);border-color:var(--ink-3)}
+.sbtn[aria-pressed="true"]{background:var(--ink);color:#0B0A0F;border-color:transparent}
+.sbtn:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+/* empty state for a surface that only fills once someone contributes */
+.empty{text-align:center;padding:48px 8px 24px}
+.empty svg{color:var(--ink-3);margin-bottom:18px}
+.empty-t{font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:19px;letter-spacing:-.02em}
+.empty-s{font-size:13.5px;line-height:1.55;color:var(--ink-2);margin:10px auto 22px;max-width:30em}
+.empty .btn{margin:0 auto}
+
+/* rising artists: same circle language as a profile, at list scale */
+.risegrid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px 10px}
+.rise{text-align:center;cursor:pointer;display:flex;flex-direction:column}
+.rise .ring{display:block;border-color:var(--line-2)}
+.rise .rn{font-size:10.5px;font-weight:500;margin-top:8px;line-height:1.3;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rise .rd{font-family:"IBM Plex Mono",monospace;font-size:9px;color:#5FD08A;margin-top:auto;padding-top:3px}
+.rise .rd.down{color:var(--ink-3)}
+
+/* releases */
+.relgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px 10px}
+.rel{cursor:pointer;min-width:0}
+.rel .art{width:100%;aspect-ratio:1/1;border-radius:8px}
+.rel .rt{font-size:11.5px;font-weight:500;margin-top:8px;line-height:1.32;min-height:2.64em;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.rel .ra{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3);margin-top:3px}
+
+/* chart: the gap between global and here is the whole point of the section */
+.crow{display:flex;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--line)}
+.crow:first-child{border-top:0}
+.cpos{
+  font-family:"IBM Plex Mono",monospace;font-size:12px;font-variant-numeric:tabular-nums;
+  color:var(--ink-3);width:22px;flex:none;text-align:right;
+}
+.cmeta{flex:1;min-width:0}
+.cname{display:block;font-size:13.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cgap{display:block;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);margin-top:3px}
+.chere{
+  font-family:"IBM Plex Mono",monospace;font-size:12px;font-variant-numeric:tabular-nums;
+  flex:none;text-align:right;
+}
+.chere s{display:block;text-decoration:none;font-size:8.5px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--ink-3);margin-top:4px}
+.hot{color:#FFB454}
+
+/* ---- customize sheet ---- */
+.sheet-wrap{position:fixed;inset:0;z-index:70;display:flex;align-items:flex-end;justify-content:center}
+.sheet-wrap[hidden]{display:none}
+.sheet-bg{position:absolute;inset:0;background:rgba(4,3,8,.62);backdrop-filter:blur(3px)}
+.sheet{
+  position:relative;width:100%;max-width:420px;max-height:88vh;overflow-y:auto;
+  background:var(--ground);border-top:1px solid var(--line-2);
+  border-radius:16px 16px 0 0;padding:0 var(--pad) calc(20px + env(safe-area-inset-bottom));
+}
+.sheet-head{
+  font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:19px;
+  letter-spacing:-.02em;padding:6px 0 4px;
+}
+.sheet-sub{font-size:12.5px;color:var(--ink-3);margin-top:4px;line-height:1.45}
+.srow{padding:16px 0;border-top:1px solid var(--line);display:flex;align-items:center;gap:14px}
+.srow.col{display:block}
+.srow .k{margin:0;flex:1}
+.srow.col .k{margin-bottom:11px}
+.pick{
+  font-family:"Public Sans",sans-serif;font-size:13px;font-weight:600;
+  background:var(--raise);border:1px solid var(--line-2);color:var(--ink);
+  height:36px;padding:0 14px;border-radius:8px;cursor:pointer;flex:none;
+  display:inline-flex;align-items:center;gap:8px;
+}
+.pick:hover{border-color:var(--ink-3)}
+.pick input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.pick:focus-within{outline:2px solid var(--accent);outline-offset:2px}
+.has{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:none}
+.swatches{display:flex;flex-wrap:wrap;gap:10px}
+.swatch{
+  width:34px;height:34px;border-radius:50%;cursor:pointer;flex:none;
+  border:2px solid transparent;box-shadow:inset 0 0 0 1px rgba(0,0,0,.35);
+}
+.swatch[aria-pressed="true"]{border-color:var(--ink)}
+.swatch:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.frames{display:flex;gap:12px}
+.frame-opt{
+  width:52px;height:52px;border-radius:50%;cursor:pointer;flex:none;padding:2.5px;
+  background:none;border:1.5px solid var(--line-2);
+}
+.frame-opt span{
+  display:block;width:100%;height:100%;border-radius:50%;
+  background:radial-gradient(110% 110% at 25% 20%,#8B7BFF,transparent 62%),
+             radial-gradient(120% 120% at 80% 85%,#FF6FA8,transparent 60%),#221B32;
+}
+.frame-opt[data-f="fr-double"]{box-shadow:0 0 0 2.5px var(--ground),0 0 0 4px var(--line-2)}
+.frame-opt[data-f="fr-thick"]{border-width:3px}
+.frame-opt[aria-pressed="true"]{border-color:var(--accent)}
+.frame-opt[aria-pressed="true"][data-f="fr-double"]{box-shadow:0 0 0 2.5px var(--ground),0 0 0 4px var(--accent)}
+.frame-opt:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.txt{
+  width:100%;background:var(--raise);border:1px solid var(--line-2);border-radius:8px;
+  color:var(--ink);font-family:"Public Sans",sans-serif;font-size:14px;
+  padding:10px 12px;resize:none;
+}
+.txt:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+.sheet-actions{display:flex;gap:9px;padding:18px 0 0;border-top:1px solid var(--line);margin-top:16px}
+.sheet-actions button{
+  height:44px;border-radius:9px;cursor:pointer;font-family:"Public Sans",sans-serif;
+  font-size:14px;font-weight:600;
+}
+#custReset{flex:none;padding:0 16px;background:none;border:1px solid var(--line-2);color:var(--ink-2)}
+#custReset:hover{color:var(--ink);border-color:var(--ink-3)}
+#custDone{flex:1;background:var(--ink);color:#0B0A0F;border:0}
+.sheet-actions button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---- activity ----
+   A feed with no authoring: every row is something a person did, so it fills
+   itself and nobody is performing for it. */
+.actlist{display:flex;flex-direction:column;gap:1px}
+.act-group{margin:22px 0 6px}
+.act-group:first-child{margin-top:4px}
+.act{
+  display:flex;align-items:center;gap:12px;padding:11px 8px;margin:0 -8px;
+  border-radius:11px;cursor:pointer;transition:background .14s ease;
+}
+.act:hover{background:rgba(244,241,250,.05)}
+.act:focus-visible{outline:2px solid var(--ink);outline-offset:-2px}
+.act .pav{width:40px;height:40px}
+.act .pav span{font-size:13px}
+.act-m{flex:1;min-width:0}
+.act-t{display:block;font-size:13.5px;line-height:1.4;color:var(--ink-2)}
+.act-t b{color:var(--ink);font-weight:600}
+.act-s{
+  display:block;font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3);
+  margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.act-th{width:38px;height:38px;flex:none;border-radius:8px;overflow:hidden}
+.act-th.circle{border-radius:50%}
+.act-th .art{display:block;width:100%;height:100%}
+.act-th.chip{
+  display:grid;place-items:center;border-radius:9px;background:var(--raise);
+  border:1px solid var(--line-2);font-family:"IBM Plex Mono",monospace;
+  font-size:11px;font-weight:500;color:var(--ink);
+}
+
+/* ---- your reach ----
+   The headline is attribution, not audience: the only way to move it is to be
+   right about music early. Followers sit inside as a supporting number. */
+.reach{
+  display:block;width:100%;text-align:left;cursor:pointer;
+  background:var(--raise);border:1px solid var(--line-2);border-radius:13px;
+  padding:16px;color:inherit;font:inherit;
+}
+.reach:hover{border-color:var(--ink-3)}
+.reach:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.reach-n{
+  display:block;font-family:"Bricolage Grotesque",sans-serif;font-weight:700;
+  font-size:38px;line-height:.9;letter-spacing:-.035em;font-variant-numeric:tabular-nums;
+}
+.reach-t{display:block;font-size:13.5px;color:var(--ink-2);line-height:1.45;margin-top:10px;max-width:26em}
+.reach-go{
+  display:block;font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);
+  margin-top:14px;padding-top:12px;border-top:1px solid var(--line);
+}
+.ana-row{display:flex;align-items:center;gap:12px;padding:9px 0}
+.ana-row .art{width:34px;height:34px;border-radius:50%;flex:none}
+.ana-row .nm{flex:1;min-width:0;font-size:13.5px;font-weight:500}
+.ana-row .ct{
+  font-family:"IBM Plex Mono",monospace;font-size:13px;font-variant-numeric:tabular-nums;flex:none;
+}
+.ana-row .ct s{
+  display:block;text-decoration:none;font-size:8.5px;letter-spacing:.11em;
+  text-transform:uppercase;color:var(--ink-3);margin-top:4px;text-align:right;
+}
+
+/* ---- show detail popover ----
+   Opens next to what you tapped rather than sliding up from the bottom, so the
+   thing you asked about stays where you left it. Head and footer are pinned;
+   only the people list scrolls. */
+.pop-wrap{position:fixed;inset:0;z-index:70}
+.pop-wrap[hidden]{display:none}
+.pop-bg{position:absolute;inset:0;background:rgba(4,3,8,.58);backdrop-filter:blur(2px)}
+.pop{
+  position:absolute;left:50%;transform:translateX(-50%);
+  width:calc(100% - 26px);max-width:390px;max-height:74vh;
+  display:flex;flex-direction:column;
+  background:var(--ground);border:1px solid var(--line-2);border-radius:16px;
+  box-shadow:0 26px 64px rgba(0,0,0,.62);
+}
+.pop-head{flex:none;padding:18px 18px 0}
+.pop-body{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding:18px 18px 4px;scrollbar-width:none}
+.pop-body::-webkit-scrollbar{display:none}
+.pop-foot{flex:none;padding:14px 18px 18px;border-top:1px solid var(--line)}
+
+/* ---- show detail sheet ---- */
+.ss-head{display:flex;gap:15px;align-items:center;padding:8px 0 0}
+.ss-art{width:66px;flex:none}
+.ss-art .ring{display:block;border-color:var(--line-2);padding:2.5px}
+.ss-name{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:22px;letter-spacing:-.025em;line-height:1.1}
+.ss-when{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);margin-top:7px;line-height:1.5}
+.ss-stats{display:flex;margin-top:20px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.ss-stat{flex:1;padding:14px 0}
+.ss-stat + .ss-stat{border-left:1px solid var(--line);padding-left:15px}
+.ss-stat b{
+  display:block;font-family:"IBM Plex Mono",monospace;font-size:15px;font-weight:500;
+  font-variant-numeric:tabular-nums;
+}
+.ss-stat s{
+  display:block;text-decoration:none;font-family:"IBM Plex Mono",monospace;font-size:8.5px;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);margin-top:6px;
+}
+/* five people, then scroll -- same bounded-region pattern as the timeline, so
+   the popover stays a predictable size whether two are going or twenty */
+.ss-friends-outer{position:relative}
+.ss-friends{
+  display:flex;flex-direction:column;gap:1px;
+  max-height:290px;overflow-y:auto;overflow-x:hidden;
+  scrollbar-width:none;-webkit-overflow-scrolling:touch;
+}
+.ss-friends::-webkit-scrollbar{display:none}
+.ss-ffade{
+  position:absolute;left:0;right:0;bottom:0;height:38px;pointer-events:none;
+  background:linear-gradient(180deg,rgba(11,10,15,0),var(--ground));
+}
+.ss-ffade[hidden]{display:none}
+.ss-f{display:flex;align-items:center;gap:12px;padding:8px 0}
+.ss-f .pav{width:36px;height:36px}
+.ss-f .pav span{font-size:12px}
+.ss-f .n{display:block;font-size:13.5px;font-weight:500}
+.ss-f .m{display:block;font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3);margin-top:4px}
+.ss-more{
+  font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);
+  padding:10px 0 0;letter-spacing:.05em;
+}
+.ss-note{
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);
+  margin-top:14px;padding-top:13px;border-top:1px solid var(--line);line-height:1.5;
+}
+.ss-actions{display:flex;gap:9px;margin-top:20px}
+.ss-actions .btn{height:46px}
+.ss-actions .btn-primary{flex:1}
+.ss-actions .btn-ghost{width:auto;padding:0 18px}
+
+/* ---- full taste map ---- */
+.mapfull{
+  position:fixed;top:0;bottom:0;left:50%;
+  transform:translateX(-50%) translateY(var(--drag,0px));
+  width:100%;max-width:420px;z-index:60;background:var(--ground);
+  display:flex;flex-direction:column;touch-action:none;
+}
+.mapfull[hidden]{display:none}
+.mapfull.snap{transition:transform .22s cubic-bezier(.2,.7,.3,1)}
+@media (prefers-reduced-motion:reduce){.mapfull.snap{transition:none}}
+/* the sheet can be dragged down to dismiss; the handle says so */
+.mf-grab{width:38px;height:4px;border-radius:2px;background:var(--line-2);margin:9px auto 0;flex:none}
+.mf-top{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:16px var(--pad) 13px;border-bottom:1px solid var(--line);flex:none;
+}
+.mf-title{
+  font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;
+  letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);
+}
+.mf-title b{display:block;font-family:"Bricolage Grotesque",sans-serif;font-size:19px;
+  font-weight:600;letter-spacing:-.02em;text-transform:none;color:var(--ink);margin-top:5px}
+.mf-canvas{position:relative;flex:1;min-height:0}
+.mf-canvas canvas{display:block;width:100%;height:100%}
+.mf-ax{
+  position:absolute;font-family:"IBM Plex Mono",monospace;font-size:9.5px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);pointer-events:none;
+}
+.mf-l{left:12px;top:50%;transform:translateY(-50%)}
+.mf-r{right:12px;top:50%;transform:translateY(-50%)}
+.mf-t{top:12px;left:50%;transform:translateX(-50%)}
+.mf-b{bottom:12px;left:50%;transform:translateX(-50%)}
+.mf-clusters{
+  flex:none;padding:15px var(--pad) 3px;display:flex;flex-direction:column;gap:9px;
+}
+.mf-cl{display:flex;align-items:center;gap:10px}
+.mf-cl .nm{
+  font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--gen);width:104px;flex:none;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.mf-cl .track{flex:1;height:3px;border-radius:2px;background:rgba(244,241,250,.08);overflow:hidden}
+.mf-cl .track i{display:block;height:100%;border-radius:2px;background:var(--gen);opacity:.75}
+.mf-cl .pc{
+  font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);
+  font-variant-numeric:tabular-nums;width:30px;text-align:right;flex:none;
+}
+.mf-foot{
+  flex:none;padding:14px var(--pad) calc(16px + env(safe-area-inset-bottom));
+  border-top:1px solid var(--line);display:flex;flex-direction:column;gap:14px;
+}
+.mf-foot-row{display:flex;align-items:center;justify-content:space-between;gap:14px}
+/* full-width and in the thumb zone: the reachable way out of the sheet */
+.mf-close-btn{
+  width:100%;height:46px;border-radius:10px;cursor:pointer;
+  background:var(--raise);border:1px solid var(--line-2);color:var(--ink);
+  font-family:"Public Sans",sans-serif;font-size:14px;font-weight:600;
+}
+.mf-close-btn:hover{border-color:var(--ink-3)}
+.mf-close-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mf-key{display:flex;gap:14px;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3)}
+.mf-key span{display:inline-flex;align-items:center;gap:6px}
+.mf-key i{width:7px;height:7px;border-radius:50%;display:inline-block}
+.mf-dist{
+  font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-2);
+  text-align:right;line-height:1.5;
+}
+
+/* ---- you & them ----
+   Kept deliberately flat: no tinted panel, no border box. The number carries it,
+   so the section stays light instead of becoming another heavy block. */
+.sim-head{display:flex;align-items:baseline;gap:13px}
+.sim-pct{
+  font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:40px;
+  line-height:.9;letter-spacing:-.035em;font-variant-numeric:tabular-nums;
+}
+.sim-cap{font-size:13px;line-height:1.4;color:var(--ink-2);flex:1;min-width:0}
+.sim-bar{height:3px;border-radius:2px;background:rgba(244,241,250,.09);margin-top:15px;overflow:hidden}
+.sim-bar i{display:block;height:100%;border-radius:2px;background:var(--ink)}
+.sim-shared{display:flex;align-items:center;gap:8px;margin-top:17px;flex-wrap:wrap}
+.sim-shared .k{margin:0 4px 0 0}
+.sim-shared .mini{
+  width:34px;height:34px;border-radius:50%;flex:none;
+  border:1.5px solid var(--line-2);padding:1.5px;
+}
+.sim-shared .mini .art{display:block;width:100%;height:100%;border-radius:50%}
+.sim-note{
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--ink-3);
+  line-height:1.5;margin-top:15px;padding-top:13px;border-top:1px solid var(--line);
+}
+
+/* ---- show more ---- */
+details{margin-top:30px;border-top:1px solid var(--line);padding-top:4px}
+summary{
+  list-style:none;cursor:pointer;padding:15px 0 14px;
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--ink-3);
+  display:flex;align-items:center;justify-content:space-between;
+}
+summary::-webkit-details-marker{display:none}
+summary:hover{color:var(--ink-2)}
+summary:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+summary .chev{transition:transform .2s ease}
+details[open] summary .chev{transform:rotate(180deg)}
+.chips{display:flex;flex-wrap:wrap;gap:7px;padding-bottom:4px}
+.chip{font-size:12.5px;padding:6px 11px;border-radius:7px;border:1px solid var(--line-2);color:var(--ink-2)}
+.makes{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.k{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3);margin-bottom:11px}
+.makes a{display:inline-block;margin-top:8px;color:var(--ink);font-size:14px;text-decoration:none;border-bottom:1px solid var(--ink-3);padding-bottom:2px}
+.makes a:hover{border-color:var(--ink)}
+.makes a:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+
+/* content runs under the bar rather than stopping at it, so the list always
+   reads as continuing */
+.fade-bot{
+  position:fixed;bottom:64px;left:50%;transform:translateX(-50%);
+  width:100%;max-width:420px;height:54px;z-index:19;pointer-events:none;
+  background:linear-gradient(180deg,rgba(11,10,15,0),var(--ground));
+}
+.totop{
+  position:fixed;bottom:80px;left:50%;margin-left:calc(210px - 68px);
+  z-index:21;height:38px;padding:0 15px;border-radius:19px;cursor:pointer;
+  background:var(--raise);border:1px solid var(--line-2);color:var(--ink);
+  font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;
+  letter-spacing:.12em;text-transform:uppercase;
+  display:inline-flex;align-items:center;gap:7px;
+  box-shadow:0 6px 20px rgba(0,0,0,.45);
+}
+.totop[hidden]{display:none}
+.totop:hover{border-color:var(--ink-3)}
+.totop:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+@media (max-width:459px){.totop{left:auto;right:16px;margin-left:0}}
+
+/* ---- tab bar ---- */
+.tabs{
+  position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+  width:100%;max-width:420px;z-index:20;
+  display:flex;justify-content:space-around;align-items:center;
+  height:64px;padding-bottom:env(safe-area-inset-bottom);
+  background:rgba(11,10,15,.88);backdrop-filter:blur(14px);border-top:1px solid var(--line);
+}
+.tab{background:none;border:0;padding:10px;color:var(--ink-3);cursor:pointer;line-height:0;border-radius:9px}
+.tab[aria-current="page"]{color:var(--ink)}
+.tab:hover{color:var(--ink-2)}
+.tab:focus-visible{outline:2px solid var(--accent);outline-offset:0}
+
+/* ---- motion ---- */
+/* The entrance runs only under .playin, which is re-applied every time a screen
+   or tab is shown. A bare `animation: ... both` here would stick at opacity 0
+   on anything that was display:none at load -- which every screen but the first
+   now is. */
+/* No fill-mode and no delay, deliberately. `both` would make the resting state
+   opacity:0, so content stays invisible whenever the animation doesn't finish
+   -- a throttled background tab, an interrupted paint. Content must never
+   depend on an animation to be visible. A stagger would need a delay window,
+   which reintroduces exactly that, so it goes. */
+.playin .anim{animation:rise .45s cubic-bezier(.2,.7,.3,1)}
+@keyframes rise{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.playin .anim{animation:none}*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="demo">
+  <span class="lab">Same skeleton &middot; three people</span>
+  <button type="button" data-p="0" aria-pressed="true">cjell</button>
+  <button type="button" data-p="1" aria-pressed="false">Devin</button>
+  <button type="button" data-p="2" aria-pressed="false">Jules</button>
+</div>
+
+<div class="phone" id="phone">
+  <div class="screen" id="screenHome">
+    <div class="home-top solo">
+      <div class="home-bar">
+        <div class="wordmark">MusicShare</div>
+        <div style="display:flex;align-items:center;gap:14px">
+        <button class="bell" id="bellBtn" aria-label="Notifications">
+          <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M13.7 20a2 2 0 0 1-3.4 0"/></svg>
+          <i aria-hidden="true"></i>
+        </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="pad" id="tabYou">
+      <section class="sec anim">
+        <div class="sec-label"><span>Your map moved</span><span class="aux">Last 4 weeks</span></div>
+        <div class="map" id="moveMapBtn" role="button" tabindex="0" aria-label="Open full taste map">
+          <canvas id="movemap"></canvas>
+          <span class="map-ax ax-l" id="mvAxL">Ambient</span>
+          <span class="map-ax ax-r" id="mvAxR">Club</span>
+          <div class="map-foot"><span id="mvNote"></span><span class="go">Open full map &rarr;</span></div>
+        </div>
+      </section>
+
+      <section class="sec anim">
+        <div class="sec-label"><span>This week</span><span class="aux">vs last</span></div>
+        <div class="stats">
+          <div class="stat"><span class="n">14.2</span><span class="l">Hours</span></div>
+          <div class="stat"><span class="n">218</span><span class="l">Tracks</span></div>
+          <div class="stat"><span class="n">11</span><span class="l">New artists</span></div>
+        </div>
+      </section>
+
+      <section class="sec anim">
+        <div class="sec-label"><span>Climbing your rotation</span><span class="aux">vs last week</span></div>
+        <div class="risegrid" id="youUp"></div>
+      </section>
+
+      <section class="sec anim">
+        <div class="sec-label"><span>Cooling off</span><span class="aux">vs last week</span></div>
+        <div class="risegrid" id="youDown"></div>
+      </section>
+
+      <section class="sec anim">
+        <div class="sec-label"><span>On repeat</span><span class="aux">This week</span></div>
+        <div class="rows" id="youTracks"></div>
+      </section>
+    </div>
+
+    </div>
+
+  <div class="screen" id="screenDiscover" hidden>
+    <div class="home-top">
+      <div class="home-bar">
+        <div class="wordmark">Discover</div>
+        <button class="bell" id="discoverSearch" aria-label="Search">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg>
+        </button>
+      </div>
+      <div class="sbar" id="searchBar" hidden>
+        <input type="search" id="searchInput" placeholder="Search people" autocomplete="off" spellcheck="false">
+        <button type="button" id="searchCancel">Cancel</button>
+      </div>
+      <div class="segs" id="discoverSegs">
+        <button class="seg" data-t="community" aria-pressed="true">Community</button>
+        <button class="seg" data-t="global" aria-pressed="false">Global</button>
+      </div>
+    </div>
+
+    <div class="pad" id="searchResults" hidden>
+      <div class="plist" id="searchList"></div>
+    </div>
+
+    <div class="pad" id="tabCommunity">
+      <section class="sec anim a1">
+        <div class="sec-label"><span>Closest to your taste</span><span class="aux">Updated today</span></div>
+        <div class="plist" id="closeList"></div>
+      </section>
+
+      <section class="sec anim a2">
+        <div class="sec-label"><span>Rising here</span><span class="aux">This week</span></div>
+        <div class="risegrid" id="riseList"></div>
+      </section>
+
+      <section class="sec anim a3">
+        <div class="sec-label"><span>Tastemakers climbing</span><span class="aux">All genres</span></div>
+        <div class="plist" id="climbList"></div>
+      </section>
+
+      <section class="sec anim a4">
+        <div class="sec-label"><span>Playlists worth stealing</span><span class="aux">From people you match</span></div>
+        <div class="plgrid open" id="stealList"></div>
+      </section>
+    </div>
+
+    <div class="pad" id="tabGlobal" hidden>
+      <section class="sec anim a1">
+        <div class="sec-label"><span>Out this week</span><span class="aux">New releases</span></div>
+        <div class="relgrid" id="relList"></div>
+      </section>
+
+      <section class="sec anim a2">
+        <div class="sec-label"><span>Global vs here</span><span class="aux">Top 5</span></div>
+        <div id="chartList"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="screen" id="screenShows" hidden>
+    <div class="home-top">
+      <div class="home-bar">
+        <div class="wordmark">Shows</div>
+        <button class="bell" id="showsFilter" aria-label="Filter by venue">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M7 12h10M10 18h4"/></svg>
+        </button>
+      </div>
+      <div class="segs" id="showSegs">
+        <button class="seg" data-s="upcoming" aria-pressed="true">Upcoming</button>
+        <button class="seg" data-s="been" aria-pressed="false">Been to</button>
+      </div>
+    </div>
+
+    <div class="pad" id="showsUpcoming">
+      <section class="sec anim">
+        <div class="sec-label"><span>Near you</span></div>
+        <div class="vt-outer">
+          <div class="vt-wrap" id="vtWrap"><div class="vt" id="timeline"></div></div>
+          <div class="vt-fade" aria-hidden="true"></div>
+        </div>
+      </section>
+
+      <section class="sec anim">
+        <div class="sec-label"><span>Your matches are going</span><span class="aux">This month</span></div>
+        <div class="plist" id="goingList"></div>
+      </section>
+    </div>
+
+    <div class="pad" id="showsBeen" hidden>
+      <div class="empty">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 8.5A2 2 0 0 0 5 6.5h14a2 2 0 0 0 2 2 2 2 0 0 0 0 7 2 2 0 0 0-2 2H5a2 2 0 0 0-2-2 2 2 0 0 0 0-7z"/>
+          <path d="M14 6.5v11" stroke-dasharray="2 2.5"/>
+        </svg>
+        <div class="empty-t">No shows yet</div>
+        <div class="empty-s">Add a ticket and it becomes part of your profile. Shows you actually went to are the one thing on here nobody can fake.</div>
+        <button class="btn btn-primary" type="button">Add a ticket</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="screenActivity" hidden>
+    <div class="home-top">
+      <div class="home-bar">
+        <div class="wordmark">Activity</div>
+      </div>
+      <div class="segs" id="actSegs">
+        <button class="seg" data-a="all" aria-pressed="true">Community</button>
+        <button class="seg" data-a="following" aria-pressed="false">Following</button>
+      </div>
+    </div>
+    <div class="pad">
+      <div class="actlist" id="actList"></div>
+    </div>
+  </div>
+
+  <div class="screen" id="screenProfile" hidden>
+  <div class="wall"><canvas id="wall"></canvas></div>
+
+  <div class="banner">
+    <canvas id="banner"></canvas>
+    <img id="bannerImg" alt="" hidden style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">
+  </div>
+
+  <div class="pad">
+    <header class="head">
+      <div class="toprow">
+        <div class="avatar" id="avatar"><span id="initials">CM</span></div>
+        <div class="actions" id="actionsSelf" hidden>
+          <button class="btn btn-primary" type="button" id="editBtn">Edit profile</button>
+          <button class="btn btn-ghost" aria-label="Share profile">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>
+          </button>
+        </div>
+        <div class="actions" id="actionsOther">
+          <button class="btn btn-primary">Follow</button>
+          <button class="btn btn-ghost" aria-label="Send a message">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.1 9.1 0 0 1-3.3-.6L3 21l1.8-5a8.2 8.2 0 0 1-.8-3.5 8.4 8.4 0 0 1 8.4-8.4 8.4 8.4 0 0 1 8.6 7.4z"/></svg>
+          </button>
+          <button class="btn btn-ghost" aria-label="Share profile">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>
+          </button>
+        </div>
+      </div>
+      <h1 class="name" id="name">cjell meow</h1>
+      <div class="idrow">
+        <span class="handle" id="handle">@cjellok</span>
+        <span class="badges" id="badges"></span>
+      </div>
+      <p class="bio" id="bio"></p>
+      <div class="genres-top" id="topGenres"></div>
+    </header>
+
+    <div class="stats">
+      <div class="stat"><span class="n" id="s1">1,247</span><span class="l">Followers</span></div>
+      <div class="stat"><span class="n" id="s2">389</span><span class="l">Following</span></div>
+      <div class="stat"><span class="n" id="s3">87</span><span class="l">Taste score</span></div>
+    </div>
+
+    <section class="sec anim a1">
+      <div class="sec-label"><span>Tracks</span><span class="aux" id="trackAux"></span></div>
+      <div class="rows" id="tracks"></div>
+    </section>
+
+    <section class="sec anim a2">
+      <div class="sec-label"><span>Artists</span><span class="aux" id="artistAux"></span></div>
+      <div class="agrid" id="artists"></div>
+    </section>
+
+    <!-- "Most underground" lived here; pinned, not deleted. The `ug` data is
+         still on every profile so it can come back cheaply. -->
+
+    <section class="sec anim a4">
+      <div class="sec-label"><span>Playlists</span>
+        <button class="sec-toggle" type="button" id="plToggle" aria-expanded="false" aria-controls="playlists">Show all</button>
+      </div>
+      <div class="plgrid" id="playlists"></div>
+      <button class="pl-collapse" type="button" id="plCollapse" hidden>Show less</button>
+    </section>
+
+    <section class="sec anim a5">
+      <div class="sec-label"><span>Taste map</span><span class="aux" id="mapAux"></span></div>
+      <div class="map" id="tasteMapBtn" role="button" tabindex="0" aria-label="Open full taste map">
+        <canvas id="tastemap"></canvas>
+        <span class="map-ax ax-l" id="axL">Ambient</span>
+        <span class="map-ax ax-r" id="axR">Club</span>
+        <div class="map-foot"><span id="mapNote"></span><span class="go">Open full map &rarr;</span></div>
+      </div>
+    </section>
+
+    <section class="sec anim a5" id="simSection">
+      <div class="sec-label"><span id="simLabel">You &amp; cjell</span><span class="aux" id="simRank"></span></div>
+      <div class="sim-head">
+        <div class="sim-pct" id="simPct">68%</div>
+        <div class="sim-cap" id="simCap"></div>
+      </div>
+      <div class="sim-bar"><i id="simBar" style="width:0%"></i></div>
+      <div class="sim-shared">
+        <span class="k">Both listen to</span>
+        <span id="simShared" style="display:contents"></span>
+      </div>
+      <div class="sim-shared" id="simShowsRow">
+        <span class="k">Both went to</span>
+        <span id="simShows" style="display:contents"></span>
+      </div>
+      <div class="sim-note" id="simNote"></div>
+    </section>
+
+    <section class="sec anim" id="reachSection">
+      <div class="sec-label"><span>Your reach</span><span class="aux">Owner only</span></div>
+      <button class="reach" type="button" id="reachBtn">
+        <span class="reach-n" id="reachN"></span>
+        <span class="reach-t">people picked up an artist because of you</span>
+        <span class="reach-go">See analytics &rarr;</span>
+      </button>
+    </section>
+
+    <details>
+      <summary>
+        <span id="moreLabel">More</span>
+        <svg class="chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+      </summary>
+      <div class="k">All genres</div>
+      <div class="chips" id="genres"></div>
+      <div class="makes">
+        <div class="k">What I make</div>
+        <a href="#" id="makesLink">soundcloud.com/cjellok</a>
+      </div>
+    </details>
+  </div>
+
+
+  </div>
+
+  <div class="fade-bot" aria-hidden="true"></div>
+
+  <button class="totop" id="toTop" type="button" hidden>
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+    Top
+  </button>
+
+  <nav class="tabs" aria-label="Main">
+    <button class="tab" id="tabHome" aria-label="Home"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.2L12 3l9 7.2V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg></button>
+    <button class="tab" id="tabDiscover" aria-label="Discover"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg></button>
+    <button class="tab" id="tabShows" aria-label="Shows"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.7A2.1 2.1 0 0 0 5.1 6.6h13.8A2.1 2.1 0 0 0 21 8.7a2.1 2.1 0 0 0 0 6.6 2.1 2.1 0 0 0-2.1 2.1H5.1A2.1 2.1 0 0 0 3 15.3a2.1 2.1 0 0 0 0-6.6z"/><path d="M14 6.6v10.8" stroke-dasharray="2 2.5"/></svg></button>
+    <button class="tab" id="tabActivity" aria-label="Activity"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4"/></svg></button>
+    <button class="tab" id="tabProfile" aria-label="Profile"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.7"/><path d="M4.5 20.5c1.3-3.8 4.1-5.7 7.5-5.7s6.2 1.9 7.5 5.7"/></svg></button>
+  </nav>
+</div>
+
+  <div class="pop-wrap" id="anaWrap" hidden role="dialog" aria-modal="true" aria-label="Your analytics">
+    <div class="pop-bg" id="anaBg"></div>
+    <div class="pop" id="anaPop" style="top:14px">
+      <div class="pop-head">
+        <div class="ss-name">Your reach</div>
+        <div class="ss-when">Last 30 days</div>
+        <div class="ss-stats">
+          <div class="ss-stat"><b id="anaFollowers"></b><s>Followers</s></div>
+          <div class="ss-stat"><b id="anaViews"></b><s>Profile views</s></div>
+          <div class="ss-stat"><b id="anaSaves"></b><s>Saves</s></div>
+        </div>
+      </div>
+      <div class="pop-body">
+        <div class="k">Artists people picked up from you</div>
+        <div id="anaArtists"></div>
+        <div class="ss-note" id="anaNote"></div>
+      </div>
+      <div class="pop-foot">
+        <div class="ss-actions" style="margin-top:0">
+          <button class="btn btn-primary" type="button" id="anaClose">Done</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="pop-wrap" id="showWrap" hidden role="dialog" aria-modal="true" aria-label="Show details">
+    <div class="pop-bg" id="showBg"></div>
+    <div class="pop" id="showPop">
+      <div class="pop-head">
+        <div class="ss-head">
+          <div class="ss-art"><span class="ring"><span class="art" id="ssArt" style="display:block"></span></span></div>
+          <div>
+            <div class="ss-name" id="ssName"></div>
+            <div class="ss-when" id="ssWhen"></div>
+          </div>
+        </div>
+        <div class="ss-stats">
+          <div class="ss-stat"><b id="ssDist"></b><s>From campus</s></div>
+          <div class="ss-stat"><b id="ssPrice"></b><s>Advance</s></div>
+          <div class="ss-stat"><b id="ssDoors"></b><s>Doors</s></div>
+        </div>
+      </div>
+
+      <div class="pop-body">
+        <div class="k" id="ssGoingLabel">Going</div>
+        <div class="ss-friends-outer">
+          <div class="ss-friends" id="ssFriends"></div>
+          <div class="ss-ffade" id="ssFade" hidden aria-hidden="true"></div>
+        </div>
+        <div class="ss-note" id="ssNote"></div>
+      </div>
+
+      <div class="pop-foot">
+        <div class="ss-actions" style="margin-top:0">
+          <button class="btn btn-primary" type="button" id="ssGo">Going</button>
+          <button class="btn btn-ghost" type="button">Tickets</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sheet-wrap" id="custWrap" hidden role="dialog" aria-modal="true" aria-label="Customize profile">
+    <div class="sheet-bg" id="custBg"></div>
+    <div class="sheet">
+      <div class="mf-grab" aria-hidden="true"></div>
+      <div class="sheet-head">Make it yours</div>
+      <div class="sheet-sub">Everything here stays on this phone. Nothing is uploaded.</div>
+
+      <div class="srow">
+        <span class="k">Banner photo</span>
+        <label class="pick"><span class="has" id="hasBanner" hidden></span>Choose<input type="file" accept="image/*" id="bannerFile"></label>
+      </div>
+      <div class="srow">
+        <span class="k">Profile photo</span>
+        <label class="pick"><span class="has" id="hasAvatar" hidden></span>Choose<input type="file" accept="image/*" id="avatarFile"></label>
+      </div>
+      <div class="srow col">
+        <div class="k">Accent colour</div>
+        <div class="swatches" id="swatches"></div>
+      </div>
+      <div class="srow col">
+        <div class="k">Artist frame</div>
+        <div class="frames" id="frames">
+          <button class="frame-opt" data-f="fr-thin" aria-pressed="false" aria-label="Thin frame"><span></span></button>
+          <button class="frame-opt" data-f="fr-double" aria-pressed="false" aria-label="Double frame"><span></span></button>
+          <button class="frame-opt" data-f="fr-thick" aria-pressed="false" aria-label="Thick frame"><span></span></button>
+        </div>
+      </div>
+      <div class="srow col">
+        <div class="k">Name</div>
+        <input class="txt" id="custName" maxlength="28" autocomplete="off">
+      </div>
+      <div class="srow col">
+        <div class="k">Bio</div>
+        <textarea class="txt" id="custBio" rows="2" maxlength="140"></textarea>
+      </div>
+
+      <div class="sheet-actions">
+        <button type="button" id="custReset">Reset</button>
+        <button type="button" id="custDone">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="mapfull" id="mapFull" hidden role="dialog" aria-modal="true" aria-label="Full taste map">
+    <div class="mf-grab" aria-hidden="true"></div>
+    <div class="mf-top">
+      <div class="mf-title">Taste map<b id="mfWho">You &amp; cjell</b></div>
+      <button class="icon-btn" id="mfClose" aria-label="Close map">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="mf-canvas">
+      <canvas id="mapFullCanvas"></canvas>
+      <span class="mf-ax mf-l" id="mfAxL">Ambient</span>
+      <span class="mf-ax mf-r" id="mfAxR">Club</span>
+      <span class="mf-ax mf-t" id="mfAxT">Instrumental</span>
+      <span class="mf-ax mf-b" id="mfAxB">Vocal</span>
+    </div>
+    <div class="mf-clusters" id="mfClusters"></div>
+    <div class="mf-foot">
+      <div class="mf-foot-row">
+        <div class="mf-key">
+          <span><i style="background:#F4F1FA"></i>You</span>
+          <span><i id="mfKeyThem"></i><span id="mfKeyName">cjell</span></span>
+        </div>
+        <div class="mf-dist" id="mfDist"></div>
+      </div>
+      <button class="mf-close-btn" type="button" id="mfCloseBottom">Close map</button>
+    </div>
+  </div>
+
+<script>
+(function(){
+"use strict";
+
+var PROFILES = [
+  {
+    name:"cjell meow", handle:"@cjellok", initials:"CM",
+    accent:"#FF9D2E", accentRGB:"255,157,46",
+    gen:"#9B8CFF", genRGB:"155,140,255",
+    bannerHues:[292,318,196,268], avatarHues:[262,330], artHue:24,
+    bio:"this is a bio about me and about the things that I do and whatnot and what I enjoy probably",
+    aux:{tracks:"my picks",artists:"My Favs"},
+    stats:["1,247","389","87"],
+    badges:[
+      {t:"rank",l:"#3 Electronic \u00B7 UNC"},
+      {t:"rank",l:"#22 Trending"},
+      {t:"mile",l:"10,000+ hrs"},
+      {t:"mile",l:"Since 2016"},
+      {t:"mile",l:"412 deep cuts"},
+      {t:"mile",l:"38 shows"},
+      {t:"mile",l:"Cradle regular"},
+      {t:"id",l:"UNC '28"},
+      {t:"id",l:"Makes music"}
+    ],
+    artists:[["Four Tet","412 plays"],["Yaeji","388 plays"],["Floating Points","341 plays"],["Overmono","297 plays"],["Nala Sinephro","264 plays"],["DJ Python","240 plays"],["Loraine James","218 plays"],["Skee Mask","195 plays"]],
+    tracks:[["Two Thousand and Seventeen","Four Tet","184"],["So Vain","Yaeji","171"],["Del Oro","DJ Python","158"],["Is U","Overmono","149"],["Space 1.8","Nala Sinephro","137"]],
+    ug:{name:"Priori",sub:"You\u2019re 1 of 3 people at UNC listening.",foot:"Bottom 0.4% listener popularity \u00B7 your rarest artist this month"},
+    playlists:[["3am on franklin st","48 tracks"],["ambient, 4th floor davis","112 tracks"],["bpm too high for morning","61 tracks"],["songs i heard at nightlight","37 tracks"],["headphones on the quad","29 tracks"],["nothing over 100bpm","55 tracks"],["sunrise, still out","26 tracks"],["texture only","64 tracks"],["the one i send people","19 tracks"]],
+    frame:"fr-thin",
+    map:{l:"Ambient",r:"Club",t:"Instrumental",b:"Vocal",gap:"0.34",
+         count:"2,140 tracks plotted",note:"0.34 apart \u00B7 closer than 82% of UNC",seed:20260902,
+         clusters:[[.20,.34,.09,44,"ambient jazz"],[.42,.62,.10,58,"dub techno"],[.66,.40,.11,64,"UK garage"],[.83,.66,.08,34,"footwork"]],
+         you:[.52,.50],viewer:[.66,.39]},
+    sim:{pct:68,rank:"Top 6% of your matches",
+         cap:"You overlap hard on the club end and barely at all on ambient.",
+         shared:["Four Tet","Overmono","DJ Python"],
+         sameShows:["Four Tet","Overmono","Yaeji"],
+         note:"Four Tet is #1 for both of you \u00B7 2 shared deep cuts: Priori, Skee Mask"},
+    genres:["UK garage","ambient jazz","dub techno","footwork","deconstructed club","jungle"],
+    makes:"soundcloud.com/cjellok"
+  },
+  {
+    name:"Devin Ruiz", handle:"@dvnruiz", initials:"DR",
+    accent:"#4FD6C0", accentRGB:"79,214,192",
+    gen:"#7FA9FF", genRGB:"127,169,255",
+    bannerHues:[172,196,148,214], avatarHues:[168,200], artHue:160,
+    bio:"junior, journalism. reverb is a personality trait. i drive to greensboro for shows.",
+    aux:{tracks:"what i'd play you",artists:"the ones that stuck"},
+    stats:["842","511","79"],
+    badges:[
+      {t:"rank",l:"#1 Shoegaze \u00B7 UNC"},
+      {t:"rank",l:"#7 Trending"},
+      {t:"mile",l:"6,200 hrs"},
+      {t:"mile",l:"Since 2014"},
+      {t:"mile",l:"88 deep cuts"},
+      {t:"mile",l:"24 shows"},
+      {t:"mile",l:"Saw Wednesday at 40 cap"},
+      {t:"id",l:"UNC '27"}
+    ],
+    artists:[["Slowdive","366 plays"],["Duster","331 plays"],["Alvvays","302 plays"],["Beach House","288 plays"],["Wednesday","259 plays"],["My Bloody Valentine","231 plays"],["Cindy Lee","204 plays"],["Hotline TNT","182 plays"]],
+    tracks:[["Sugar for the Pill","Slowdive","212"],["Constellations","Duster","198"],["Bull Believer","Wednesday","176"],["Archie, Marry Me","Alvvays","160"],["Space Song","Beach House","151"]],
+    ug:{name:"Cindy Lee",sub:"You\u2019re 1 of 6 people at UNC listening.",foot:"Bottom 1.1% listener popularity \u00B7 your rarest artist this month"},
+    playlists:[["carrboro drive home","63 tracks"],["loud but sad","94 tracks"],["cat\u2019s cradle openers","41 tracks"],["tape hiss","77 tracks"],["dorm ceiling","58 tracks"],["for the drive back","46 tracks"],["cassette rips","52 tracks"],["november","38 tracks"],["guitars that sound like synths","61 tracks"]],
+    frame:"fr-double",
+    map:{l:"Ambient",r:"Noise",t:"Polished",b:"Lo-fi",gap:"0.61",
+         count:"3,410 tracks plotted",note:"0.61 apart \u00B7 closer than 45% of UNC",seed:771144,
+         clusters:[[.28,.32,.10,52,"dream pop"],[.22,.66,.09,44,"slowcore"],[.56,.46,.12,62,"shoegaze"],[.82,.64,.08,32,"noise rock"]],
+         you:[.44,.44],viewer:[.70,.66]},
+    sim:{pct:41,rank:"Top 40% of your matches",
+         cap:"Different ends of the map, but you meet in the middle on dream pop.",
+         shared:["Beach House","Alvvays"],
+         sameShows:["Alvvays"],
+         note:"Beach House is top 5 for both of you \u00B7 1 shared deep cut: Cindy Lee"},
+    genres:["shoegaze","slowcore","dream pop","noise rock","jangle","4AD"],
+    makes:"bandcamp.com/dvnruiz"
+  },
+  {
+    name:"Jules Amari", handle:"@julesamari", initials:"JA",
+    accent:"#FF4D6D", accentRGB:"255,77,109",
+    gen:"#E8B84B", genRGB:"232,184,75",
+    bannerHues:[350, 22, 8, 38], avatarHues:[348, 18], artHue:344,
+    bio:"senior. drums first, everything else second. crate digging is cardio.",
+    aux:{tracks:"if you ask me",artists:"the foundation"},
+    stats:["2,038","297","93"],
+    badges:[
+      {t:"rank",l:"#2 Jazz \u00B7 UNC"},
+      {t:"rank",l:"#4 Trending"},
+      {t:"mile",l:"14,800 hrs"},
+      {t:"mile",l:"Since 2012"},
+      {t:"mile",l:"1.2k deep cuts"},
+      {t:"mile",l:"61 shows"},
+      {t:"mile",l:"Pinhook regular"},
+      {t:"id",l:"UNC '26"},
+      {t:"id",l:"Makes music"}
+    ],
+    artists:[["MF DOOM","488 plays"],["Alice Coltrane","402 plays"],["Madlib","377 plays"],["Yussef Dayes","344 plays"],["Sault","310 plays"],["Pharoah Sanders","286 plays"],["Knxwledge","251 plays"],["Kassa Overall","218 plays"]],
+    tracks:[["Accordion","MF DOOM","241"],["Journey in Satchidananda","Alice Coltrane","203"],["Wings","Yussef Dayes","188"],["Wildflowers","Sault","174"],["Astral Traveling","Pharoah Sanders","162"]],
+    ug:{name:"Sam Gendel",sub:"You\u2019re 1 of 4 people at UNC listening.",foot:"Bottom 0.7% listener popularity \u00B7 your rarest artist this month"},
+    playlists:[["sunday morning, no lyrics","85 tracks"],["drum breaks only","120 tracks"],["records from nice price","52 tracks"],["practice room loops","44 tracks"],["basement tapes","67 tracks"],["horns only","39 tracks"],["for the kit","48 tracks"],["late night wxyc","57 tracks"],["stuff my dad played","31 tracks"]],
+    frame:"fr-thick",
+    map:{l:"Acoustic",r:"Electronic",t:"Instrumental",b:"Vocal",gap:"0.47",
+         count:"5,120 tracks plotted",note:"0.47 apart \u00B7 closer than 63% of UNC",seed:5150808,
+         clusters:[[.20,.38,.10,60,"spiritual jazz"],[.36,.68,.09,46,"soul"],[.62,.36,.11,58,"boom bap"],[.80,.62,.08,32,"broken beat"]],
+         you:[.40,.46],viewer:[.60,.34]},
+    sim:{pct:55,rank:"Top 18% of your matches",
+         cap:"Your electronic side and their sampling side land in the same place.",
+         shared:["Madlib","Sault","Knxwledge"],
+         sameShows:["Sault","MIKE"],
+         note:"You overlap most on boom bap \u00B7 3 shared deep cuts"},
+    genres:["spiritual jazz","boom bap","broken beat","soul","library music","free jazz"],
+    makes:"soundcloud.com/julesamari"
+  }
+];
+
+/* Home is app-wide, not campus-scoped: at launch the whole community IS the
+   campus, so a filter would do no work. `p` maps a row to a full profile, so
+   nothing on this screen is a dead end. */
+var PEOPLE = [
+  {n:"cjell meow", i:"CM", h:[262,330], p:0},
+  {n:"Devin Ruiz",   i:"DR", h:[168,200], p:1},
+  {n:"Jules Amari",  i:"JA", h:[348,18],  p:2},
+  {n:"Priya Raman",  i:"PR", h:[196,286], p:0},
+  {n:"Theo Blackwell",i:"TB",h:[14,320],  p:2},
+  {n:"Nina Castellanos",i:"NC",h:[142,208],p:1},
+  {n:"Marcus Webb",  i:"MW", h:[276,32],  p:2},
+  {n:"Sofia Nakamura",  i:"SN", h:[210,300], p:0},
+  {n:"Andre Whitfield", i:"AW", h:[26,340],  p:2},
+  {n:"Lena Petrov",     i:"LP", h:[178,250], p:1},
+  {n:"Tomas Iglesias",  i:"TI", h:[300,20],  p:2},
+  {n:"Riley Okafor",    i:"RO", h:[120,190], p:1},
+  {n:"Hana Bergstrom",  i:"HB", h:[240,310], p:0},
+  {n:"Desmond Clay",    i:"DC", h:[8,44],    p:2},
+  {n:"Yuki Tanaka",     i:"YT", h:[190,280], p:1},
+  {n:"Camille Dubois",  i:"CD", h:[330,10],  p:0},
+  {n:"Isaac Mbeki",     i:"IM", h:[150,220], p:2},
+  {n:"Freya Lindqvist", i:"FL", h:[200,265], p:1},
+  {n:"Omar Haddad",     i:"OH", h:[36,350],  p:2},
+  {n:"Zoe Kaplan",      i:"ZK", h:[280,340], p:0},
+  {n:"Bram de Vries",   i:"BV", h:[164,230], p:1}
+];
+
+var HOME = {
+  close:[
+    {i:0, num:"68%", lab:"match", sub:"Four Tet, Overmono +3 shared"},
+    {i:5, num:"61%", lab:"match", sub:"Kelly Lee Owens, Sault +2 shared"},
+    {i:3, num:"57%", lab:"match", sub:"Yaeji, Loraine James +1 shared"}
+  ],
+  climb:[
+    {i:2, num:"2", lab:"jazz", sub:"#2 Jazz \u00B7 up 3 this week", up:true},
+    {i:1, num:"1", lab:"shoegaze", sub:"#1 Shoegaze \u00B7 held 4 weeks"},
+    {i:4, num:"6", lab:"hip-hop", sub:"#6 Hip-hop \u00B7 up 5 this week", up:true},
+    {i:6, num:"9", lab:"ambient", sub:"#9 Ambient \u00B7 up 1 this week", up:true}
+  ],
+  /* real Triangle venues: a fake show at a real room reads true, and it is
+     the listen/going counts that make this section impossible to copy */
+  shows:[
+    {w:0,m:"nov",d:"14", dist:"1.4 mi", price:"$28", doors:"8:00 pm", friends:[1,3,5], dow:"fri",a:"Overmono",         v:"Cat\u2019s Cradle \u00B7 Carrboro",    listen:23, going:4,  av:[[262,330],[168,200],[348,18]]},
+    {w:1,m:"nov",d:"18", dist:"9.2 mi", price:"$22", doors:"8:30 pm", friends:[0,2,4,6], dow:"tue",a:"Nourished by Time",v:"Motorco Music Hall \u00B7 Durham",     listen:19, going:6,  av:[[196,286],[276,32],[142,208]]},
+    {w:1,m:"nov",d:"21", dist:"1.4 mi", price:"$18", doors:"8:00 pm", friends:[3,4,5,6], dow:"fri",a:"Wednesday",        v:"Cradle Back Room \u00B7 Carrboro",     listen:31, going:9,  av:[[196,286],[142,208],[14,320]]},
+    {w:2,m:"nov",d:"29", dist:"0.6 mi", price:"$20", doors:"9:00 pm", friends:[1,6], dow:"sat",a:"Jane Remover",     v:"Local 506 \u00B7 Chapel Hill",         listen:12, going:3,  av:[[168,200],[14,320]]},
+    {w:3,m:"dec",d:"02", dist:"9.2 mi", price:"$32", doors:"9:00 pm", friends:[2,5], dow:"tue",a:"Yaeji",            v:"Motorco Music Hall \u00B7 Durham",     listen:18, going:3,  av:[[348,18],[276,32]]},
+    {w:3,m:"dec",d:"06", dist:"9.8 mi", price:"$24", doors:"9:00 pm", friends:[0,3,4,5], dow:"sat",a:"Loraine James",    v:"The Pinhook \u00B7 Durham",            listen:16, going:7,  av:[[262,330],[196,286],[168,200]]},
+    {w:4,m:"dec",d:"09", dist:"0.6 mi", price:"$26", doors:"8:30 pm", friends:[1,4], dow:"tue",a:"Kelly Lee Owens",  v:"Local 506 \u00B7 Chapel Hill",         listen:11, going:2,  av:[[262,330],[142,208]]},
+    {w:4,m:"dec",d:"13", dist:"9.8 mi", price:"$25", doors:"8:00 pm", friends:[2,3,6], dow:"sat",a:"MIKE",             v:"The Pinhook \u00B7 Durham",            listen:14, going:5,  av:[[14,320],[276,32],[196,286]]},
+    {w:5,m:"dec",d:"19", dist:"26 mi", price:"$45", doors:"8:00 pm", friends:[0,1,2,4], dow:"fri",a:"Four Tet",         v:"The Ritz \u00B7 Raleigh",              listen:41, going:12, av:[[262,330],[168,200],[348,18]]}
+  ],
+  /* Home's default tab is about you, because your own listening is the only
+     thing that changes every day and is never empty at any user count. */
+  you:{
+    map:{l:"Ambient",r:"Club",t:"Instrumental",b:"Vocal",gap:"0.12",
+         count:"", note:"Moved 0.12 toward club \u00B7 furthest in 6 months", seed:20260902,
+         clusters:[[.20,.34,.09,44,"ambient jazz"],[.42,.62,.10,58,"dub techno"],
+                   [.66,.40,.11,64,"UK garage"],[.83,.66,.08,34,"footwork"]],
+         you:[.60,.44], viewer:[.50,.51]},
+    up:[["Overmono","+41%"],["Nala Sinephro","+28%"],["Priori","+22%"],["Loraine James","+16%"]],
+    down:[["Skee Mask","-19%"],["Yaeji","-12%"],["Kelly Lee Owens","-8%"],["Four Tet","-4%"]],
+    tracks:[["Is U","Overmono","31"],["Del Oro","DJ Python","27"],["Space 1.8","Nala Sinephro","24"],
+            ["So Vain","Yaeji","19"],["Two Thousand and Seventeen","Four Tet","17"]]
+  },
+  /* attribution, not audience: the only way to move these is to be right early */
+  reach:{
+    picked:31,
+    artists:[["Priori",12],["Overmono",9],["Nala Sinephro",6],["DJ Python",4]],
+    early:4,
+    followers:"1,247", views:"3.1k", saves:"188"
+  },
+  /* `f` marks people you follow -- the Following tab is a filter on this, not a
+     separate feed, so nothing is gated behind following anyone */
+  activity:[
+    {g:"Today", p:1, k:"show",     x:"Wednesday",        v:"Cradle Back Room", ago:"2h",  f:true},
+    {g:"Today", p:5, k:"playlist", x:"dorm ceiling",     v:"58 tracks",        ago:"3h"},
+    {g:"Today", p:2, k:"rank",     x:"#2 Jazz",          v:"up 3 places",      ago:"4h",  f:true, n:"2"},
+    {g:"Today", p:9, k:"artist",   x:"Nourished by Time", v:"",                ago:"5h"},
+    {g:"Today", p:3, k:"show",     x:"Overmono",         v:"Cat\u2019s Cradle", ago:"6h", f:true},
+    {g:"Today", p:12,k:"was",      x:"Yaeji",            v:"Motorco, Durham",  ago:"9h"},
+
+    {g:"Yesterday", p:6, k:"playlist", x:"tape hiss",     v:"77 tracks",       ago:"1d"},
+    {g:"Yesterday", p:4, k:"show",     x:"MIKE",          v:"The Pinhook",     ago:"1d",  f:true},
+    {g:"Yesterday", p:14,k:"rank",     x:"#7 Ambient",    v:"up 2 places",     ago:"1d",  n:"7"},
+    {g:"Yesterday", p:0, k:"artist",   x:"Priori",        v:"",                ago:"1d",  f:true},
+    {g:"Yesterday", p:8, k:"follow",   x:"Devin Ruiz",    v:"",                ago:"1d",  who:1},
+
+    {g:"Earlier this week", p:11,k:"was",      x:"Four Tet",     v:"The Ritz, Raleigh", ago:"3d"},
+    {g:"Earlier this week", p:7, k:"playlist", x:"basement tapes", v:"67 tracks",       ago:"3d"},
+    {g:"Earlier this week", p:2, k:"show",     x:"Loraine James", v:"The Pinhook",      ago:"4d", f:true},
+    {g:"Earlier this week", p:16,k:"artist",   x:"Cindy Lee",    v:"",                  ago:"4d"},
+    {g:"Earlier this week", p:13,k:"rank",     x:"#5 Shoegaze",  v:"up 1 place",        ago:"5d", n:"5"}
+  ],
+  matchesGoing:[
+    {i:1, num:"2", lab:"shows", sub:"Wednesday \u00B7 Four Tet"},
+    {i:3, num:"1", lab:"show",  sub:"Overmono at Cat\u2019s Cradle"},
+    {i:6, num:"3", lab:"shows", sub:"Yaeji \u00B7 MIKE \u00B7 Four Tet"}
+  ],
+  rise:[
+    ["Nourished by Time","+41"],["Jane Remover","+33"],["MIKE","+28"],["Fcukers","+24"],
+    ["Ravyn Lenae","+19"],["Blue Bendy","+17"],["Nailah Hunter","+15"],["Bar Italia","+12"]
+  ],
+  steal:[
+    ["3am on franklin st","cjell \u00B7 48 tracks"],
+    ["loud but sad","Devin \u00B7 94 tracks"],
+    ["drum breaks only","Jules \u00B7 120 tracks"],
+    ["records from nice price","Jules \u00B7 52 tracks"],
+    ["tape hiss","Devin \u00B7 77 tracks"],
+    ["texture only","cjell \u00B7 64 tracks"]
+  ],
+  releases:[
+    ["Fantasy Album","Nourished by Time"],["Revengeseekerz","Jane Remover"],["Burning Desire","MIKE"],
+    ["Baby Blue","Fcukers"],["Bird's Eye","Ravyn Lenae"],["Motorbike","Blue Bendy"]
+  ],
+  chart:[
+    {g:1, name:"Sabrina Carpenter", here:34, gap:"33 lower here"},
+    {g:2, name:"Charli XCX",        here:6,  gap:"4 lower here"},
+    {g:3, name:"Fontaines D.C.",    here:2,  gap:"1 higher here", hot:true},
+    {g:4, name:"Tyler, The Creator",here:5,  gap:"1 lower here"},
+    {g:5, name:"Four Tet",          here:1,  gap:"4 higher here", hot:true}
+  ]
+};
+
+function $(id){ return document.getElementById(id); }
+
+/* deterministic PRNG so a profile always renders identically */
+function makeRnd(seed){
+  var s = seed >>> 0;
+  return function(){ s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+}
+
+/* procedural bokeh: reads as an out-of-focus photo, stands in for a user upload */
+function bokeh(cv, hues, seed, density){
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var w = cv.clientWidth, h = cv.clientHeight;
+  if(!w || !h) return;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  var ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+  var rnd = makeRnd(seed);
+  ctx.fillStyle = "#0A0812";
+  ctx.fillRect(0, 0, w, h);
+
+  var n = density || 26;
+  for(var i = 0; i < n; i++){
+    var hue = hues[i % hues.length] + (rnd() * 26 - 13);
+    var x = rnd() * w, y = rnd() * h * 1.05;
+    var r = (0.10 + rnd() * 0.42) * Math.max(w, h) * 0.55;
+    var a = 0.10 + rnd() * 0.30;
+    var g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, "hsla(" + hue.toFixed(0) + ",88%,62%," + a.toFixed(3) + ")");
+    g.addColorStop(0.55, "hsla(" + hue.toFixed(0) + ",82%,48%," + (a * 0.34).toFixed(3) + ")");
+    g.addColorStop(1, "hsla(" + hue.toFixed(0) + ",80%,40%,0)");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+  /* a few hot specular points sell the photographic read */
+  for(var j = 0; j < 9; j++){
+    var hx = rnd() * w, hy = rnd() * h, hr = 1.5 + rnd() * 4;
+    var hg = ctx.createRadialGradient(hx, hy, 0, hx, hy, hr * 5);
+    hg.addColorStop(0, "rgba(255,252,245,.60)");
+    hg.addColorStop(1, "rgba(255,252,245,0)");
+    ctx.fillStyle = hg;
+    ctx.beginPath(); ctx.arc(hx, hy, hr * 5, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function tasteMap(cv, cfg, accent, accentRGB, genRGB, big, mode){
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var w = cv.clientWidth, h = cv.clientHeight;
+  if(!w || !h) return;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  var ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  var rnd = makeRnd(cfg.seed);
+  function gauss(){ return (rnd() + rnd() + rnd() + rnd() - 2) / 2; }
+
+  /* One scale for both axes. Non-uniform scaling would stretch clusters into
+     streaks and, worse, misreport the gap between the two dots -- and that gap
+     is the whole point of the section. A taller canvas just shows more empty
+     space, exactly like panning a real map. */
+  var k = w, y0 = (h - k) / 2;
+  function X(n){ return n * k; }
+  function Y(n){ return y0 + n * k; }
+
+  ctx.strokeStyle = "rgba(244,241,250,.045)";
+  ctx.lineWidth = 1;
+  for(var gx = 1; gx < 5; gx++){ ctx.beginPath(); ctx.moveTo(w * gx / 5, 0); ctx.lineTo(w * gx / 5, h); ctx.stroke(); }
+  for(var gy = 1; gy < 3; gy++){ ctx.beginPath(); ctx.moveTo(0, h * gy / 3); ctx.lineTo(w, h * gy / 3); ctx.stroke(); }
+
+  /* a soft field behind each cluster so density reads before any dot does */
+  cfg.clusters.forEach(function(c){
+    var cx = X(c[0]), cy = Y(c[1]), cr = c[2] * k * 3.1;
+    var g = ctx.createRadialGradient(cx, cy, 0, cx, cy, cr);
+    g.addColorStop(0, "rgba(" + genRGB + ",.13)");
+    g.addColorStop(1, "rgba(" + genRGB + ",0)");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(cx, cy, cr, 0, Math.PI * 2); ctx.fill();
+  });
+
+  var dense = big ? 2.6 : 1;   /* the full map earns more points to look at */
+  var pts = [];
+  cfg.clusters.forEach(function(c){
+    var n = Math.round(c[3] * dense);
+    for(var i = 0; i < n; i++){
+      pts.push([X(c[0]) + gauss() * c[2] * k, Y(c[1]) + gauss() * c[2] * k,
+                0.7 + rnd() * 1.1, 0.20 + rnd() * 0.38]);
+    }
+  });
+  /* scattered singles fill the whole visible field, not just the unit square */
+  for(var s = 0; s < Math.round(46 * dense); s++){
+    pts.push([rnd() * w, rnd() * h, 0.6 + rnd() * 0.7, 0.09 + rnd() * 0.15]);
+  }
+
+  var pr = big ? 1.35 : 1;
+  pts.forEach(function(p){
+    if(p[0] < 0 || p[0] > w || p[1] < 0 || p[1] > h) return;
+    ctx.fillStyle = "rgba(" + genRGB + "," + p[3].toFixed(3) + ")";
+    ctx.beginPath(); ctx.arc(p[0], p[1], p[2] * pr, 0, Math.PI * 2); ctx.fill();
+  });
+
+  /* cluster names: the map is meaningless without them, since the axes are a
+     projection and only the groupings actually carry genre */
+  ctx.textAlign = "center";
+  ctx.font = '500 ' + (big ? 11 : 8.5) + 'px "IBM Plex Mono", monospace';
+  cfg.clusters.forEach(function(c){
+    var cx = X(c[0]);
+    var cy = Y(c[1]) - c[2] * k * (big ? 1.5 : 1.35) - (big ? 14 : 8);
+    var label = (c[4] || "").toUpperCase();
+    var half = ctx.measureText(label).width / 2 + 6;
+    cx = Math.max(half, Math.min(w - half, cx));
+    cy = Math.max(big ? 26 : 13, cy);
+    ctx.fillStyle = "rgba(" + genRGB + "," + (big ? .92 : .72) + ")";
+    ctx.fillText(label, cx, cy);
+  });
+
+  var ox = X(cfg.you[0]), oy = Y(cfg.you[1]);       /* the profile owner */
+  var vx = X(cfg.viewer[0]), vy = Y(cfg.viewer[1]); /* whoever is looking */
+
+  /* the gap between the two is the point of the section, so draw it as a
+     measured span rather than leaving the reader to eyeball two dots */
+  ctx.save();
+  if(mode === "self") ctx.setLineDash([]);
+  else ctx.setLineDash([3, 4]);
+  ctx.strokeStyle = "rgba(244,241,250,.28)";
+  ctx.lineWidth = 1;
+  if(mode !== "self"){ ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(vx, vy); ctx.stroke(); }
+  ctx.restore();
+
+  var S = big ? 1.5 : 1;
+
+  /* the gap readout rides beside the line, not on it, so it never lands on the
+     dot labels when the two people sit close together */
+  if(big && mode !== "self"){
+    var dx = ox - vx, dy = oy - vy;
+    var len = Math.sqrt(dx * dx + dy * dy) || 1;
+    var mx = (ox + vx) / 2 - (dy / len) * 21;
+    var my = (oy + vy) / 2 + (dx / len) * 21;
+    ctx.font = '500 10px "IBM Plex Mono", monospace';
+    ctx.textAlign = "center";
+    var t = cfg.gap + " apart";
+    var tw = ctx.measureText(t).width;
+    ctx.fillStyle = "#0C0A13";   /* solid: it must never sit half-over a cluster name */
+    ctx.fillRect(mx - tw / 2 - 6, my - 8, tw + 12, 16);
+    ctx.fillStyle = "rgba(244,241,250,.72)";
+    ctx.fillText(t, mx, my + 4);
+  }
+
+  function dot(x, y, fill, ringRGB, haloA, r){
+    var hr = 32 * S;
+    var halo = ctx.createRadialGradient(x, y, 0, x, y, hr);
+    halo.addColorStop(0, "rgba(" + ringRGB + "," + haloA + ")");
+    halo.addColorStop(1, "rgba(" + ringRGB + ",0)");
+    ctx.fillStyle = halo;
+    ctx.beginPath(); ctx.arc(x, y, hr, 0, Math.PI * 2); ctx.fill();
+
+    ctx.strokeStyle = "rgba(" + ringRGB + ",.44)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(x, y, 10 * S, 0, Math.PI * 2); ctx.stroke();
+
+    /* punch the ground back in so the dashed line never crosses the dot */
+    ctx.fillStyle = "#0D0B14";
+    ctx.beginPath(); ctx.arc(x, y, r * S + 2.4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = fill;
+    ctx.beginPath(); ctx.arc(x, y, r * S, 0, Math.PI * 2); ctx.fill();
+  }
+
+  if(mode !== "self") dot(vx, vy, "#F4F1FA", "244,241,250", ".18", 3);
+  dot(ox, oy, accent, accentRGB, ".32", 3.6);
+
+  ctx.font = '500 ' + (big ? 11 : 9) + 'px "IBM Plex Mono", monospace';
+  ctx.textAlign = "center";
+  /* same two dots, two meanings: you vs someone else, or you vs you a month ago */
+  var lab = mode === "move" ? ["4 wks ago", "now"] : mode === "self" ? ["", "you"] : ["you", "them"];
+  ctx.fillStyle = "rgba(244,241,250,.62)";
+  if(lab[0]) ctx.fillText(lab[0], vx, vy - 16 * S);
+  ctx.fillStyle = accent;
+  ctx.fillText(lab[1], ox, oy - 16 * S);
+
+}
+
+/* album art: deterministic per title, varied hues so art carries the colour */
+function artStyle(seedStr, base){
+  var s = 0;
+  for(var i = 0; i < seedStr.length; i++) s = (s * 31 + seedStr.charCodeAt(i)) >>> 0;
+  var h1 = (base + (s % 300)) % 360;
+  var h2 = (h1 + 38 + (s >> 8) % 60) % 360;
+  return "--a:hsl(" + h1 + ",72%,56%);--b:hsl(" + h2 + ",64%,26%)";
+}
+
+var current = 0;
+var PL_COLLAPSED = 6;
+
+/* ---------- personalization ----------
+   Photos never leave the device: FileReader -> canvas downscale -> data URI ->
+   localStorage. Every viewer customizes their own copy, so testing this costs
+   nobody a photo upload. */
+var SWATCHES = ["#FF9D2E","#4FD6C0","#FF4D6D","#7FA9FF","#C08BFF","#FFD84D"];
+var STORE = "musicshare-custom-v1";
+var CUSTOM = {};
+
+try { CUSTOM = JSON.parse(localStorage.getItem(STORE) || "{}") || {}; }
+catch(e){ CUSTOM = {}; }
+
+function saveCustom(){
+  try { localStorage.setItem(STORE, JSON.stringify(CUSTOM)); }
+  catch(e){ /* private window, or quota: the session still works, it just won't persist */ }
+}
+function cust(){ return CUSTOM[current] || (CUSTOM[current] = {}); }
+
+function hexRGB(hex){
+  var n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+/* The genre hue is derived, never chosen. One picked colour can't produce an
+   illegible pair, and every profile gets a harmonious two-colour set. */
+function genFrom(hex){
+  var c = hexRGB(hex).map(function(v){ return v / 255; });
+  var mx = Math.max.apply(null, c), mn = Math.min.apply(null, c), d = mx - mn, h = 0;
+  if(d){
+    if(mx === c[0]) h = ((c[1] - c[2]) / d + (c[1] < c[2] ? 6 : 0));
+    else if(mx === c[1]) h = (c[2] - c[0]) / d + 2;
+    else h = (c[0] - c[1]) / d + 4;
+    h *= 60;
+  }
+  var g = (h + 155) % 360, s = 0.78, l = 0.73;
+  var a = s * Math.min(l, 1 - l);
+  function f(n){
+    var k = (n + g / 30) % 12;
+    return Math.round(255 * (l - a * Math.max(-1, Math.min(Math.min(k - 3, 9 - k), 1))));
+  }
+  return [f(0), f(8), f(4)];
+}
+
+/* phone photos are multi-megabyte; store a sane size or blow the quota */
+function shrink(file, maxW, cb){
+  var fr = new FileReader();
+  fr.onload = function(){
+    var img = new Image();
+    img.onload = function(){
+      var s = Math.min(1, maxW / img.width);
+      var cv = document.createElement("canvas");
+      cv.width = Math.round(img.width * s);
+      cv.height = Math.round(img.height * s);
+      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
+      cb(cv.toDataURL("image/jpeg", 0.82));
+    };
+    img.onerror = function(){ cb(null); };
+    img.src = fr.result;
+  };
+  fr.onerror = function(){ cb(null); };
+  fr.readAsDataURL(file);
+}
+
+/* One place decides the expanded state, so the top toggle, the foot control
+   and a profile switch can never disagree about it. */
+function setPlaylists(open, keepPlace){
+  var p = PROFILES[current];
+  var grid = $("playlists"), toggle = $("plToggle"), collapse = $("plCollapse");
+  var hasMore = p.playlists.length > PL_COLLAPSED;
+
+  grid.classList.toggle("open", open);
+  toggle.hidden = !hasMore;
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  toggle.textContent = open ? "Show less" : "Show all " + p.playlists.length;
+  collapse.hidden = !(open && hasMore);
+
+  /* Collapsing from the foot control removes content above the viewport, which
+     would otherwise strand you further down the page than you expect. */
+  if(!open && keepPlace){
+    var top = grid.closest(".sec").getBoundingClientRect().top + window.scrollY - 70;
+    window.scrollTo({ top: top, behavior: "auto" });
+  }
+}
+
+function render(i){
+  var p = PROFILES[i];
+  current = i;
+  var c = CUSTOM[i] || {};
+
+  var accent = c.accent || p.accent;
+  var accentRGB = hexRGB(accent).join(",");
+  var genRGB = c.accent ? genFrom(accent).join(",") : p.genRGB;
+  var gen = "rgb(" + genRGB + ")";
+
+  var phone = $("phone");
+  phone.style.setProperty("--accent", accent);
+  phone.style.setProperty("--accent-tint", "rgba(" + accentRGB + ",.13)");
+  phone.style.setProperty("--accent-line", "rgba(" + accentRGB + ",.30)");
+  phone.style.setProperty("--gen", gen);
+  phone.style.setProperty("--gen-tint", "rgba(" + genRGB + ",.13)");
+  phone.style.setProperty("--gen-line", "rgba(" + genRGB + ",.34)");
+  p._accent = accent; p._accentRGB = accentRGB; p._genRGB = genRGB;
+
+  $("bannerImg").hidden = !c.banner;
+  if(c.banner) $("bannerImg").src = c.banner;
+
+  var av = $("avatar");
+  $("initials").hidden = !!c.avatar;
+  if(c.avatar){
+    av.style.background = "url(" + c.avatar + ") center/cover no-repeat, #221B32";
+  } else {
+    av.style.background =
+      "radial-gradient(110% 110% at 25% 20%,hsl(" + p.avatarHues[0] + ",78%,62%),transparent 62%)," +
+      "radial-gradient(120% 120% at 80% 85%,hsl(" + p.avatarHues[1] + ",80%,58%),transparent 60%),#221B32";
+  }
+
+  $("initials").textContent = p.initials;
+  $("name").textContent = c.name || p.name;
+  $("handle").textContent = p.handle;
+  $("bio").textContent = c.bio || p.bio;
+  $("s1").textContent = p.stats[0];
+  $("s2").textContent = p.stats[1];
+  $("s3").textContent = p.stats[2];
+
+  $("topGenres").innerHTML = p.genres.slice(0, 3).map(function(g, i){
+    return '<button type="button" class="gen' + (i === 0 ? " gen-1" : "") + '">' + g + "</button>";
+  }).join("");
+
+  var VISIBLE = 5;
+  var bh = p.badges.slice(0, VISIBLE).map(function(b){
+    var pip = b.t === "rank" ? '<span class="pip"></span>' : "";
+    return '<span class="bdg bdg-' + b.t + '">' + pip + b.l + "</span>";
+  }).join("");
+  if(p.badges.length > VISIBLE) bh += '<button type="button" class="bdg bdg-more">+' + (p.badges.length - VISIBLE) + "</button>";
+  $("badges").innerHTML = bh;
+
+  /* user-written, system-styled: the words are theirs, the treatment is fixed
+     so the label rhythm survives whatever anyone types */
+  $("trackAux").textContent = p.aux.tracks;
+  $("artistAux").textContent = p.aux.artists;
+
+  $("artists").className = "agrid " + (c.frame || p.frame);
+  $("artists").innerHTML = p.artists.map(function(a){
+    return '<div class="artist" tabindex="0" role="button">' +
+           '<div class="ring"><div class="art" style="' + artStyle(a[0], p.artHue) + '"></div></div>' +
+           '<div class="an">' + a[0] + '</div><div class="ameta">' + a[1] + "</div></div>";
+  }).join("");
+
+  $("tracks").innerHTML = p.tracks.map(function(t, n){
+    return '<div class="row" tabindex="0" role="button">' +
+      '<span class="idx">' + (n + 1) + "</span>" +
+      '<div class="art" style="' + artStyle(t[0], p.artHue) + '"></div>' +
+      '<div class="meta"><div class="tt">' + t[0] + '</div><div class="ta">' + t[1] + "</div></div>" +
+      '<span class="plays">' + t[2] + "</span></div>";
+  }).join("");
+
+  /* profile 0 is you; everyone else is someone you're visiting */
+  var self = i === 0;
+  $("actionsSelf").hidden = !self;
+  $("actionsOther").hidden = self;
+  $("simSection").hidden = self;      /* you can't match with yourself */
+  $("reachSection").hidden = !self;   /* and nobody else sees your reach */
+
+  var first = p.name.split(" ")[0];
+  $("simLabel").textContent = "You & " + first;
+  $("simRank").textContent = p.sim.rank;
+  $("simPct").textContent = p.sim.pct + "%";
+  $("simCap").textContent = p.sim.cap;
+  $("simBar").style.width = p.sim.pct + "%";
+  $("simShared").innerHTML = p.sim.shared.map(function(a){
+    return '<span class="mini" title="' + a + '"><span class="art" style="' + artStyle(a, p.artHue) + '"></span></span>';
+  }).join("");
+  /* shows attended together: the costly-signal version of a shared artist */
+  var same = p.sim.sameShows || [];
+  $("simShowsRow").hidden = !same.length;
+  $("simShows").innerHTML = same.map(function(a){
+    return '<span class="mini" title="' + a + '"><span class="art" style="' + artStyle(a, p.artHue) + '"></span></span>';
+  }).join("") + (same.length
+    ? '<span class="sgo" style="margin-left:3px">' + same.length + " show" + (same.length > 1 ? "s" : "") + " together</span>"
+    : "");
+
+  $("simNote").textContent = p.sim.note;
+
+  $("playlists").innerHTML = p.playlists.map(function(x){
+    return '<div class="pl" tabindex="0" role="button"><div class="art" style="' + artStyle(x[0], p.artHue) + '"></div>' +
+           '<div class="pn">' + x[0] + '</div><div class="pm">' + x[1] + "</div></div>";
+  }).join("");
+  setPlaylists(false);
+
+  $("mapAux").textContent = p.map.count;
+  $("axL").textContent = p.map.l;
+  $("axR").textContent = p.map.r;
+  var top = p.map.clusters.slice().sort(function(a,b){ return b[3] - a[3]; })[0][4];
+  $("mapNote").textContent = self ? ("Your centre \u00B7 dense in " + top) : p.map.note;
+
+  $("moreLabel").textContent = "More about " + p.name.split(" ")[0];
+  $("genres").innerHTML = p.genres.map(function(g){ return '<span class="chip">' + g + "</span>"; }).join("");
+  $("makesLink").textContent = p.makes;
+
+  paint();
+}
+
+function paint(){
+  var p = PROFILES[current], c = CUSTOM[current] || {};
+  if(!c.banner) bokeh($("banner"), p.bannerHues, p.map.seed, 26);
+  /* the wallpaper takes its colour from the chosen photo, so personalizing the
+     banner tints the whole page rather than one strip of it */
+  if(c.banner) wallFromImage(c.banner);
+  else bokeh($("wall"), p.bannerHues, p.map.seed + 7, 16);
+  tasteMap($("tastemap"), p.map, p._accent, p._accentRGB, p._genRGB, false, current === 0 ? "self" : "");
+  if(!$("screenHome").hidden) paintYou();
+  if(!$("mapFull").hidden) paintFull();
+}
+
+function wallFromImage(src){
+  var cv = $("wall"), img = new Image();
+  img.onload = function(){
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    var w = cv.clientWidth, h = cv.clientHeight;
+    if(!w || !h) return;
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    var ctx = cv.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var s = Math.max(w / img.width, h / img.height);
+    ctx.drawImage(img, (w - img.width * s) / 2, 0, img.width * s, img.height * s);
+  };
+  img.src = src;
+}
+
+function paintFull(){
+  var p = PROFILES[current];
+  tasteMap($("mapFullCanvas"), p.map, p._accent, p._accentRGB, p._genRGB, true, current === 0 ? "self" : "");
+}
+
+function openMap(){
+  var p = PROFILES[current], first = p.name.split(" ")[0];
+  var mine = current === 0;
+  $("mfWho").textContent = mine ? "Your taste map" : "You & " + first;
+  $("mfKeyName").textContent = first;
+  $("mfKeyName").parentNode.hidden = mine;
+  $("mfKeyThem").style.background = p.accent;
+  $("mfAxL").textContent = p.map.l;
+  $("mfAxR").textContent = p.map.r;
+  $("mfAxT").textContent = p.map.t;
+  $("mfAxB").textContent = p.map.b;
+  $("mfDist").innerHTML = p.map.note.replace(" \u00B7 ", "<br>");
+
+  var total = p.map.clusters.reduce(function(a, c){ return a + c[3]; }, 0);
+  var top = p.map.clusters.slice().sort(function(a, b){ return b[3] - a[3]; });
+  var peak = top[0][3] / total;
+  $("mfClusters").innerHTML = top.map(function(c){
+    var share = c[3] / total;
+    return '<div class="mf-cl"><span class="nm">' + c[4] + "</span>" +
+           '<span class="track"><i style="width:' + (share / peak * 100).toFixed(1) + '%"></i></span>' +
+           '<span class="pc">' + Math.round(share * 100) + "%</span></div>";
+  }).join("");
+  $("mapFull").hidden = false;
+  document.body.style.overflow = "hidden";
+  /* the canvas has no size until it is shown, so draw on the next frame */
+  requestAnimationFrame(paintFull);
+  $("mfClose").focus();
+}
+
+function closeMap(){
+  var mf = $("mapFull");
+  mf.hidden = true;
+  mf.classList.remove("snap");
+  mf.style.setProperty("--drag", "0px");
+  document.body.style.overflow = "";
+  $("tasteMapBtn").focus();
+}
+
+/* drag the sheet down to dismiss -- the reach-free way out on a phone */
+(function(){
+  var mf = $("mapFull"), startY = null, dy = 0;
+  mf.addEventListener("pointerdown", function(e){
+    if(e.target.closest("button")) return;
+    startY = e.clientY; dy = 0;
+    mf.classList.remove("snap");
+    mf.setPointerCapture(e.pointerId);
+  });
+  mf.addEventListener("pointermove", function(e){
+    if(startY === null) return;
+    dy = e.clientY - startY;
+    if(dy < 0) dy *= 0.25;          /* resist upward, it goes nowhere */
+    mf.style.setProperty("--drag", dy.toFixed(1) + "px");
+  });
+  function end(){
+    if(startY === null) return;
+    startY = null;
+    mf.classList.add("snap");
+    if(dy > 90){ closeMap(); }
+    else { mf.style.setProperty("--drag", "0px"); }
+    dy = 0;
+  }
+  mf.addEventListener("pointerup", end);
+  mf.addEventListener("pointercancel", end);
+})();
+
+document.querySelector(".demo").addEventListener("click", function(e){
+  var b = e.target.closest("button[data-p]");
+  if(!b) return;
+  document.querySelectorAll(".demo button[data-p]").forEach(function(x){
+    x.setAttribute("aria-pressed", x === b ? "true" : "false");
+  });
+  openProfile(parseInt(b.dataset.p, 10));
+});
+
+/* ---------- home ---------- */
+function avatarCSS(hues){
+  return "radial-gradient(110% 110% at 25% 20%,hsl(" + hues[0] + ",78%,62%),transparent 62%)," +
+         "radial-gradient(120% 120% at 80% 85%,hsl(" + hues[1] + ",80%,58%),transparent 60%),#221B32";
+}
+
+function personRow(row){
+  var q = PEOPLE[row.i];
+  return '<button class="prow" type="button" data-p="' + q.p + '">' +
+    '<span class="pav"><span style="background:' + avatarCSS(q.h) + '">' + q.i + "</span></span>" +
+    '<span class="pmeta"><span class="pname">' + q.n + '</span>' +
+    '<span class="psub">' + row.sub + "</span></span>" +
+    '<span class="pnum"><b' + (row.up ? ' class="up"' : "") + ">" +
+      (row.up ? "\u2191" : "") + row.num + "</b><s>" + row.lab + "</s></span></button>";
+}
+
+var goingSet = {};       /* survives the re-render a toggle causes */
+
+/* The full guest list, not a sample -- the popover scrolls through everyone.
+   Derived deterministically from the show so the same faces appear in the row's
+   avatar stack and in the list, and never shuffle between renders. */
+function attendees(s){
+  if(s._att) return s._att;
+  var seed = 0, k = s.a + s.d;
+  for(var c = 0; c < k.length; c++) seed = (seed * 31 + k.charCodeAt(c)) >>> 0;
+  var rnd = makeRnd(seed || 7);
+  var pool = PEOPLE.map(function(_, i){ return i; });
+  for(var j = pool.length - 1; j > 0; j--){
+    var x = Math.floor(rnd() * (j + 1)), t = pool[j];
+    pool[j] = pool[x]; pool[x] = t;
+  }
+  s._att = pool.slice(0, Math.min(s.going, PEOPLE.length));
+  return s._att;
+}
+
+function stackHTML(s, n){
+  return attendees(s).slice(0, n || 3).map(function(pi){
+    return '<span style="background:' + avatarCSS(PEOPLE[pi].h) + '"></span>';
+  }).join("");
+}
+var shownShows = 9;      /* the curated ones; the rest stream in as you scroll */
+var SHOW_BATCH = 6;
+
+/* The calendar has no natural end, so the list shouldn't either. Deterministic
+   so the same show never changes identity between renders. */
+(function extendShows(){
+  var artists = ["Four Tet","Yaeji","Floating Points","Slowdive","Duster","Alvvays",
+    "MF DOOM Tribute","Alice Coltrane Ensemble","Madlib","Sault","Knxwledge","Beach House",
+    "DJ Python","Loraine James","Skee Mask","Cindy Lee","Hotline TNT","Nala Sinephro",
+    "Kassa Overall","Yussef Dayes","Overmono","Bar Italia","Nailah Hunter","Blue Bendy"];
+  var venues = ["Cat\u2019s Cradle \u00B7 Carrboro","Cradle Back Room \u00B7 Carrboro","Local 506 \u00B7 Chapel Hill",
+    "Motorco Music Hall \u00B7 Durham","The Pinhook \u00B7 Durham","The Ritz \u00B7 Raleigh",
+    "Lincoln Theatre \u00B7 Raleigh","Kings \u00B7 Raleigh"];
+  var dows = ["mon","tue","wed","thu","fri","sat","sun"];
+  var months = ["dec","jan","feb","mar","apr","may"];
+  var hues = [[262,330],[168,200],[348,18],[196,286],[142,208],[14,320],[276,32]];
+
+  var rnd = makeRnd(90210), mi = 1, day = 22;
+  for(var i = 0; i < 44; i++){
+    day += 3 + Math.floor(rnd() * 5);
+    if(day > 28){ day -= 28; mi = Math.min(mi + 1, months.length - 1); }
+    var going = 1 + Math.floor(rnd() * 14);
+    var av = [];
+    for(var k = 0; k < 2 + Math.floor(rnd() * 2); k++) av.push(hues[Math.floor(rnd() * hues.length)]);
+    var venue = venues[Math.floor(rnd() * venues.length)];
+    var friends = [], used = {};
+    for(var f = 0; f < Math.min(going, 2 + Math.floor(rnd() * 3)); f++){
+      var pi = Math.floor(rnd() * PEOPLE.length);
+      if(!used[pi]){ used[pi] = 1; friends.push(pi); }
+    }
+    HOME.shows.push({
+      m: months[mi],
+      d: (day < 10 ? "0" : "") + day,
+      dow: dows[Math.floor(rnd() * 7)],
+      a: artists[Math.floor(rnd() * artists.length)],
+      v: venue,
+      /* distance follows the venue, not the show -- Carrboro is walkable, Raleigh isn't */
+      dist: /Carrboro|Chapel Hill/.test(venue) ? (0.4 + rnd() * 1.4).toFixed(1) + " mi"
+           : /Durham/.test(venue) ? (8 + rnd() * 3).toFixed(1) + " mi"
+           : (24 + rnd() * 5).toFixed(0) + " mi",
+      price: "$" + (16 + Math.floor(rnd() * 30)),
+      doors: (rnd() < 0.5 ? "8:00" : "9:00") + " pm",
+      friends: friends,
+      listen: going + 3 + Math.floor(rnd() * 30),
+      going: going,
+      av: av
+    });
+  }
+})();
+
+/* Vertical timeline: a continuous rail down the left, dates on it, each show
+   opening to the right. The month interrupts the rail rather than sitting
+   beside it, so scrolling reads as moving through a calendar. */
+function renderTimeline(){
+  var html = "", lastMonth = null;
+  HOME.shows.slice(0, shownShows).forEach(function(s){
+    if(s.m !== lastMonth){
+      html += '<div class="vt-month"><b>' + s.m + "</b><i></i></div>";
+    }
+    lastMonth = s.m;
+
+    var key = s.a + s.d;
+    var on = !!goingSet[key];
+    var stack = stackHTML(s);
+
+    html += '<div class="vrow' + (s.going >= 8 ? " big" : "") + '" data-i="' + HOME.shows.indexOf(s) + '">' +
+      '<span class="vt-date"><b>' + s.dow + "</b><i>" + s.d + "</i></span>" +
+      '<span class="vt-dot"></span>' +
+      '<div class="vt-body">' +
+        '<div class="vt-art" tabindex="0" role="button" aria-label="' + s.a + '">' +
+          '<span class="ring"><span class="art" style="display:block;' + artStyle(s.a, 200) + '"></span></span>' +
+        "</div>" +
+        '<div class="vt-meta">' +
+          '<div class="vt-name">' + s.a + "</div>" +
+          '<span class="vt-ven">' + s.v + "</span>" +
+          '<div class="vt-go"><span class="stack">' + stack + "</span>" +
+            '<span class="sgo"><b data-going>' + (s.going + (on ? 1 : 0)) + "</b> going \u00B7 " + s.listen + " listen here</span></div>" +
+          '<button class="sbtn vt-btn" type="button" data-k="' + key + '" aria-pressed="' + on + '">' +
+            (on ? "Going \u2713" : "Going") + "</button>" +
+        "</div>" +
+      "</div></div>";
+  });
+  $("timeline").innerHTML = html;
+}
+
+function artistCircles(list, down){
+  return list.map(function(a){
+    return '<div class="rise" tabindex="0" role="button">' +
+      '<span class="ring"><span class="art" style="display:block;' + artStyle(a[0], 200) + '"></span></span>' +
+      '<span class="rn">' + a[0] + '</span><span class="rd' + (down ? " down" : "") + '">' + a[1] + "</span></div>";
+  }).join("");
+}
+
+function renderYou(){
+  var y = HOME.you;
+  $("mvAxL").textContent = y.map.l;
+  $("mvAxR").textContent = y.map.r;
+  $("mvNote").textContent = y.map.note;
+  $("youUp").innerHTML = artistCircles(y.up);
+  $("youDown").innerHTML = artistCircles(y.down, true);
+  $("youTracks").innerHTML = y.tracks.map(function(t, n){
+    return '<div class="row" tabindex="0" role="button">' +
+      '<span class="idx">' + (n + 1) + "</span>" +
+      '<div class="art" style="' + artStyle(t[0], 200) + '"></div>' +
+      '<div class="meta"><div class="tt">' + t[0] + '</div><div class="ta">' + t[1] + "</div></div>" +
+      '<span class="plays">' + t[2] + "</span></div>";
+  }).join("");
+}
+
+var actFilter = "all";
+
+function renderActivity(){
+  var list = HOME.activity.filter(function(e){ return actFilter === "all" || e.f; });
+  var html = "", group = null;
+
+  list.forEach(function(e){
+    if(e.g !== group){ html += '<div class="k act-group">' + e.g + "</div>"; group = e.g; }
+    var q = PEOPLE[e.p], name = "<b>" + q.n + "</b>";
+    var text, thumb, sub = e.ago + (e.v ? " \u00B7 " + e.v : "");
+
+    if(e.k === "show"){
+      text = name + " is going to <b>" + e.x + "</b>";
+      thumb = '<span class="act-th circle"><span class="art" style="' + artStyle(e.x, 200) + '"></span></span>';
+    } else if(e.k === "was"){
+      text = name + " was at <b>" + e.x + "</b>";
+      thumb = '<span class="act-th circle"><span class="art" style="' + artStyle(e.x, 200) + '"></span></span>';
+    } else if(e.k === "playlist"){
+      text = name + " made <b>" + e.x + "</b>";
+      thumb = '<span class="act-th"><span class="art" style="' + artStyle(e.x, 280) + '"></span></span>';
+    } else if(e.k === "artist"){
+      text = name + " added <b>" + e.x + "</b> to their top 8";
+      thumb = '<span class="act-th circle"><span class="art" style="' + artStyle(e.x, 200) + '"></span></span>';
+    } else if(e.k === "rank"){
+      text = name + " hit <b>" + e.x + "</b>";
+      thumb = '<span class="act-th chip">#' + e.n + "</span>";
+    } else {
+      var w = PEOPLE[e.who];
+      text = name + " followed <b>" + e.x + "</b>";
+      thumb = '<span class="act-th circle"><span class="art" style="background:' + avatarCSS(w.h) + '"></span></span>';
+    }
+
+    html += '<div class="act" tabindex="0" role="button" data-p="' + q.p + '">' +
+      '<span class="pav"><span style="background:' + avatarCSS(q.h) + '">' + q.i + "</span></span>" +
+      '<span class="act-m"><span class="act-t">' + text + '</span>' +
+      '<span class="act-s">' + sub + "</span></span>" + thumb + "</div>";
+  });
+
+  $("actList").innerHTML = html;
+}
+
+function renderHome(){
+  renderYou();
+  renderActivity();
+  $("closeList").innerHTML = HOME.close.map(personRow).join("");
+  $("climbList").innerHTML = HOME.climb.map(personRow).join("");
+
+  renderTimeline();
+  $("goingList").innerHTML = HOME.matchesGoing.map(personRow).join("");
+
+  $("riseList").innerHTML = HOME.rise.map(function(a){
+    return '<div class="rise" tabindex="0" role="button">' +
+      '<span class="ring"><span class="art" style="display:block;' + artStyle(a[0], 200) + '"></span></span>' +
+      '<span class="rn">' + a[0] + '</span><span class="rd">' + a[1] + " here</span></div>";
+  }).join("");
+
+  $("stealList").innerHTML = HOME.steal.map(function(x){
+    return '<div class="pl" tabindex="0" role="button"><div class="art" style="' + artStyle(x[0], 280) + '"></div>' +
+      '<div class="pn">' + x[0] + '</div><div class="pm">' + x[1] + "</div></div>";
+  }).join("");
+
+  $("relList").innerHTML = HOME.releases.map(function(r){
+    return '<div class="rel" tabindex="0" role="button"><div class="art" style="' + artStyle(r[0], 40) + '"></div>' +
+      '<div class="rt">' + r[0] + '</div><div class="ra">' + r[1] + "</div></div>";
+  }).join("");
+
+  $("chartList").innerHTML = HOME.chart.map(function(c){
+    return '<div class="crow"><span class="cpos">' + c.g + "</span>" +
+      '<span class="cmeta"><span class="cname">' + c.name + '</span>' +
+      '<span class="cgap">' + c.gap + "</span></span>" +
+      '<span class="chere' + (c.hot ? " hot" : "") + '">' + c.here + "<s>here</s></span></div>";
+  }).join("");
+}
+
+/* re-arm the entrance so it can never be left in its finished-while-hidden state */
+function playIn(el){
+  el.classList.remove("playin");
+  void el.offsetWidth;
+  el.classList.add("playin");
+}
+
+/* ---------- your reach ---------- */
+$("reachN").textContent = HOME.reach.picked;
+
+$("reachBtn").addEventListener("click", function(){
+  var r = HOME.reach, p = PROFILES[current];
+  $("anaFollowers").textContent = r.followers;
+  $("anaViews").textContent = r.views;
+  $("anaSaves").textContent = r.saves;
+  $("anaArtists").innerHTML = r.artists.map(function(a){
+    return '<div class="ana-row"><span class="art" style="display:block;' + artStyle(a[0], p.artHue) + '"></span>' +
+      '<span class="nm">' + a[0] + "</span>" +
+      '<span class="ct">' + a[1] + "<s>people</s></span></div>";
+  }).join("");
+  $("anaNote").textContent = "You were early on " + r.early +
+    " artists that broke here this month \u00B7 early counts only if you were listening before they climbed.";
+  $("anaWrap").hidden = false;
+  document.body.style.overflow = "hidden";
+});
+
+function closeAna(){ $("anaWrap").hidden = true; document.body.style.overflow = ""; $("reachBtn").focus(); }
+$("anaClose").addEventListener("click", closeAna);
+$("anaBg").addEventListener("click", closeAna);
+document.addEventListener("keydown", function(e){
+  if(e.key === "Escape" && !$("anaWrap").hidden) closeAna();
+});
+
+/* ---------- show detail sheet ---------- */
+var sheetShow = null;
+var sheetAnchor = null;
+
+function openShow(i, anchor){
+  var s = HOME.shows[i];
+  if(!s) return;
+  sheetShow = i;
+  if(anchor) sheetAnchor = anchor;
+
+  $("ssArt").setAttribute("style", "display:block;" + artStyle(s.a, 200));
+  $("ssName").textContent = s.a;
+  $("ssWhen").innerHTML = s.dow + " " + s.m + " " + s.d + "<br>" + s.v;
+  $("ssDist").textContent = s.dist;
+  $("ssPrice").textContent = s.price;
+  $("ssDoors").textContent = s.doors;
+
+  var key = s.a + s.d;
+  var on = !!goingSet[key];
+  var total = s.going + (on ? 1 : 0);
+
+  $("ssGoingLabel").textContent = total + " going";
+  $("ssFriends").innerHTML = attendees(s).map(function(pi){
+    var q = PEOPLE[pi];
+    return '<div class="ss-f"><span class="pav"><span style="background:' + avatarCSS(q.h) + '">' + q.i + "</span></span>" +
+      '<span class="pmeta"><span class="n">' + q.n + '</span>' +
+      '<span class="m">' + (40 + (pi * 7) % 45) + "% match</span></span></div>";
+  }).join("");
+  $("ssNote").textContent = s.listen + " people here listen to " + s.a + ".";
+
+  $("ssGo").textContent = on ? "Going \u2713" : "Going";
+  $("ssGo").dataset.k = key;
+
+  $("showWrap").hidden = false;
+  document.body.style.overflow = "hidden";
+  $("ssFriends").scrollTop = 0;
+  /* the fade is the only cue that the list continues, so only show it when it does */
+  var fl = $("ssFriends");
+  $("ssFade").hidden = fl.scrollHeight <= fl.clientHeight + 2;
+  placePop();
+}
+
+/* centre the popover on whatever was tapped, clamped so it always fits */
+function placePop(){
+  var pop = $("showPop");
+  var h = pop.offsetHeight;
+  /* clientHeight is the reliable one; innerHeight can read 0 before first paint */
+  var vh = document.documentElement.clientHeight || window.innerHeight || 0;
+  if(!vh || !h) return;
+  var top = (vh - h) / 2;
+  if(sheetAnchor && sheetAnchor.isConnected){
+    var r = sheetAnchor.getBoundingClientRect();
+    top = r.top + r.height / 2 - h / 2;
+  }
+  pop.style.top = Math.max(14, Math.min(vh - h - 14, top)) + "px";
+}
+
+function closeShow(){
+  $("showWrap").hidden = true;
+  document.body.style.overflow = "";
+}
+
+document.addEventListener("click", function(e){
+  if(e.target.closest(".sbtn")) return;            /* Going handled below */
+  var row = e.target.closest(".vrow, .show");
+  if(row && row.dataset.i) openShow(parseInt(row.dataset.i, 10), row);
+});
+$("showBg").addEventListener("click", closeShow);
+document.addEventListener("keydown", function(e){
+  if(e.key === "Escape" && !$("showWrap").hidden) closeShow();
+});
+$("ssGo").addEventListener("click", function(){
+  var k = this.dataset.k;
+  if(goingSet[k]) delete goingSet[k]; else goingSet[k] = true;
+  renderTimeline();
+  openShow(sheetShow);                              /* refresh counts in place */
+});
+
+/* The same show appears in the timeline, the sheet and the Home summary. One
+   handler owns the state and re-renders all of them, so they can never disagree. */
+document.addEventListener("click", function(e){
+  var b = e.target.closest(".sbtn");
+  if(!b || !b.dataset.k) return;
+  if(b.getAttribute("aria-pressed") === "true") delete goingSet[b.dataset.k];
+  else goingSet[b.dataset.k] = true;
+  var y = window.scrollY;
+  renderTimeline();
+  window.scrollTo(0, y);   /* a toggle must not move the page under them */
+});
+
+$("discoverSegs").addEventListener("click", function(e){
+  var b = e.target.closest(".seg");
+  if(!b) return;
+  [].forEach.call(this.children, function(x){
+    x.setAttribute("aria-pressed", x === b ? "true" : "false");
+  });
+  var community = b.dataset.t === "community";
+  $("tabCommunity").hidden = !community;
+  $("tabGlobal").hidden = community;
+  window.scrollTo(0, 0);
+  playIn(community ? $("tabCommunity") : $("tabGlobal"));
+});
+
+function paintYou(){
+  var p = PROFILES[0];
+  tasteMap($("movemap"), HOME.you.map, p._accent || p.accent,
+           p._accentRGB || hexRGB(p.accent).join(","), p._genRGB || p.genRGB, false, "move");
+}
+
+/* ---------- screen switching ---------- */
+var SCREENS = {home:"screenHome", discover:"screenDiscover", shows:"screenShows", activity:"screenActivity", profile:"screenProfile"};
+var TABS = {home:"tabHome", discover:"tabDiscover", shows:"tabShows", activity:"tabActivity", profile:"tabProfile"};
+var screenScroll = {home:0, discover:0, shows:0, activity:0, profile:0};
+var currentScreen = "home";
+
+function showScreen(which){
+  screenScroll[currentScreen] = window.scrollY;
+  currentScreen = which;
+
+  Object.keys(SCREENS).forEach(function(k){
+    $(SCREENS[k]).hidden = k !== which;
+    $(TABS[k]).setAttribute("aria-current", k === which ? "page" : "false");
+  });
+
+  window.scrollTo(0, which === "profile" ? 0 : screenScroll[which]);
+
+  if(which === "home"){ playIn($("tabYou")); paintYou(); }
+  else if(which === "discover") playIn($("tabGlobal").hidden ? $("tabCommunity") : $("tabGlobal"));
+  else if(which === "activity") playIn($("screenActivity"));
+  else if(which === "shows") playIn($("showsBeen").hidden ? $("showsUpcoming") : $("showsBeen"));
+  else { paint(); playIn($("screenProfile")); }
+}
+
+function openProfile(i){
+  render(i);
+  showScreen("profile");
+}
+
+document.addEventListener("click", function(e){
+  /* activity rows are people too -- tapping one goes to whoever did the thing */
+  var row = e.target.closest(".prow, .act");
+  if(row) openProfile(parseInt(row.dataset.p, 10));
+});
+
+/* stream the next batch in before the reader reaches the end, and offer a way
+   back once they are deep enough that scrolling up would be a chore */
+/* the timeline scrolls inside itself now, so paging and the Top control both
+   listen to that container rather than the page */
+$("vtWrap").addEventListener("scroll", function(){
+  var el = this;
+  $("toTop").hidden = !(currentScreen === "shows" && el.scrollTop > 700);
+  if(shownShows >= HOME.shows.length) return;
+  if(el.scrollTop + el.clientHeight > el.scrollHeight - 500){
+    shownShows = Math.min(shownShows + SHOW_BATCH, HOME.shows.length);
+    renderTimeline();
+  }
+}, {passive:true});
+
+$("toTop").addEventListener("click", function(){
+  var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  $("vtWrap").scrollTo({top:0, behavior: reduce ? "auto" : "smooth"});
+  $("toTop").hidden = true;
+});
+
+$("tabHome").addEventListener("click", function(){ showScreen("home"); });
+$("tabDiscover").addEventListener("click", function(){ showScreen("discover"); });
+
+/* ---------- search ---------- */
+function searchMode(on){
+  $("searchBar").hidden = !on;
+  $("discoverSegs").hidden = on;
+  if(on){ $("searchInput").focus(); return; }
+  /* leaving search restores whichever tab was open behind it */
+  $("searchInput").value = "";
+  $("searchResults").hidden = true;
+  var community = $("discoverSegs").querySelector('[data-t="community"]').getAttribute("aria-pressed") === "true";
+  $("tabCommunity").hidden = !community;
+  $("tabGlobal").hidden = community;
+}
+
+function runSearch(){
+  var q = $("searchInput").value.trim().toLowerCase();
+  var showing = q.length > 0;
+  $("searchResults").hidden = !showing;
+  if(!showing) return;
+  $("tabCommunity").hidden = true;
+  $("tabGlobal").hidden = true;
+
+  var hits = PEOPLE.map(function(q2, i){ return {q:q2, i:i}; })
+    .filter(function(r){ return r.q.n.toLowerCase().indexOf(q) !== -1; });
+
+  if(!hits.length){
+    $("searchList").innerHTML = '<div class="search-empty">No one here by that name.</div>';
+    return;
+  }
+
+  $("searchList").innerHTML = hits.map(function(r){
+    var prof = PROFILES[r.q.p];
+    return '<button class="prow" type="button" data-p="' + r.q.p + '">' +
+      '<span class="pav"><span style="background:' + avatarCSS(r.q.h) + '">' + r.q.i + "</span></span>" +
+      '<span class="pmeta"><span class="pname">' + r.q.n + "</span>" +
+      '<span class="psub">' + prof.genres.slice(0, 2).join(" \u00B7 ") + "</span></span>" +
+      '<span class="pnum"><b>' + (40 + (r.i * 7) % 45) + "%</b><s>match</s></span></button>";
+  }).join("");
+}
+
+$("discoverSearch").addEventListener("click", function(){ searchMode(true); });
+$("searchCancel").addEventListener("click", function(){ searchMode(false); });
+$("searchInput").addEventListener("input", runSearch);
+$("tabShows").addEventListener("click", function(){ showScreen("shows"); });
+$("tabActivity").addEventListener("click", function(){ showScreen("activity"); });
+
+$("actSegs").addEventListener("click", function(e){
+  var b = e.target.closest(".seg");
+  if(!b) return;
+  [].forEach.call(this.children, function(x){
+    x.setAttribute("aria-pressed", x === b ? "true" : "false");
+  });
+  actFilter = b.dataset.a;
+  renderActivity();
+  window.scrollTo(0, 0);
+  playIn($("screenActivity"));
+});
+$("tabProfile").addEventListener("click", function(){ openProfile(0); });
+
+$("showSegs").addEventListener("click", function(e){
+  var b = e.target.closest(".seg");
+  if(!b) return;
+  [].forEach.call(this.children, function(x){
+    x.setAttribute("aria-pressed", x === b ? "true" : "false");
+  });
+  var up = b.dataset.s === "upcoming";
+  $("showsUpcoming").hidden = !up;
+  $("showsBeen").hidden = up;
+  window.scrollTo(0, 0);
+  playIn(up ? $("showsUpcoming") : $("showsBeen"));
+});
+
+/* ---------- customize sheet ---------- */
+$("swatches").innerHTML = SWATCHES.map(function(h){
+  return '<button class="swatch" type="button" data-c="' + h + '" aria-pressed="false" ' +
+         'aria-label="Accent ' + h + '" style="background:' + h + '"></button>';
+}).join("");
+
+function syncSheet(){
+  var p = PROFILES[current], c = CUSTOM[current] || {};
+  var acc = c.accent || p.accent, fr = c.frame || p.frame;
+  [].forEach.call($("swatches").children, function(b){
+    b.setAttribute("aria-pressed", b.dataset.c.toLowerCase() === acc.toLowerCase() ? "true" : "false");
+  });
+  [].forEach.call($("frames").children, function(b){
+    b.setAttribute("aria-pressed", b.dataset.f === fr ? "true" : "false");
+  });
+  $("custName").value = c.name || p.name;
+  $("custBio").value = c.bio || p.bio;
+  $("hasBanner").hidden = !c.banner;
+  $("hasAvatar").hidden = !c.avatar;
+}
+
+function openCust(){ $("custWrap").hidden = false; syncSheet(); document.body.style.overflow = "hidden"; }
+function closeCust(){ $("custWrap").hidden = true; document.body.style.overflow = ""; $("editBtn").focus(); }
+
+$("editBtn").addEventListener("click", openCust);
+$("custDone").addEventListener("click", closeCust);
+$("custBg").addEventListener("click", closeCust);
+document.addEventListener("keydown", function(e){
+  if(e.key === "Escape" && !$("custWrap").hidden) closeCust();
+});
+
+$("swatches").addEventListener("click", function(e){
+  var b = e.target.closest(".swatch");
+  if(!b) return;
+  cust().accent = b.dataset.c;
+  saveCustom(); render(current); syncSheet();
+});
+$("frames").addEventListener("click", function(e){
+  var b = e.target.closest(".frame-opt");
+  if(!b) return;
+  cust().frame = b.dataset.f;
+  saveCustom(); render(current); syncSheet();
+});
+$("custName").addEventListener("input", function(){
+  cust().name = this.value.trim() || undefined;
+  saveCustom(); $("name").textContent = this.value.trim() || PROFILES[current].name;
+});
+$("custBio").addEventListener("input", function(){
+  cust().bio = this.value.trim() || undefined;
+  saveCustom(); $("bio").textContent = this.value.trim() || PROFILES[current].bio;
+});
+
+function wirePhoto(inputId, key, maxW){
+  $(inputId).addEventListener("change", function(){
+    var f = this.files && this.files[0];
+    if(!f) return;
+    shrink(f, maxW, function(data){
+      if(!data) return;
+      cust()[key] = data;
+      saveCustom(); render(current); syncSheet();
+    });
+    this.value = "";
+  });
+}
+wirePhoto("bannerFile", "banner", 1000);
+wirePhoto("avatarFile", "avatar", 320);
+
+$("custReset").addEventListener("click", function(){
+  delete CUSTOM[current];
+  saveCustom(); render(current); syncSheet();
+});
+
+$("tasteMapBtn").addEventListener("click", openMap);
+$("tasteMapBtn").addEventListener("keydown", function(e){
+  if(e.key === "Enter" || e.key === " "){ e.preventDefault(); openMap(); }
+});
+$("mfClose").addEventListener("click", closeMap);
+$("mfCloseBottom").addEventListener("click", closeMap);
+document.addEventListener("keydown", function(e){
+  if(e.key === "Escape" && !$("mapFull").hidden) closeMap();
+});
+
+$("plToggle").addEventListener("click", function(){
+  setPlaylists(!$("playlists").classList.contains("open"), true);
+});
+$("plCollapse").addEventListener("click", function(){
+  setPlaylists(false, true);
+});
+
+$("badges").addEventListener("click", function(e){
+  if(!e.target.closest(".bdg-more")) return;
+  var p = PROFILES[current];
+  $("badges").innerHTML = p.badges.map(function(b){
+    var pip = b.t === "rank" ? '<span class="pip"></span>' : "";
+    return '<span class="bdg bdg-' + b.t + '">' + pip + b.l + "</span>";
+  }).join("");
+});
+
+renderHome();
+render(0);
+showScreen("home");
+
+var t;
+window.addEventListener("resize", function(){ clearTimeout(t); t = setTimeout(paint, 140); });
+if(document.fonts && document.fonts.ready) document.fonts.ready.then(paint);
+})();
+</script>
+</body>
+</html>

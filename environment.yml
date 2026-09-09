@@ -1,0 +1,11 @@
+# Creates the env; pip installs the project itself from pyproject.toml.
+#   conda env create -f environment.yml -p ./mscs
+#   conda activate ./mscs
+name: musicshare
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  - pip
+  - pip:
+      - -e .[dev]
