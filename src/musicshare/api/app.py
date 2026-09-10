@@ -14,6 +14,7 @@ import logging
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
+from musicshare import shows as shows_mod
 from musicshare import taste
 from musicshare.spotify import SpotifyClient, SpotifyError
 from musicshare.spotify.client import ALL_KINDS, SEARCH_MAX
@@ -69,6 +70,30 @@ def seed(refresh: bool = False) -> dict[str, object]:
         return taste.build_seed(refresh=refresh)
     except SpotifyError as e:
         raise HTTPException(502, str(e)) from e
+
+
+@app.get("/api/shows")
+def shows(
+    refresh: bool = False,
+    only_mine: bool = False,
+    limit: int = Query(400, ge=1, le=1000),
+) -> dict[str, object]:
+    """Upcoming shows near the user, each carrying how much they play that artist.
+
+    Ticketmaster needs no auth, so this works before any Spotify login exists.
+    """
+    try:
+        data = shows_mod.build(refresh=refresh)
+    except Exception as e:
+        log.error("shows build failed: %s", e)
+        raise HTTPException(502, str(e)) from e
+    if only_mine:
+        data = [s for s in data if s.get("yours")]
+    return {
+        "total": len(data),
+        "matching": sum(1 for s in data if s.get("yours")),
+        "shows": data[:limit],
+    }
 
 
 @app.get("/", response_class=HTMLResponse)

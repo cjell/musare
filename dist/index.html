@@ -1473,7 +1473,7 @@ details[open] summary .chev{transform:rotate(180deg)}
       <div class="pop-foot">
         <div class="ss-actions" style="margin-top:0">
           <button class="btn btn-primary" type="button" id="ssGo">Going</button>
-          <button class="btn btn-ghost" type="button">Tickets</button>
+          <button class="btn btn-ghost" type="button" id="ssTickets">Tickets</button>
         </div>
       </div>
     </div>
@@ -2461,8 +2461,8 @@ function renderTimeline(){
       '<span class="vt-date"><b>' + s.dow + "</b><i>" + s.d + "</i></span>" +
       '<span class="vt-dot"></span>' +
       '<div class="vt-body">' +
-        '<div class="vt-art" tabindex="0" role="button" aria-label="' + s.a + '">' +
-          '<span class="ring"><span class="art" style="display:block;' + artStyle(s.a, 200) + '"></span></span>' +
+        '<div class="vt-art" tabindex="0" role="button" aria-label="' + esc(s.a) + '">' +
+          '<span class="ring"><span ' + showArt(s) + "></span></span>" +
         "</div>" +
         '<div class="vt-meta">' +
           '<div class="vt-name">' + s.a + "</div>" +
@@ -2475,6 +2475,85 @@ function renderTimeline(){
       "</div></div>";
   });
   $("timeline").innerHTML = html;
+}
+
+/* Real shows come from Ticketmaster; the social half of a row - who is going,
+   how many people here listen - needs other users on the platform, so it stays
+   generated. Seeding it from artist+date keeps a given show stable between
+   renders instead of reshuffling its friends every repaint. */
+function seedOf(str){
+  var n = 0;
+  for(var i = 0; i < str.length; i++) n = (n * 31 + str.charCodeAt(i)) >>> 0;
+  return n || 7;
+}
+
+function showArt(s){
+  return s.img
+    ? 'class="art photo" style="display:block;background-image:url(' + s.img + ')"'
+    : 'class="art" style="display:block;' + artStyle(s.a, 200) + '"';
+}
+
+/* Ticketmaster reports local time as 24h; the page writes times the way people
+   say them. */
+function fmtDoors(t){
+  var p = t.split(":"), h = +p[0];
+  var ampm = h >= 12 ? "pm" : "am";
+  h = h % 12; if(h === 0) h = 12;
+  return h + ":" + p[1] + " " + ampm;
+}
+
+function apiShow(x){
+  var rnd = makeRnd(seedOf(x.artist + x.date));
+  var going = 1 + Math.floor(rnd() * 14);
+  var friends = [], used = {};
+  for(var f = 0; f < Math.min(going, 2 + Math.floor(rnd() * 3)); f++){
+    var pi = Math.floor(rnd() * PEOPLE.length);
+    if(!used[pi]){ used[pi] = 1; friends.push(pi); }
+  }
+  var av = [];
+  for(var k = 0; k < 2 + Math.floor(rnd() * 2); k++){
+    av.push([Math.floor(rnd() * 360), Math.floor(rnd() * 360)]);
+  }
+  return {
+    m: (x.month || "").toLowerCase(),
+    d: x.day,
+    dow: (x.dow || "").toLowerCase(),
+    a: x.artist,
+    v: x.venue + (x.city ? " \u00B7 " + x.city : ""),
+    dist: x.distance_mi != null ? x.distance_mi + " mi" : "",
+    price: x.price_min ? "$" + x.price_min + (x.price_max && x.price_max !== x.price_min ? "-" + x.price_max : "") : "",
+    doors: x.time ? fmtDoors(x.time) : "",
+    friends: friends, going: going, av: av,
+    /* "N listen here" is the one social number the local history can ground:
+       it stands in for the campus until there is a campus. */
+    listen: x.your_plays ? Math.min(99, Math.round(x.your_plays / 4) + 3) : 3 + Math.floor(rnd() * 20),
+    img: x.image,
+    hours: x.your_hours,
+    yours: x.yours,
+    url: x.url
+  };
+}
+
+var showsLoaded = false;
+function loadShows(){
+  if(showsLoaded) return;
+  showsLoaded = true;
+  fetch("/api/shows?limit=400").then(function(r){
+    if(!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(function(d){
+    if(!d.shows || !d.shows.length) return;
+    /* Yours first within the feed's chronology: the API already sorts by date,
+       so this only decides which of two same-day shows leads. */
+    HOME.shows = d.shows.map(apiShow);
+    shownShows = Math.min(12, HOME.shows.length);
+    renderTimeline();
+    var lbl = document.querySelector("#showsUpcoming .sec-label span");
+    if(lbl) lbl.textContent = "Near you \u00B7 " + d.matching + " you listen to";
+  }).catch(function(){
+    /* No server (the published Artifact) - the generated shows already on the
+       page stay exactly as they were. */
+  });
 }
 
 function artistCircles(list, down){
@@ -2618,12 +2697,19 @@ function openShow(i, anchor){
   sheetShow = i;
   if(anchor) sheetAnchor = anchor;
 
-  $("ssArt").setAttribute("style", "display:block;" + artStyle(s.a, 200));
+  $("ssArt").setAttribute("class", s.img ? "art photo" : "art");
+  $("ssArt").setAttribute("style", s.img
+    ? "display:block;background-image:url(" + s.img + ")"
+    : "display:block;" + artStyle(s.a, 200));
   $("ssName").textContent = s.a;
   $("ssWhen").innerHTML = s.dow + " " + s.m + " " + s.d + "<br>" + s.v;
-  $("ssDist").textContent = s.dist;
-  $("ssPrice").textContent = s.price;
-  $("ssDoors").textContent = s.doors;
+  $("ssDist").textContent = s.dist || "\u2014";
+  $("ssPrice").textContent = s.price || "\u2014";
+  $("ssDoors").textContent = s.doors || "\u2014";
+
+  /* Only real shows carry a listing; the generated ones have nowhere to send you. */
+  $("ssTickets").disabled = !s.url;
+  $("ssTickets").style.opacity = s.url ? "" : ".45";
 
   var key = s.a + s.d;
   var on = !!goingSet[key];
@@ -2737,7 +2823,10 @@ function showScreen(which){
   if(which === "home"){ playIn($("tabYou")); paintYou(); }
   else if(which === "discover") playIn($("tabGlobal").hidden ? $("tabCommunity") : $("tabGlobal"));
   else if(which === "activity") playIn($("screenActivity"));
-  else if(which === "shows") playIn($("showsBeen").hidden ? $("showsUpcoming") : $("showsBeen"));
+  else if(which === "shows"){
+    loadShows();   /* fetches once, then the cache serves it */
+    playIn($("showsBeen").hidden ? $("showsUpcoming") : $("showsBeen"));
+  }
   else { paint(); playIn($("screenProfile")); }
 }
 
@@ -3320,6 +3409,11 @@ function closePicker(){
   document.body.style.overflow = "";
   pickTarget = null;
 }
+
+$("ssTickets").addEventListener("click", function(){
+  var s = HOME.shows[sheetShow];
+  if(s && s.url) window.open(s.url, "_blank", "noopener");
+});
 
 $("editBtn").addEventListener("click", function(){ setEditing(true); });
 $("editDone").addEventListener("click", function(){ setEditing(false); });
