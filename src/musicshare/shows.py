@@ -22,10 +22,10 @@ import time
 from datetime import datetime
 from typing import Any
 
-import duckdb
 import httpx
 
 from musicshare.config import ROOT, settings
+from musicshare.history import connect
 
 log = logging.getLogger(__name__)
 
@@ -179,8 +179,7 @@ def _richness(r: dict) -> int:
 
 def _my_artists() -> dict[str, tuple[float, int]]:
     """artist name (lowercased) -> (hours, plays) from the local history."""
-    con = duckdb.connect()
-    con.execute(f"create view plays as select * from read_parquet('{settings().plays_glob}')")
+    con = connect()
     rows = con.execute("""
         select artist_name, sum(ms_played)/3600000.0 as hours, count(*) as plays
         from plays where ms_played >= 30000 and artist_name is not null group by 1

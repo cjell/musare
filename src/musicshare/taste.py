@@ -11,12 +11,10 @@ from __future__ import annotations
 import json
 import logging
 import re
-from pathlib import Path
 from typing import Any
 
-import duckdb
-
-from musicshare.config import ROOT, settings
+from musicshare.config import ROOT
+from musicshare.history import connect, has_export
 from musicshare.spotify import SpotifyClient
 
 log = logging.getLogger(__name__)
@@ -29,14 +27,12 @@ MIN_MS = 30_000
 URI_RE = re.compile(r"^spotify:track:([A-Za-z0-9]+)$")
 
 
-def _con() -> duckdb.DuckDBPyConnection:
-    con = duckdb.connect()
-    con.execute(f"create view plays as select * from read_parquet('{settings().plays_glob}')")
-    return con
+def _con():
+    return connect()
 
 
 def has_history() -> bool:
-    return any(Path(ROOT / "data" / "raw" / "plays").rglob("*.parquet"))
+    return has_export()
 
 
 def top_tracks_local(limit: int = 300) -> list[dict[str, Any]]:

@@ -14,7 +14,7 @@ from typing import Any
 
 import duckdb
 
-from musicshare.config import settings
+from musicshare.history import connect
 from musicshare.spec.chart import ChartSpec
 
 # The export stores UTC. A naive timestamp has to be marked as UTC before it can
@@ -40,7 +40,11 @@ METRICS: dict[str, tuple[str, bool, str]] = {
     "plays": ("count(*)", True, "plays"),
     "distinct_tracks": ("count(distinct track_uri)", True, "tracks"),
     "distinct_artists": ("count(distinct artist_name)", True, "artists"),
-    "skip_rate": ("avg(case when skipped then 1.0 else 0 end) * 100", False, "% skipped"),
+    "skip_rate": (
+        "avg(case when skipped then 1.0 when not skipped then 0.0 end) * 100",
+        False,
+        "% skipped",
+    ),
 }
 
 # Raw platform strings are build identifiers - "Windows 10 (10.0.19041; x64)",
@@ -102,10 +106,9 @@ def chart_for(dimension: str) -> str:
 
 
 def _connect() -> duckdb.DuckDBPyConnection:
-    con = duckdb.connect()
-    con.execute("install icu; load icu;")  # timezone conversion lives in icu
-    con.execute(f"create view plays as select * from read_parquet('{settings().plays_glob}')")
-    return con
+    # icu carries the timezone conversion; history unions the export with any
+    # live rows past its high-water mark.
+    return connect(icu=True)
 
 
 def _where(spec: ChartSpec, needs_min: bool) -> tuple[str, list[Any]]:

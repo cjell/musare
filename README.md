@@ -22,8 +22,26 @@ for a feed.
 
 ```
 Spotify export  ->  Parquet (raw)  ->  DuckDB (transform)  ->  Postgres (serve)
-   503k plays        8.5 MB            ~0.1s queries          ~2 MB per user
+   509k plays        8.6 MB            ~0.1s queries          ~2 MB per user
+recently-played ->  Parquet (live)  ^
 ```
+
+Two sources, one view. The export is complete and exact up to the day it was
+generated; the API's recently-played endpoint holds fifty rows - about a day -
+and carries no `ms_played`, `skipped` or `platform`. They live in separate
+files and union at read time under a single rule: **the export wins for every
+period it covers**, so live rows only survive past its high-water mark and a
+future export silently upgrades approximate rows to exact ones.
+
+    python scripts/sync_recent.py           # append the last day
+    python scripts/sync_recent.py --status  # coverage by source
+
+Polling is a commitment rather than a convenience: fifty plays is roughly a
+day, and anything that falls out of that window before a sync runs is gone
+unless a later export covers it. The sync fetches the whole window rather than
+asking for rows after a cursor, precisely so it can tell you when that has
+happened - with a cursor, the oldest row returned is just the first play past
+it, which cannot distinguish "plays were lost" from "you were asleep".
 
 Raw play events stay local. Postgres stores answers, not events - a profile
 needs to know you have played an artist for 532 hours, not that you played a
