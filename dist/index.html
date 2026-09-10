@@ -30,12 +30,12 @@
   --ink-3:#635C7A;
   --pad:22px;
   /* per-profile, set inline on .phone */
-  --accent:#E8467E;
-  --accent-tint:rgba(232,70,126,.13);
-  --accent-line:rgba(232,70,126,.30);
-  --gen:#84F09E;
-  --gen-tint:rgba(132,240,158,.13);
-  --gen-line:rgba(132,240,158,.34);
+  --accent:#E74094;
+  --accent-tint:rgba(231,64,148,.13);
+  --accent-line:rgba(231,64,148,.30);
+  --gen:#9B8CFF;
+  --gen-tint:rgba(155,140,255,.13);
+  --gen-line:rgba(155,140,255,.34);
   --grain:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 *{box-sizing:border-box}
@@ -1650,8 +1650,8 @@ details[open] summary .chev{transform:rotate(180deg)}
 var PROFILES = [
   {
     name:"cjell meow", handle:"@cjellok", initials:"CM",
-    accent:"#E8467E", accentRGB:"232,70,126",
-    gen:"#84F09E", genRGB:"132,240,158",
+    accent:"#E74094", accentRGB:"231,64,148",
+    gen:"#9B8CFF", genRGB:"155,140,255",
     bannerHues:[292,318,196,268], avatarHues:[262,330], artHue:24,
     bio:"this is a bio about me and about the things that I do and whatnot and what I enjoy probably",
     aux:{tracks:"my picks",artists:"My Favs"},
@@ -2078,7 +2078,7 @@ var PL_COLLAPSED = 6;
    Photos never leave the device: FileReader -> canvas downscale -> data URI ->
    localStorage. Every viewer customizes their own copy, so testing this costs
    nobody a photo upload. */
-var SWATCHES = ["#E8467E","#FF9D2E","#4FD6C0","#7FA9FF","#C08BFF","#FFD84D"];
+var SWATCHES = ["#E74094","#FF9D2E","#4FD6C0","#7FA9FF","#C08BFF","#FFD84D"];
 var STORE = "musicshare-custom-v1";
 var CUSTOM = {};
 
