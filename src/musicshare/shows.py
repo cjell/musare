@@ -36,7 +36,10 @@ CACHE_TTL = 6 * 3600
 # Chapel Hill. Ticketmaster wants a geohash; five characters is a few km, which
 # is the right grain for "near me" when the radius does the real work.
 DEFAULT_LAT, DEFAULT_LON = 35.9132, -79.0558
-DEFAULT_RADIUS = 75
+# Fetch wide once and let the client's slider narrow it: dragging a distance
+# control should not spend a network round trip, and a cache keyed by radius
+# would refetch for every position.
+DEFAULT_RADIUS = 150
 
 SPOTIFY_ARTIST = re.compile(r"open\.spotify\.com/artist/([A-Za-z0-9]+)")
 _B32 = "0123456789bcdefghjkmnpqrstuvwxyz"

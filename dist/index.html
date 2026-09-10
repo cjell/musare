@@ -1013,6 +1013,23 @@ details[open] summary .chev{transform:rotate(180deg)}
 .editbar .primary{background:var(--accent);border-color:var(--accent);color:#120E1B}
 .editbar button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
+/* ---- filter sheet ---- */
+.rng{width:100%;accent-color:var(--accent);margin:2px 0}
+.tgl{
+  width:44px;height:25px;border-radius:99px;flex:none;padding:0;cursor:pointer;
+  border:1px solid var(--line-2);background:var(--raise);position:relative;
+}
+.tgl span{
+  position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;
+  background:var(--ink-3);transition:transform .16s ease,background .16s ease;
+}
+.tgl[aria-checked="true"]{background:var(--accent-tint);border-color:var(--accent-line)}
+.tgl[aria-checked="true"] span{transform:translateX(19px);background:var(--accent)}
+.tgl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* the funnel carries the applied state, so a filter is visible without
+   opening the sheet to check */
+.bell.on{color:var(--accent)}
+
 /* ================= crop positioner =================
    A photo applied with object-fit:cover gives whatever the centre crop gives
    you. This puts the frame in front of the user and lets them place the image
@@ -1482,6 +1499,27 @@ details[open] summary .chev{transform:rotate(180deg)}
   <div class="editbar" id="editBar" hidden>
     <button type="button" id="editAppearance">Appearance</button>
     <button type="button" class="primary" id="editDone">Done</button>
+  </div>
+
+  <div class="sheet-wrap" id="filtWrap" hidden role="dialog" aria-modal="true" aria-label="Filter shows">
+    <div class="sheet-bg" id="filtBg"></div>
+    <div class="sheet">
+      <div class="mf-grab" aria-hidden="true"></div>
+      <div class="sheet-head">Filter shows</div>
+      <div class="sheet-sub" id="filtCount">&nbsp;</div>
+      <div class="srow col">
+        <div class="k">Within <b id="filtMiLabel">50 miles</b></div>
+        <input class="rng" id="filtMi" type="range" min="5" max="150" step="5" value="50" aria-label="Maximum distance in miles">
+      </div>
+      <div class="srow">
+        <span class="k">Only artists I listen to</span>
+        <button class="tgl" id="filtMine" type="button" role="switch" aria-checked="false"><span></span></button>
+      </div>
+      <div class="sheet-actions">
+        <button type="button" id="filtReset">Reset</button>
+        <button type="button" id="filtDone">Done</button>
+      </div>
+    </div>
   </div>
 
   <div class="crop-wrap" id="cropWrap" hidden role="dialog" aria-modal="true" aria-label="Position photo">
@@ -2520,6 +2558,7 @@ function apiShow(x){
     dow: (x.dow || "").toLowerCase(),
     a: x.artist,
     v: x.venue + (x.city ? " \u00B7 " + x.city : ""),
+    mi: x.distance_mi,
     dist: x.distance_mi != null ? x.distance_mi + " mi" : "",
     price: x.price_min ? "$" + x.price_min + (x.price_max && x.price_max !== x.price_min ? "-" + x.price_max : "") : "",
     doors: x.time ? fmtDoors(x.time) : "",
@@ -2534,27 +2573,101 @@ function apiShow(x){
   };
 }
 
+/* Everything fetched, before the filter narrows it. Shows are fetched once at
+   a wide radius so dragging the slider costs nothing - a cache keyed by radius
+   would refetch on every position, for a spinner and no benefit. */
+var ALL_SHOWS = null;
+var SHOW_FILTER_DEFAULT = { maxMi: 50, onlyMine: false };
+var showFilter = { maxMi: SHOW_FILTER_DEFAULT.maxMi, onlyMine: SHOW_FILTER_DEFAULT.onlyMine };
+
+function filterShows(){
+  var src = ALL_SHOWS || [];
+  return src.filter(function(s){
+    if(showFilter.onlyMine && !s.yours) return false;
+    /* Shows with no distance are kept: absent is not the same as far. */
+    return s.mi == null || s.mi <= showFilter.maxMi;
+  });
+}
+
+function applyShowFilter(){
+  if(!ALL_SHOWS) return;
+  HOME.shows = filterShows();
+  shownShows = Math.min(12, HOME.shows.length);
+  renderTimeline();
+
+  var n = HOME.shows.length, mine = 0;
+  for(var i = 0; i < n; i++) if(HOME.shows[i].yours) mine++;
+  var lbl = document.querySelector("#showsUpcoming .sec-label span");
+  if(lbl){
+    lbl.textContent = showFilter.onlyMine
+      ? n + " within " + showFilter.maxMi + " mi"
+      : "Within " + showFilter.maxMi + " mi \u00B7 " + mine + " you listen to";
+  }
+  $("filtCount").textContent = n
+    ? n + " show" + (n === 1 ? "" : "s") + ", " + mine + " you listen to"
+    : "Nothing in range. Try a wider radius.";
+  /* Active means "different from the default", not "not the maximum" - the
+     feed opens at 50mi, so comparing against 150 lit the icon permanently. */
+  $("showsFilter").classList.toggle("on",
+    showFilter.onlyMine || showFilter.maxMi !== SHOW_FILTER_DEFAULT.maxMi);
+}
+
 var showsLoaded = false;
 function loadShows(){
   if(showsLoaded) return;
   showsLoaded = true;
-  fetch("/api/shows?limit=400").then(function(r){
+  fetch("/api/shows?limit=600").then(function(r){
     if(!r.ok) throw new Error(r.status);
     return r.json();
   }).then(function(d){
-    if(!d.shows || !d.shows.length) return;
-    /* Yours first within the feed's chronology: the API already sorts by date,
-       so this only decides which of two same-day shows leads. */
-    HOME.shows = d.shows.map(apiShow);
-    shownShows = Math.min(12, HOME.shows.length);
-    renderTimeline();
-    var lbl = document.querySelector("#showsUpcoming .sec-label span");
-    if(lbl) lbl.textContent = "Near you \u00B7 " + d.matching + " you listen to";
+    if(!d.shows || !d.shows.length) throw new Error("empty");
+    ALL_SHOWS = d.shows.map(apiShow);
+    applyShowFilter();
   }).catch(function(){
-    /* No server (the published Artifact) - the generated shows already on the
-       page stay exactly as they were. */
+    /* No server (the published Artifact). Keep the generated shows and let the
+       filter work on those instead, so the control is never inert. */
+    ALL_SHOWS = HOME.shows.map(function(s){
+      if(s.mi == null) s.mi = parseFloat(s.dist);
+      return s;
+    });
+    applyShowFilter();
   });
 }
+
+$("showsFilter").addEventListener("click", function(){
+  $("filtMi").value = showFilter.maxMi;
+  $("filtMiLabel").textContent = showFilter.maxMi + " miles";
+  $("filtMine").setAttribute("aria-checked", showFilter.onlyMine ? "true" : "false");
+  applyShowFilter();
+  $("filtWrap").hidden = false;
+  document.body.style.overflow = "hidden";
+});
+
+function closeFilter(){
+  $("filtWrap").hidden = true;
+  document.body.style.overflow = "";
+  $("showsFilter").focus();
+}
+$("filtBg").addEventListener("click", closeFilter);
+$("filtDone").addEventListener("click", closeFilter);
+
+$("filtMi").addEventListener("input", function(){
+  showFilter.maxMi = +this.value;
+  $("filtMiLabel").textContent = showFilter.maxMi + " miles";
+  applyShowFilter();
+});
+$("filtMine").addEventListener("click", function(){
+  showFilter.onlyMine = this.getAttribute("aria-checked") !== "true";
+  this.setAttribute("aria-checked", showFilter.onlyMine ? "true" : "false");
+  applyShowFilter();
+});
+$("filtReset").addEventListener("click", function(){
+  showFilter = { maxMi: SHOW_FILTER_DEFAULT.maxMi, onlyMine: SHOW_FILTER_DEFAULT.onlyMine };
+  $("filtMi").value = showFilter.maxMi;
+  $("filtMiLabel").textContent = showFilter.maxMi + " miles";
+  $("filtMine").setAttribute("aria-checked", "false");
+  applyShowFilter();
+});
 
 function artistCircles(list, down){
   return list.map(function(a){
@@ -3466,6 +3579,7 @@ document.addEventListener("keydown", function(e){
   if(e.key !== "Escape") return;
   if(!$("cropWrap").hidden) closeCrop();
   else if(!$("pickWrap").hidden) closePicker();
+  else if(!$("filtWrap").hidden) closeFilter();
   else if(document.body.classList.contains("editing")) setEditing(false);
 });
 
