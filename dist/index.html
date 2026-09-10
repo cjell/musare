@@ -96,6 +96,11 @@ body{
 
 /* ---- banner ---- */
 .banner{position:relative;height:216px;overflow:hidden}
+/* The grain gives the generated bokeh art its texture. Over a real photograph
+   the same overlay reads as heavy sensor noise - it was the whole of the
+   "pixely" complaint - so photos switch it off. The gradient scrim stays;
+   only the noise layer resolves to none. */
+.banner.has-photo,.avatar.has-photo{--grain:none}
 .banner canvas{display:block;width:100%;height:100%}
 .banner::after{
   content:"";position:absolute;inset:0;
@@ -117,7 +122,9 @@ body{
 /* avatar and actions share a row, bottom-aligned: the picture runs down to the
    buttons instead of stopping short of them */
 .head{margin-top:-106px}
-.toprow{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
+/* position:relative so the row paints above .banner, which is positioned and
+   now tall enough to sit underneath these buttons. */
+.toprow{position:relative;display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
 .avatar{
   width:98px;height:98px;flex:none;border-radius:50%;
   border:3px solid var(--ground);
@@ -1268,7 +1275,7 @@ details[open] summary .chev{transform:rotate(180deg)}
   <div class="screen" id="screenProfile" hidden>
   <div class="wall"><canvas id="wall"></canvas></div>
 
-  <div class="banner">
+  <div class="banner" id="bannerWrap">
     <canvas id="banner"></canvas>
     <img id="bannerImg" alt="" hidden style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover">
   </div>
@@ -2137,9 +2144,11 @@ function render(i){
   p._accent = accent; p._accentRGB = accentRGB; p._genRGB = genRGB;
 
   $("bannerImg").hidden = !c.banner;
+  $("bannerWrap").classList.toggle("has-photo", !!c.banner);
   if(c.banner) $("bannerImg").src = c.banner;
 
   var av = $("avatar");
+  av.classList.toggle("has-photo", !!c.avatar);
   $("initials").hidden = !!c.avatar;
   if(c.avatar){
     av.style.background = "url(" + c.avatar + ") center/cover no-repeat, #221B32";
