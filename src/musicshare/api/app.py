@@ -16,6 +16,8 @@ from fastapi.responses import HTMLResponse
 
 from musicshare import shows as shows_mod
 from musicshare import taste
+from musicshare.spec import validate
+from musicshare.spec.generate import DEFAULT_MODEL, generate
 from musicshare.spotify import SpotifyClient, SpotifyError
 from musicshare.spotify.client import ALL_KINDS, SEARCH_MAX
 from musicshare.web.render import render
@@ -93,6 +95,36 @@ def shows(
         "total": len(data),
         "matching": sum(1 for s in data if s.get("yours")),
         "shows": data[:limit],
+    }
+
+
+@app.get("/api/spec/shows")
+def shows_spec(
+    q: str = Query(..., min_length=1, max_length=400, description="request in plain language"),
+    model: str = DEFAULT_MODEL,
+) -> dict[str, object]:
+    """Turn a request into a ShowFilter. Returns the spec, not the results.
+
+    The page already holds every show, so handing back a spec rather than a
+    filtered list means the controls can move to what was understood and the
+    user can correct one wrong guess by dragging, instead of retyping the
+    sentence. It also keeps this a transformation rather than a conversation.
+    """
+    try:
+        g = generate(q, model=model)
+    except Exception as e:
+        log.error("spec generation failed: %s", e)
+        raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
+
+    problems = validate(g.spec)
+    if problems:
+        log.warning("spec rejected: %s", problems)
+    return {
+        "spec": g.spec.model_dump(),
+        "understood": g.spec.understood and not problems,
+        "problems": [{"field": p.field, "message": p.message} for p in problems],
+        "model": g.model,
+        "latency_ms": g.latency_ms,
     }
 
 

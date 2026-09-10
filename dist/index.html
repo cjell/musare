@@ -1025,6 +1025,34 @@ details[open] summary .chev{transform:rotate(180deg)}
 .editbar button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* ---- filter sheet ---- */
+.ask{display:flex;gap:8px;align-items:center;margin:4px 0 2px}
+.ask input{
+  flex:1;height:40px;border-radius:10px;padding:0 12px;
+  border:1px solid var(--line);background:var(--raise);color:var(--ink);
+  font-family:inherit;font-size:14px;min-width:0;
+}
+.ask input:focus{outline:none;border-color:var(--accent)}
+.ask button{
+  flex:none;height:40px;padding:0 15px;border-radius:10px;cursor:pointer;
+  font-family:inherit;font-size:13px;font-weight:600;
+  border:1px solid var(--accent);background:var(--accent);color:#120E1B;
+}
+.ask button:disabled{opacity:.5;cursor:default}
+.ask-note{font-size:11.5px;color:var(--ink-3);line-height:1.45;margin:9px 0 2px;min-height:1em}
+.ask-note.bad{color:#FF6B8A}
+/* What it understood, as things you can remove. The slider and toggle carry
+   the rest, so every part of a spec is visible somewhere and correctable. */
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 2px}
+.chips:empty{display:none}
+.chip-f{
+  display:inline-flex;align-items:center;gap:6px;padding:5px 8px 5px 10px;
+  border-radius:99px;border:1px solid var(--accent-line);background:var(--accent-tint);
+  color:var(--accent);font-family:"IBM Plex Mono",monospace;font-size:10px;
+  letter-spacing:.04em;cursor:pointer;
+}
+.chip-f b{font-weight:500}
+.chip-f i{font-style:normal;opacity:.7;font-size:12px;line-height:1}
+.chip-f:hover{border-color:var(--accent)}
 .rng{width:100%;accent-color:var(--accent);margin:2px 0}
 .tgl{
   width:44px;height:25px;border-radius:99px;flex:none;padding:0;cursor:pointer;
@@ -1518,6 +1546,13 @@ details[open] summary .chev{transform:rotate(180deg)}
       <div class="mf-grab" aria-hidden="true"></div>
       <div class="sheet-head">Filter shows</div>
       <div class="sheet-sub" id="filtCount">&nbsp;</div>
+      <div class="ask">
+        <input id="askInput" type="text" autocomplete="off"
+               placeholder="small bands near me this weekend">
+        <button type="button" id="askGo">Ask</button>
+      </div>
+      <div class="ask-note" id="askNote"></div>
+      <div class="chips" id="filtChips"></div>
       <div class="srow col">
         <div class="k">Within <b id="filtMiLabel">50 miles</b></div>
         <input class="rng" id="filtMi" type="range" min="5" max="150" step="5" value="50" aria-label="Maximum distance in miles">
@@ -2571,6 +2606,8 @@ function apiShow(x){
     a: x.artist,
     v: x.venue + (x.city ? " \u00B7 " + x.city : ""),
     mi: x.distance_mi,
+    iso: x.date,
+    fans: x.fans,
     dist: x.distance_mi != null ? x.distance_mi + " mi" : "",
     price: x.price_min ? "$" + x.price_min + (x.price_max && x.price_max !== x.price_min ? "-" + x.price_max : "") : "",
     doors: x.time ? fmtDoors(x.time) : "",
@@ -2589,16 +2626,59 @@ function apiShow(x){
    a wide radius so dragging the slider costs nothing - a cache keyed by radius
    would refetch on every position, for a spinner and no benefit. */
 var ALL_SHOWS = null;
-var SHOW_FILTER_DEFAULT = { maxMi: 50, onlyMine: false };
-var showFilter = { maxMi: SHOW_FILTER_DEFAULT.maxMi, onlyMine: SHOW_FILTER_DEFAULT.onlyMine };
+var SHOW_FILTER_DEFAULT = { maxMi: 50, onlyMine: false, days: null, maxFans: null, minFans: null, artists: [] };
+var showFilter = Object.assign({}, SHOW_FILTER_DEFAULT);
 
+/* Mirrors musicshare/spec/apply.py, which is the tested reference. It is
+   duplicated here on purpose: dragging a slider must not wait on a round trip,
+   and every show is already in memory. */
 function filterShows(){
   var src = ALL_SHOWS || [];
+  var cutoff = null;
+  if(showFilter.days != null){
+    cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() + showFilter.days);
+  }
+  var want = showFilter.artists.map(function(a){ return a.toLowerCase(); });
+
   return src.filter(function(s){
     if(showFilter.onlyMine && !s.yours) return false;
     /* Shows with no distance are kept: absent is not the same as far. */
-    return s.mi == null || s.mi <= showFilter.maxMi;
+    if(s.mi != null && s.mi > showFilter.maxMi) return false;
+
+    if(cutoff && s.iso){
+      var d = new Date(s.iso + "T00:00:00");
+      if(d > cutoff) return false;
+    }
+    if(showFilter.maxFans != null || showFilter.minFans != null){
+      /* A fan bound was asked for and this artist has no count - exclude it
+         rather than pretend it qualifies. */
+      if(s.fans == null) return false;
+      if(showFilter.maxFans != null && s.fans > showFilter.maxFans) return false;
+      if(showFilter.minFans != null && s.fans < showFilter.minFans) return false;
+    }
+    if(want.length && want.indexOf((s.a || "").toLowerCase()) < 0) return false;
+    return true;
   });
+}
+
+function fansLabel(n){
+  return n >= 1000000 ? (n / 1000000) + "M" : n >= 1000 ? Math.round(n / 1000) + "k" : n;
+}
+
+/* Everything the spec set that the slider and toggle do not already show. */
+function renderChips(){
+  var out = [];
+  if(showFilter.days != null)
+    out.push(['days', 'next ' + showFilter.days + ' day' + (showFilter.days === 1 ? '' : 's')]);
+  if(showFilter.maxFans != null) out.push(['maxFans', 'under ' + fansLabel(showFilter.maxFans) + ' fans']);
+  if(showFilter.minFans != null) out.push(['minFans', 'over ' + fansLabel(showFilter.minFans) + ' fans']);
+  showFilter.artists.forEach(function(a){ out.push(['artist:' + a, a]); });
+
+  $("filtChips").innerHTML = out.map(function(c){
+    return '<button class="chip-f" type="button" data-clear="' + esc(c[0]) + '">' +
+           '<b>' + esc(c[1]) + '</b><i>&#215;</i></button>';
+  }).join("");
 }
 
 function applyShowFilter(){
@@ -2620,8 +2700,11 @@ function applyShowFilter(){
     : "Nothing in range. Try a wider radius.";
   /* Active means "different from the default", not "not the maximum" - the
      feed opens at 50mi, so comparing against 150 lit the icon permanently. */
+  renderChips();
   $("showsFilter").classList.toggle("on",
-    showFilter.onlyMine || showFilter.maxMi !== SHOW_FILTER_DEFAULT.maxMi);
+    showFilter.onlyMine || showFilter.maxMi !== SHOW_FILTER_DEFAULT.maxMi ||
+    showFilter.days != null || showFilter.maxFans != null ||
+    showFilter.minFans != null || showFilter.artists.length > 0);
 }
 
 var showsLoaded = false;
@@ -2674,11 +2757,78 @@ $("filtMine").addEventListener("click", function(){
   applyShowFilter();
 });
 $("filtReset").addEventListener("click", function(){
-  showFilter = { maxMi: SHOW_FILTER_DEFAULT.maxMi, onlyMine: SHOW_FILTER_DEFAULT.onlyMine };
+  showFilter = Object.assign({}, SHOW_FILTER_DEFAULT, { artists: [] });
   $("filtMi").value = showFilter.maxMi;
   $("filtMiLabel").textContent = showFilter.maxMi + " miles";
   $("filtMine").setAttribute("aria-checked", "false");
+  $("askInput").value = "";
+  $("askNote").textContent = "";
+  $("askNote").className = "ask-note";
   applyShowFilter();
+});
+
+$("filtChips").addEventListener("click", function(e){
+  var b = e.target.closest("[data-clear]");
+  if(!b) return;
+  var k = b.dataset.clear;
+  if(k.indexOf("artist:") === 0){
+    var name = k.slice(7);
+    showFilter.artists = showFilter.artists.filter(function(a){ return a !== name; });
+  } else {
+    showFilter[k] = null;
+  }
+  applyShowFilter();
+});
+
+/* ---------- natural language -> spec ----------
+   The server returns a spec, not results. The controls then move to show what
+   it understood, so a wrong guess is corrected by dragging rather than by
+   rewording the sentence. */
+function askShows(){
+  var q = $("askInput").value.trim();
+  if(!q) return;
+  var note = $("askNote"), go = $("askGo");
+  note.className = "ask-note";
+  note.textContent = "Reading that...";
+  go.disabled = true;
+
+  fetch("/api/spec/shows?q=" + encodeURIComponent(q)).then(function(r){
+    if(!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(function(d){
+    go.disabled = false;
+    if(!d.understood){
+      note.className = "ask-note bad";
+      note.textContent = d.problems && d.problems.length
+        ? "That filter did not make sense: " + d.problems[0].message
+        : "That is not something this can search for.";
+      return;
+    }
+    var sp = d.spec;
+    showFilter.onlyMine = !!sp.only_mine;
+    showFilter.maxMi = sp.radius_mi != null ? sp.radius_mi : SHOW_FILTER_DEFAULT.maxMi;
+    showFilter.days = sp.within_days;
+    showFilter.maxFans = sp.max_fans;
+    showFilter.minFans = sp.min_fans;
+    showFilter.artists = sp.artists || [];
+
+    /* The visible controls are the interpretation - moving them is how the
+       user finds out what it decided. */
+    $("filtMi").value = showFilter.maxMi;
+    $("filtMiLabel").textContent = showFilter.maxMi + " miles";
+    $("filtMine").setAttribute("aria-checked", showFilter.onlyMine ? "true" : "false");
+    note.textContent = "Adjust anything it got wrong.";
+    applyShowFilter();
+  }).catch(function(){
+    go.disabled = false;
+    note.className = "ask-note bad";
+    note.textContent = "Needs the local server. The sliders still work.";
+  });
+}
+
+$("askGo").addEventListener("click", askShows);
+$("askInput").addEventListener("keydown", function(e){
+  if(e.key === "Enter"){ e.preventDefault(); askShows(); }
 });
 
 function artistCircles(list, down){
