@@ -492,26 +492,37 @@ body{
 .vt-art:hover .ring{border-color:var(--ink-3)}
 .vt-meta{flex:1;min-width:0;padding-top:2px}
 .vt-name{font-size:16px;font-weight:600;line-height:1.22}
+.vt-sub{display:flex;align-items:baseline;gap:9px;margin-top:6px}
 .vt-ven{
-  display:block;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);
-  margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.vt-mi{
+  font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-2);
+  flex:none;font-variant-numeric:tabular-nums;
 }
 .vt-go{display:flex;align-items:center;gap:8px;margin-top:10px}
 .vt-btn{margin-top:12px;height:30px;padding:0 15px;font-size:12.5px}
 /* the month interrupts the rail, so scrolling reads as moving through a
    calendar -- it is the strongest structural cue in the list, so it is loud */
-.vt-month{position:relative;display:flex;align-items:center;gap:14px;padding:32px 0 12px 73px}
-.vt-month:first-child{padding-top:6px}
+.vt-month{
+  position:sticky;top:0;z-index:3;
+  display:flex;align-items:center;gap:14px;
+  /* -10px each side to cover the overhang the rows hang out for their hover
+     highlight, so nothing slides out from under the header */
+  margin:32px -10px 0;padding:9px 10px 10px 83px;
+  background:var(--ground);
+}
+.vt-month:first-child{margin-top:0}
 .vt-month b{
   font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:500;
   letter-spacing:.2em;text-transform:uppercase;color:var(--ink);
 }
 .vt-month i{flex:1;height:1px;background:var(--line-2)}
 .vt-month::before{
-  content:"";position:absolute;left:40px;top:30px;width:15px;height:15px;
+  content:"";position:absolute;left:50px;top:7px;width:15px;height:15px;
   border-radius:50%;background:var(--ground);border:1.5px solid var(--ink-3);
 }
-.vt-month:first-child::before{top:4px}
 .tl-clear{
   background:none;border:0;padding:0;cursor:pointer;
   font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;
@@ -2488,7 +2499,8 @@ function renderTimeline(){
         "</div>" +
         '<div class="vt-meta">' +
           '<div class="vt-name">' + s.a + "</div>" +
-          '<span class="vt-ven">' + s.v + "</span>" +
+          '<div class="vt-sub"><span class="vt-ven">' + esc(s.v) + "</span>" +
+            (s.dist ? '<span class="vt-mi">' + esc(s.dist) + "</span>" : "") + "</div>" +
           '<div class="vt-go"><span class="stack">' + stack + "</span>" +
             '<span class="sgo"><b data-going>' + (s.going + (on ? 1 : 0)) + "</b> going \u00B7 " + s.listen + " listen here</span></div>" +
           '<button class="sbtn vt-btn" type="button" data-k="' + key + '" aria-pressed="' + on + '">' +
