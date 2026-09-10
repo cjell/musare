@@ -16,8 +16,8 @@ from fastapi.responses import HTMLResponse
 
 from musicshare import shows as shows_mod
 from musicshare import taste
-from musicshare.spec import validate
-from musicshare.spec.generate import DEFAULT_MODEL, generate
+from musicshare.spec import ChartSpec, run_chart, validate, validate_chart
+from musicshare.spec.generate import CHARTS, DEFAULT_MODEL, generate
 from musicshare.spotify import SpotifyClient, SpotifyError
 from musicshare.spotify.client import ALL_KINDS, SEARCH_MAX
 from musicshare.web.render import render
@@ -125,6 +125,52 @@ def shows_spec(
         "problems": [{"field": p.field, "message": p.message} for p in problems],
         "model": g.model,
         "latency_ms": g.latency_ms,
+    }
+
+
+@app.get("/api/chart")
+def chart(
+    q: str = Query(..., min_length=1, max_length=400, description="a question about listening"),
+    model: str = DEFAULT_MODEL,
+) -> dict[str, object]:
+    """Turn a question into a chart: spec, then the rows to draw.
+
+    Unlike the show filter, the data cannot live in the page - it is 503k rows
+    on disk - so this returns the spec *and* the result. The spec still comes
+    back so the page can show what was understood.
+    """
+    try:
+        g = generate(q, task=CHARTS, model=model)
+    except Exception as e:
+        log.error("chart spec failed: %s", e)
+        raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
+
+    spec: ChartSpec = g.spec
+    problems = validate_chart(spec)
+    if problems or not spec.understood:
+        return {
+            "spec": spec.model_dump(),
+            "understood": False,
+            "problems": [{"field": p.field, "message": p.message} for p in problems],
+            "model": g.model,
+        }
+
+    d = run_chart(spec)
+    return {
+        "spec": spec.model_dump(),
+        "understood": not d.empty,
+        "problems": [],
+        "model": g.model,
+        "latency_ms": g.latency_ms,
+        "data": {
+            "labels": d.labels,
+            "values": d.values,
+            "title": d.title,
+            "x_label": d.x_label,
+            "y_label": d.y_label,
+            "chart": d.chart,
+            "note": d.note,
+        },
     }
 
 

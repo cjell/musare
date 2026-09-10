@@ -1009,6 +1009,27 @@ details[open] summary .chev{transform:rotate(180deg)}
 .editbar .primary{background:var(--accent);border-color:var(--accent);color:#120E1B}
 .editbar button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
+/* ---- generated charts ---- */
+.chartcard{
+  border:1px solid var(--line);border-radius:13px;background:var(--raise);
+  padding:14px 14px 10px;position:relative;
+}
+.chart-t{
+  font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:15px;
+  letter-spacing:-.015em;line-height:1.2;
+}
+.chart-sub{
+  font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);margin-top:5px;
+}
+.chart-canvas{display:block;width:100%;margin-top:10px}
+.chart-note{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3);margin-top:6px}
+.chart-acts{display:flex;gap:8px;margin-top:12px}
+.chart-acts .btn{flex:1;height:34px;font-size:12.5px}
+/* A pinned chart on someone else's profile is a thing they made, not a control */
+.pl.chartpin{grid-column:1 / -1}
+.pl.chartpin .chartcard{padding:12px 12px 8px}
+
 /* ---- filter sheet ---- */
 .ask{display:flex;gap:8px;align-items:center;margin:4px 0 2px}
 .ask input{
@@ -1376,6 +1397,11 @@ details[open] summary .chev{transform:rotate(180deg)}
       <div class="agrid" id="artists"></div>
     </section>
 
+    <section class="sec anim a3" id="chartSection">
+      <div class="sec-label"><span>Charts</span><span class="aux" id="chartAux"></span></div>
+      <div class="plgrid" id="charts"></div>
+    </section>
+
     <section class="sec anim a3" id="albumSection">
       <div class="sec-label"><span>Albums</span><span class="aux" id="albumAux"></span></div>
       <div class="plgrid" id="albums"></div>
@@ -1470,6 +1496,10 @@ details[open] summary .chev{transform:rotate(180deg)}
         </div>
         <div class="ask-note" id="chartNote"></div>
         <div class="chips" id="chartEg"></div>
+      </section>
+
+      <section class="sec" id="chartResultSec" hidden>
+        <div id="chartResult"></div>
       </section>
 
       <div class="empty">
@@ -3238,14 +3268,63 @@ $("chartEg").addEventListener("click", function(e){
   $("chartInput").focus();
 });
 
+var lastChart = null;
+
+function showChartResult(d, q){
+  lastChart = { data: d, q: q };
+  $("chartResult").innerHTML = chartCard(d, {
+    key: "live",
+    actions: '<div class="chart-acts">' +
+      '<button class="btn btn-primary" type="button" id="chartPin">Pin to profile</button>' +
+      '<button class="btn btn-ghost" type="button" id="chartAgain">Ask again</button></div>'
+  });
+  $("chartResultSec").hidden = false;
+  drawChart($("chartResult").querySelector('[data-chart="live"]'), d);
+}
+
 function askChart(){
   var q = $("chartInput").value.trim();
+  var note = $("chartNote"), go = $("chartGo");
+  note.className = "ask-note";
+  if(!q){ note.textContent = "Type something about your listening first."; return; }
+
+  note.textContent = "Working it out...";
+  go.disabled = true;
+  fetch("/api/chart?q=" + encodeURIComponent(q)).then(function(r){
+    if(!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(function(d){
+    go.disabled = false;
+    if(!d.understood || !d.data){
+      /* A refusal is the right answer to a question this data cannot support,
+         so it says which rather than drawing something plausible. */
+      note.className = "ask-note bad";
+      note.textContent = d.problems && d.problems.length
+        ? "That chart would not hold up: " + d.problems[0].message
+        : "That is not something this history can answer.";
+      $("chartResultSec").hidden = true;
+      return;
+    }
+    note.textContent = "";
+    showChartResult(d.data, q);
+  }).catch(function(){
+    go.disabled = false;
+    note.className = "ask-note bad";
+    note.textContent = "Needs the local server - the charts are computed from your history on disk.";
+  });
+}
+
+$("chartResult").addEventListener("click", function(e){
+  if(e.target.closest("#chartAgain")){ $("chartInput").focus(); $("chartInput").select(); return; }
+  if(!e.target.closest("#chartPin") || !lastChart) return;
+  var list = pinList("charts");
+  var slot = list.indexOf(null);
+  if(slot < 0) slot = PIN_SLOTS.charts - 1;   /* full: replace the last one */
+  setPin("charts", slot, { data: lastChart.data, q: lastChart.q, at: Date.now() });
   var note = $("chartNote");
   note.className = "ask-note";
-  note.textContent = q
-    ? "Not wired up yet - this is where the request becomes a chart spec."
-    : "Type something about your listening first.";
-}
+  note.textContent = "Pinned. It is on your profile now.";
+});
 
 $("chartGo").addEventListener("click", askChart);
 $("chartInput").addEventListener("keydown", function(e){
@@ -3486,7 +3565,7 @@ $("badges").addEventListener("click", function(e){
    Pinned items are references, not copies: an id, a name, a picture URL. They
    live beside the rest of the personalization in localStorage, so testing costs
    nobody an account. When auth exists they move to Postgres unchanged. */
-var PIN_SLOTS = { tracks: 5, artists: 8, albums: 6 };
+var PIN_SLOTS = { tracks: 5, artists: 8, albums: 6, charts: 2 };
 var PIN_KIND = { tracks: "track", artists: "artist", albums: "album" };
 
 function esc(v){
@@ -3513,7 +3592,10 @@ function setPin(kind, idx, item){
   /* One item, one slot. Choosing something already pinned moves it here rather
      than duplicating it - the alternative is either a silent no-op, which
      reads as broken, or two copies of the same record on one profile. */
-  if(item){
+  /* Guard on id being present: chart pins carry no id, so an undefined ===
+     undefined comparison made every chart a duplicate of every other and the
+     second pin silently cleared the first. */
+  if(item && item.id){
     for(var i = 0; i < list.length; i++){
       if(i !== idx && list[i] && list[i].id === item.id) list[i] = null;
     }
@@ -3616,9 +3698,174 @@ function renderPins(p){
       bh += slotCell("albums", k, "slot-sq", "pl", "pn", "pm");
     }
   }
+  /* A chart pin stores the spec, the rows and the question. The rows mean a
+     visitor sees it without a server; the spec means it can be refreshed into
+     a live one later without re-asking the model. */
+  var cp = pinList("charts"), cAny = self && cp.some(Boolean), ch = "";
+  for(var q = 0; q < PIN_SLOTS.charts; q++){
+    var cpin = self ? cp[q] : null;
+    if(cpin && cpin.data){
+      ch += '<div class="pl chartpin pinbox">' +
+        chartCard(cpin.data, { unpin: unpinBtn("charts", q), key: "pin" + q }) + "</div>";
+    } else if(editing && self){
+      ch += '<div class="pl chartpin">' + slotBtn("charts", q, "slot-sq") + "</div>";
+    }
+  }
+  $("charts").innerHTML = ch;
+  $("chartSection").hidden = !cAny && !(editing && self);
+  $("chartAux").textContent = cAny ? cp.filter(Boolean).length + " pinned" : "";
+  for(var z = 0; z < PIN_SLOTS.charts; z++){
+    if(cp[z] && cp[z].data){
+      drawChart(document.querySelector('#charts [data-chart="pin' + z + '"]'), cp[z].data);
+    }
+  }
+
   $("albums").innerHTML = bh;
   $("albumSection").hidden = !bAny && !(editing && self);
   $("albumAux").textContent = bAny ? bp.filter(Boolean).length + " pinned" : "";
+}
+
+/* ================= chart rendering =================
+   Canvas rather than SVG for consistency with the taste map and the bokeh, and
+   because a chart with 24 bars is cheaper to paint than to build as nodes.
+
+   Orientation is derived, not asked for: ten artist names cannot sit under
+   vertical bars at this width, so long labels lay the bars on their side. It is
+   the same reasoning that took chart type out of the schema - the data already
+   says what the drawing should be. */
+function longLabels(d){
+  if(d.chart === "line") return false;
+  var longest = 0;
+  for(var i = 0; i < d.labels.length; i++) longest = Math.max(longest, String(d.labels[i]).length);
+  return longest > 4 || d.labels.length <= 6;
+}
+
+/* Date buckets arrive as ISO dates. Truncating them to fit gives eight labels
+   all reading "2026-0", so they are formatted to the grain they were bucketed
+   at instead. */
+var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function fmtLabel(lab, grain){
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(lab));
+  if(!m) return String(lab);
+  if(grain === "year") return m[1];
+  if(grain === "month") return MONTHS[+m[2] - 1] || m[2];
+  return m[2] + "/" + m[3];
+}
+
+function fmtVal(v){
+  if(v >= 1000) return Math.round(v / 1000) + "k";
+  return v >= 100 ? Math.round(v) : Math.round(v * 10) / 10;
+}
+
+function drawChart(cv, d){
+  if(!cv || !d || !d.values || !d.values.length) return;
+  var css = getComputedStyle(document.querySelector(".phone"));
+  var accent = css.getPropertyValue("--accent").trim() || "#E74094";
+  var ink3 = css.getPropertyValue("--ink-3").trim() || "#635C7A";
+  var ink2 = css.getPropertyValue("--ink-2").trim() || "#A9A2BE";
+
+  var horizontal = longLabels(d);
+  var n = d.values.length;
+  var w = cv.clientWidth || 320;
+  var h = horizontal ? Math.max(120, n * 20 + 8) : 150;
+  var dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.round(w * dpr);
+  cv.height = Math.round(h * dpr);
+  cv.style.height = h + "px";
+
+  var x = cv.getContext("2d");
+  x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  x.clearRect(0, 0, w, h);
+  x.font = '9px "IBM Plex Mono", monospace';
+  x.textBaseline = "middle";
+
+  var max = Math.max.apply(null, d.values) || 1;
+
+  if(horizontal){
+    var labelW = 0;
+    for(var i = 0; i < n; i++) labelW = Math.max(labelW, x.measureText(String(d.labels[i])).width);
+    labelW = Math.min(labelW, w * 0.42);
+    var valW = 30, gap = 8;
+    var barX = labelW + gap, barMax = w - barX - valW - gap;
+    var rowH = (h - 6) / n;
+
+    for(var r = 0; r < n; r++){
+      var cy = 3 + rowH * r + rowH / 2;
+      var bw = Math.max(2, (d.values[r] / max) * barMax);
+      x.fillStyle = ink2;
+      x.textAlign = "right";
+      /* Truncate against the width the ellipsis will take, or appending it
+         pushes the label back over the edge it was just trimmed to fit. */
+      var full = fmtLabel(d.labels[r], d.x_label), lab = full;
+      if(x.measureText(full).width > labelW){
+        var room = labelW - x.measureText("\u2026").width;
+        while(lab.length > 1 && x.measureText(lab).width > room) lab = lab.slice(0, -1);
+        lab += "\u2026";
+      }
+      x.fillText(lab, labelW, cy);
+      x.fillStyle = accent;
+      x.beginPath();
+      x.roundRect(barX, cy - rowH * 0.3, bw, rowH * 0.6, 3);
+      x.fill();
+      x.fillStyle = ink3;
+      x.textAlign = "left";
+      x.fillText(fmtVal(d.values[r]), barX + bw + 6, cy);
+    }
+    return;
+  }
+
+  var padB = 16, top = 8, plotH = h - padB - top;
+  var step = w / n;
+
+  if(d.chart === "line"){
+    x.beginPath();
+    for(var p = 0; p < n; p++){
+      var px = step * p + step / 2;
+      var py = top + plotH - (d.values[p] / max) * plotH;
+      p ? x.lineTo(px, py) : x.moveTo(px, py);
+    }
+    x.strokeStyle = accent;
+    x.lineWidth = 2;
+    x.lineJoin = "round";
+    x.stroke();
+    /* fill under the line so a sparse series still reads as a quantity */
+    x.lineTo(step * (n - 1) + step / 2, top + plotH);
+    x.lineTo(step / 2, top + plotH);
+    x.closePath();
+    var g = x.createLinearGradient(0, top, 0, top + plotH);
+    g.addColorStop(0, css.getPropertyValue("--accent-tint").trim() || "rgba(231,64,148,.13)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    x.fillStyle = g;
+    x.fill();
+  } else {
+    for(var b = 0; b < n; b++){
+      var bh = Math.max(2, (d.values[b] / max) * plotH);
+      x.fillStyle = accent;
+      x.beginPath();
+      x.roundRect(step * b + step * 0.18, top + plotH - bh, step * 0.64, bh, 2);
+      x.fill();
+    }
+  }
+
+  /* Only as many x labels as will fit without colliding. */
+  x.fillStyle = ink3;
+  x.textAlign = "center";
+  var every = Math.max(1, Math.ceil(n / Math.floor(w / 34)));
+  for(var t = 0; t < n; t += every){
+    x.fillText(fmtLabel(d.labels[t], d.x_label), step * t + step / 2, h - padB / 2 + 1);
+  }
+}
+
+function chartCard(d, opts){
+  opts = opts || {};
+  return '<div class="chartcard">' +
+    (opts.unpin || "") +
+    '<div class="chart-t">' + esc(d.title) + "</div>" +
+    '<div class="chart-sub">' + esc(d.y_label) + " by " + esc(d.x_label) + "</div>" +
+    '<canvas class="chart-canvas" data-chart="' + esc(opts.key || "") + '"></canvas>' +
+    (d.note ? '<div class="chart-note">' + esc(d.note) + "</div>" : "") +
+    (opts.actions || "") +
+    "</div>";
 }
 
 /* ================= edit mode ================= */
@@ -3779,11 +4026,26 @@ $("pickList").addEventListener("click", function(e){
   renderPins(PROFILES[current]);
 });
 
+/* A chart is made, not chosen from a list, so an empty chart slot sends you to
+   the Charts tab instead of opening a picker. */
+function chartsSlotGuard(kind){
+  if(kind !== "charts") return false;
+  setEditing(false);
+  showScreen("charts");
+  $("chartNote").className = "ask-note";
+  $("chartNote").textContent = "Ask for a chart, then pin it.";
+  $("chartInput").focus();
+  return true;
+}
+
 /* One listener on the page rather than per item, because slots and unpin
    buttons are rebuilt on every render. */
 document.addEventListener("click", function(e){
   var slot = e.target.closest("[data-slot]");
-  if(slot){ openPicker(slot.dataset.slot, +slot.dataset.idx); return; }
+  if(slot){
+    if(!chartsSlotGuard(slot.dataset.slot)) openPicker(slot.dataset.slot, +slot.dataset.idx);
+    return;
+  }
   var un = e.target.closest("[data-unpin]");
   if(un){
     e.stopPropagation();
