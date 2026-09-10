@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     spotify_client_id: str = ""
     spotify_client_secret: str = ""
+    # Must match a Redirect URI registered on the Spotify app character for
+    # character, so it is read from .env rather than written in two places.
+    spotify_redirect_uri: str = "http://127.0.0.1:3000/api/auth/callback/spotify"
     ticketmaster_api_key: str = ""
     openai_api_key: str = ""
     database_url: str = ""
