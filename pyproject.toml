@@ -30,6 +30,8 @@ dependencies = [
   # tracing, cost, latency + structured logs that pair with it
   "langfuse>=4.15",
   "structlog>=26.1",
+  # the eval golden set
+  "pyyaml>=6",
 ]
 
 [project.optional-dependencies]

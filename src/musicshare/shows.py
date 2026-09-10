@@ -188,6 +188,50 @@ def _my_artists() -> dict[str, tuple[float, int]]:
     return {n.lower(): (h, p) for n, h, p in rows}
 
 
+DEEZER = "https://api.deezer.com/search/artist"
+FANS_CACHE = ROOT / "data" / "cache" / "artist_fans.json"
+
+
+def fan_counts(names: list[str], refresh: bool = False) -> dict[str, int]:
+    """Artist name -> Deezer fan count.
+
+    Spotify strips popularity and follower counts from every response, so
+    "small fanbase" needs a number from somewhere else. Deezer is free, needs
+    no key, and returns an actual count with real range - 13 fans for Omar+
+    against 2.5M for Juice WRLD - which discriminates far better than a 0-100
+    score would have.
+    """
+    cache: dict[str, int] = {}
+    if FANS_CACHE.exists() and not refresh:
+        cache = json.loads(FANS_CACHE.read_text(encoding="utf-8"))
+
+    todo = [n for n in names if n.lower() not in cache]
+    if todo:
+        with httpx.Client(timeout=20) as http:
+            for n in todo:
+                try:
+                    r = http.get(DEEZER, params={"q": n, "limit": 8})
+                    items = (r.json().get("data") or []) if r.status_code == 200 else []
+                    # Deezer lists several artists under the identical name and
+                    # orders them badly - the real Turnstile (50,812 fans) sits
+                    # behind a duplicate with 22. Take the largest exact match:
+                    # for a "small fanbase" filter, overstating popularity only
+                    # ever excludes, while understating it surfaces Ed Sheeran.
+                    exact = [
+                        int(d.get("nb_fan") or 0)
+                        for d in items
+                        if (d.get("name") or "").lower() == n.lower()
+                    ]
+                    cache[n.lower()] = max(exact) if exact else -1
+                except Exception as e:  # one bad lookup must not sink the batch
+                    log.warning("deezer %s: %s", n, e)
+                    cache[n.lower()] = -1
+                time.sleep(0.06)  # Deezer allows ~50 requests per 5s
+        FANS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        FANS_CACHE.write_text(json.dumps(cache, indent=0, ensure_ascii=False), encoding="utf-8")
+    return cache
+
+
 def _dow(date_str: str) -> str:
     return datetime.strptime(date_str, "%Y-%m-%d").strftime("%a")
 
@@ -208,7 +252,13 @@ def build(refresh: bool = False, **kw) -> list[dict[str, Any]]:
         log.warning("no play history for relevance: %s", e)
         mine = {}
 
+    fans = fan_counts([s["artist"] for s in shows])
+
     for s in shows:
+        # -1 marks a lookup that found nothing or matched the wrong artist;
+        # keep it as None so "unknown" never reads as "tiny".
+        f = fans.get(s["artist"].lower(), -1)
+        s["fans"] = f if f and f > 0 else None
         hours, plays = mine.get(s["artist"].lower(), (0.0, 0))
         s["your_hours"] = round(hours, 1)
         s["your_plays"] = plays

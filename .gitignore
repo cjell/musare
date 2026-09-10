@@ -14,6 +14,8 @@ htmlcov/
 .env.*
 !.env.example
 
+evals/reports/
+
 # data: the Last.fm corpus and any derived artifacts are far too large for git
 data/
 *.parquet
