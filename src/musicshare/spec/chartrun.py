@@ -38,8 +38,8 @@ METRICS: dict[str, tuple[str, bool, str]] = {
     # name -> (sql, needs_min_ms, axis label)
     "hours": ("sum(ms_played) / 3600000.0", False, "hours"),
     "plays": ("count(*)", True, "plays"),
-    "tracks": ("count(distinct track_uri)", True, "tracks"),
-    "artists": ("count(distinct artist_name)", True, "artists"),
+    "distinct_tracks": ("count(distinct track_uri)", True, "tracks"),
+    "distinct_artists": ("count(distinct artist_name)", True, "artists"),
     "skip_rate": ("avg(case when skipped then 1.0 else 0 end) * 100", False, "% skipped"),
 }
 
@@ -96,6 +96,11 @@ class ChartData:
         return not self.values
 
 
+def chart_for(dimension: str) -> str:
+    """Dates are a series and read as a line; everything else is a comparison."""
+    return "line" if dimension == "date" else "bar"
+
+
 def _connect() -> duckdb.DuckDBPyConnection:
     con = duckdb.connect()
     con.execute("install icu; load icu;")  # timezone conversion lives in icu
@@ -124,7 +129,13 @@ def _where(spec: ChartSpec, needs_min: bool) -> tuple[str, list[Any]]:
 def run(spec: ChartSpec) -> ChartData:
     if not spec.understood:
         return ChartData(
-            [], [], "", "", spec.title, spec.chart, note="not a question about listening"
+            [],
+            [],
+            "",
+            "",
+            spec.title,
+            chart_for(spec.dimension),
+            note="not a question about listening",
         )
 
     metric_sql, needs_min, y_label = METRICS[spec.metric]
@@ -178,7 +189,7 @@ def run(spec: ChartSpec) -> ChartData:
         x_label=x_label,
         y_label=y_label,
         title=spec.title or f"{y_label} by {x_label}",
-        chart=spec.chart,
+        chart=chart_for(spec.dimension),
         total_rows=total,
         note=(
             f"artists with fewer than {MIN_SAMPLE} plays excluded"

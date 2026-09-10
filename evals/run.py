@@ -14,7 +14,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -27,27 +29,42 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
 from evals.score import CaseResult, score_case, summarise  # noqa: E402
-from musicshare.spec.generate import DEFAULT_MODEL, generate  # noqa: E402
-from musicshare.spec.validate import validate  # noqa: E402
+from musicshare.spec.generate import CHARTS, DEFAULT_MODEL, SHOWS, Task, generate  # noqa: E402
+from musicshare.spec.validate import validate, validate_chart  # noqa: E402
 
-CASES = ROOT / "evals" / "cases" / "shows.yaml"
+CASE_DIR = ROOT / "evals" / "cases"
 REPORTS = ROOT / "evals" / "reports"
 
 
-def load_cases(tag: str | None = None) -> list[dict]:
-    cases = yaml.safe_load(CASES.read_text(encoding="utf-8"))
+@dataclass(frozen=True)
+class Suite:
+    task: Task
+    cases: str
+    validate: Callable
+
+
+SUITES: dict[str, Suite] = {
+    "shows": Suite(SHOWS, "shows.yaml", validate),
+    "charts": Suite(CHARTS, "charts.yaml", validate_chart),
+}
+
+
+def load_cases(suite: str = "shows", tag: str | None = None) -> list[dict]:
+    path = CASE_DIR / SUITES[suite].cases
+    cases = yaml.safe_load(path.read_text(encoding="utf-8"))
     if tag:
         cases = [c for c in cases if tag in (c.get("tags") or [])]
     return cases
 
 
-def run_case(case: dict, model: str) -> CaseResult:
+def run_case(case: dict, model: str, suite: str = "shows") -> CaseResult:
+    s = SUITES[suite]
     try:
-        g = generate(case["input"], model=model)
+        g = generate(case["input"], task=s.task, model=model)
     except Exception as e:  # a provider failure is a result, not a crash
         return score_case(case, None, error=f"{type(e).__name__}: {e}"[:160])
 
-    problems = validate(g.spec)
+    problems = s.validate(g.spec)
     meta = {
         "latency_ms": g.latency_ms,
         "input_tokens": g.input_tokens,
@@ -59,13 +76,13 @@ def run_case(case: dict, model: str) -> CaseResult:
     return score_case(case, g.spec, **meta)
 
 
-def run(model: str, tag: str | None, workers: int) -> tuple[list[CaseResult], dict]:
-    cases = load_cases(tag)
+def run(model: str, tag: str | None, workers: int, suite: str) -> tuple[list[CaseResult], dict]:
+    cases = load_cases(suite, tag)
     if not cases:
         raise SystemExit(f"no cases{f' tagged {tag}' if tag else ''}")
     # Sixty sequential round trips is four minutes of waiting for no reason.
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        results = list(pool.map(lambda c: run_case(c, model), cases))
+        results = list(pool.map(lambda c: run_case(c, model, suite), cases))
     return results, summarise(results)
 
 
@@ -74,8 +91,8 @@ def bar(v: float, width: int = 18) -> str:
     return "#" * n + "." * (width - n)
 
 
-def report(results: list[CaseResult], s: dict, model: str) -> None:
-    print(f"\n{model}   {s['passed']}/{s['cases']} cases pass\n")
+def report(results: list[CaseResult], s: dict, model: str, suite: str = "shows") -> None:
+    print(f"\n{suite}   {model}   {s['passed']}/{s['cases']} cases pass\n")
     print(f"  exact match      {s['exact_match']:.0%}")
     print(f"  field accuracy   {s['field_accuracy']:.0%}")
     print(f"  errors           {s['errors']}")
@@ -104,13 +121,14 @@ def report(results: list[CaseResult], s: dict, model: str) -> None:
     print()
 
 
-def save(results: list[CaseResult], s: dict, model: str) -> Path:
+def save(results: list[CaseResult], s: dict, model: str, suite: str = "shows") -> Path:
     REPORTS.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    path = REPORTS / f"{model}-{stamp}.json"
+    path = REPORTS / f"{suite}-{model}-{stamp}.json"
     path.write_text(
         json.dumps(
             {
+                "suite": suite,
                 "model": model,
                 "at": stamp,
                 "summary": s,
@@ -162,6 +180,7 @@ def compare(a: Path, b: Path) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--suite", default="shows", choices=sorted(SUITES))
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--tag", help="only cases carrying this tag")
     ap.add_argument("--workers", type=int, default=8)
@@ -172,9 +191,9 @@ def main() -> int:
         compare(*args.compare)
         return 0
 
-    results, s = run(args.model, args.tag, args.workers)
-    report(results, s, args.model)
-    print(f"  saved {save(results, s, args.model).relative_to(ROOT)}\n")
+    results, s = run(args.model, args.tag, args.workers, args.suite)
+    report(results, s, args.model, args.suite)
+    print(f"  saved {save(results, s, args.model, args.suite).relative_to(ROOT)}\n")
     return 0
 
 

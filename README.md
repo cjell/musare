@@ -74,10 +74,15 @@ hand-written inputs with the spec each should produce, scored per field with
 tolerances - "a few hours" is 150 miles or 250 depending who you ask, and
 failing a good answer for being differently good teaches nothing.
 
-    python evals/run.py                        # report + failure taxonomy
-    python evals/run.py --model gpt-5.4-mini   # compare
+    python evals/run.py --suite shows           # report + failure taxonomy
+    python evals/run.py --suite charts
+    python evals/run.py --model gpt-5.4-mini    # compare
     python evals/run.py --compare a.json b.json
-    pytest -m eval                             # the same, as a CI gate
+    pytest -m eval                              # the same, as a CI gate
+
+Two suites share one runner, one scorer and one generator; a suite is a schema,
+a case file and a validator. Adding the chart feature added an entry, not a
+second harness.
 
 Measured on 2026-09-10, 54 cases:
 
@@ -109,6 +114,18 @@ can actually emit, took both to 100% and the suite from 89% to 96%.
 
 **One failure was ours.** An empty request returned a provider 400 rather than
 an answer. The eval found it; the fix is four lines and no round trip.
+
+The chart suite (49 cases) repeated the lesson more bluntly. `ChartSpec` had a
+`chart` field, and the model would read "over time", pick a line, and leave
+`dimension` on artist - a pair that cannot be drawn. Four rounds of rewording
+moved the score between 43 and 49 out of 49 without fixing it, because the
+schema could express the invalid state. Chart type is a function of dimension,
+so it was deleted from the schema and derived in code; the failure class went
+with it and the variance collapsed to 47-48.
+
+**A single run is not a measurement.** The same code scored 100% and then 98%
+on consecutive runs with nothing changed. Every figure here is from repeated
+runs, and the CI floors sit well below the observed range on purpose.
 
 ## Layout
 

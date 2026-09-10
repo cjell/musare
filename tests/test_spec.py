@@ -13,8 +13,11 @@ TODAY = date(2026, 9, 10)
 
 def show(**kw):
     base = {
-        "artist": "Slow Pulp", "date": "2026-09-20", "distance_mi": 10.0,
-        "fans": 40_000, "yours": True,
+        "artist": "Slow Pulp",
+        "date": "2026-09-20",
+        "distance_mi": 10.0,
+        "fans": 40_000,
+        "yours": True,
     }
     base.update(kw)
     return base

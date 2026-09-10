@@ -11,6 +11,13 @@ is a bad title; a bad metric is a lie with axes on it.
 
 Same rule as ShowFilter: nothing here names a table, a column, a file or a
 user. The model chooses from a menu; it never writes a query.
+
+There is deliberately no `chart` field. It was one, and it cost four rounds of
+prose: the model would read "over time" and pick a line while leaving dimension
+on artist, which is a pair that cannot be drawn. Chart type is a function of
+dimension - dates get a line, everything else a bar - so deriving it in code
+deletes the entire failure class instead of describing around it. When a field
+can be computed, computing it beats asking for it.
 """
 
 from __future__ import annotations
@@ -35,20 +42,16 @@ class ChartSpec(BaseModel):
             "of the axes. Six words at most."
         ),
     )
-    chart: Literal["bar", "line", "area"] = Field(
-        default="bar",
-        description=(
-            "How to draw it. 'line' or 'area' only for something measured over "
-            "consecutive dates; 'bar' for everything compared side by side, including "
-            "hours of the day and days of the week."
-        ),
-    )
-    metric: Literal["hours", "plays", "tracks", "artists", "skip_rate"] = Field(
+    metric: Literal["hours", "plays", "distinct_tracks", "distinct_artists", "skip_rate"] = Field(
         default="hours",
         description=(
-            "What is being counted. 'hours' is time listened and is the usual answer; "
-            "'plays' counts individual listens; 'tracks' and 'artists' count how many "
-            "distinct ones appear, for questions about variety or breadth; "
+            "What is being counted. Default to 'hours' - time listened is what "
+            "'top', 'most', 'favourite' and 'listened to the most' mean unless the "
+            "user says otherwise. Use 'plays' only when they ask about a count of "
+            "listens - 'how many times', 'play count', 'number of plays'. "
+            "'distinct_tracks' and 'distinct_artists' count how many different ones "
+            "appear, and are only for questions about variety, range or breadth - "
+            "never for 'top artists', which ranks artists by hours. "
             "'skip_rate' is the percentage skipped."
         ),
     )
@@ -58,7 +61,10 @@ class ChartSpec(BaseModel):
         default="artist",
         description=(
             "What goes along the bottom. 'date' for anything over time - use it with "
-            "grain. 'hour_of_day' for questions about times of day ('2am', 'mornings'), "
+            "grain, and use it whenever the request says 'over time', 'by month', "
+            "'trend' or 'year over year', even when an artist is named. A named "
+            "artist belongs in the artists field, not here; 'artist' as a dimension "
+            "means one bar per artist. 'hour_of_day' for questions about times of day ('2am', 'mornings'), "
             "'day_of_week' for weekdays and weekends, 'platform' for phone versus "
             "desktop. Otherwise the thing being ranked."
         ),

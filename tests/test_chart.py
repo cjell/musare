@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from musicshare.spec.chart import MAX_SERIES, ChartSpec
-from musicshare.spec.chartrun import DIMENSIONS, METRICS, MIN_SAMPLE, run
+from musicshare.spec.chartrun import DIMENSIONS, METRICS, MIN_SAMPLE, chart_for, run
 from musicshare.taste import has_history
 
 pytestmark = pytest.mark.skipif(not has_history(), reason="no play history ingested")
@@ -98,3 +98,10 @@ def test_title_falls_back_to_something_descriptive():
 def test_limit_cannot_exceed_the_schema_cap():
     with pytest.raises(ValueError):
         ChartSpec(limit=MAX_SERIES + 1)
+
+
+def test_chart_type_is_derived_not_chosen():
+    """Removing it from the schema removed a whole class of undrawable specs."""
+    assert chart_for("date") == "line"
+    assert all(chart_for(d) == "bar" for d in DIMENSIONS)
+    assert "chart" not in ChartSpec.model_json_schema()["properties"]

@@ -46,6 +46,10 @@ def _matches(expected: Any, got: Any) -> bool:
     if isinstance(expected, dict) and "between" in expected:
         lo, hi = expected["between"]
         return isinstance(got, int | float) and lo <= got <= hi
+    if isinstance(expected, dict) and "in" in expected:
+        # Two answers can be equally right - line or area for a series over
+        # time - and demanding one would score taste rather than correctness.
+        return got in expected["in"]
     if isinstance(expected, list):
         # Artist order is not meaningful, and casing is the model echoing the
         # user rather than a judgement.
