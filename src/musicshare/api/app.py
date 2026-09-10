@@ -64,7 +64,7 @@ def seed(refresh: bool = False) -> dict[str, object]:
     one tap and search is the escape hatch rather than the entry point.
     """
     if not taste.has_history():
-        return {"tracks": [], "artists": [], "note": "no play history ingested"}
+        return {"tracks": [], "artists": [], "albums": [], "note": "no play history ingested"}
     try:
         return taste.build_seed(refresh=refresh)
     except SpotifyError as e:

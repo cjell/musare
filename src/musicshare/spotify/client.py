@@ -194,6 +194,22 @@ class SpotifyClient:
             log.warning("artist %s: %s", artist_id, e)
             return None
 
+    def resolve_album(self, name: str, artist: str = "") -> dict[str, Any] | None:
+        """Best-effort (album, artist) -> album.
+
+        The field filters are what keep "Love Deluxe" from matching a covers
+        compilation; the bare query is the fallback when they find nothing.
+        """
+        queries = [f'album:"{name}" artist:"{artist}"'.strip(), f"{name} {artist}".strip()]
+        for q in queries:
+            hits = self.search(q, ("album",), limit=5)["albums"]
+            for h in hits:
+                if (h.get("name") or "").lower() == name.lower():
+                    return h
+            if hits:
+                return hits[0]
+        return None
+
     def resolve_artist(self, name: str) -> dict[str, Any] | None:
         """Best-effort name -> artist. Stands in for the forbidden batch lookup.
 

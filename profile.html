@@ -944,6 +944,11 @@ details[open] summary .chev{transform:rotate(180deg)}
 .slot-row{height:58px;border-radius:9px;margin:0 -8px}
 .slot-sq{width:100%;aspect-ratio:1/1;border-radius:8px}
 .slot-ci{width:100%;aspect-ratio:1/1;border-radius:50%}
+/* flex-none: in the .artist column the slot is a flex item, and without this it
+   shrinks and loses its 1/1 ratio once the label lines are laid out. */
+.slotcell{cursor:default}
+.slotcell .slot{flex:none}
+.slotcell .an,.slotcell .pn,.slotcell .ameta,.slotcell .pm{pointer-events:none}
 
 /* Remove control, only in edit mode. Sits on the artwork corner so it reads as
    attached to the item rather than to the row. */
@@ -2886,6 +2891,16 @@ function slotBtn(kind, idx, shape){
   return '<button class="slot ' + shape + '" type="button" data-slot="' + kind + '" data-idx="' + idx +
          '" aria-label="Add to ' + kind + '">' + PLUS + "</button>";
 }
+/* A bare slot inside a grid stretches to the row height, and aspect-ratio then
+   takes its width from that - so an empty circle grows past its column. Giving
+   the slot the same wrapper the filled item uses fixes the geometry and holds
+   the label space, so filling one does not move the others. */
+function slotCell(kind, idx, shape, wrapCls, nameCls, metaCls){
+  /* Both label lines carry a space rather than nothing: an empty div collapses
+     to zero height, and the section would jump the moment the first item lands. */
+  return '<div class="' + wrapCls + ' slotcell">' + slotBtn(kind, idx, shape) +
+         '<div class="' + nameCls + '">&nbsp;</div><div class="' + metaCls + '">&nbsp;</div></div>';
+}
 
 /* Sections render pins when any exist, and the sample data when none do, so a
    profile nobody has customized still looks like a profile. Edit mode always
@@ -2934,7 +2949,7 @@ function renderPins(p){
         '<div class="ring"><div class="art" style="' + artStyle(ademo[0], hue) + '"></div></div>' +
         '<div class="an">' + esc(ademo[0]) + '</div><div class="ameta">' + esc(ademo[1]) + "</div></div>";
     } else if(editing && self){
-      ah += slotBtn("artists", j, "slot-ci");
+      ah += slotCell("artists", j, "slot-ci", "artist", "an", "ameta");
     }
   }
   $("artists").innerHTML = ah;
@@ -2951,7 +2966,7 @@ function renderPins(p){
         esc((bpin.release_date || "").slice(0, 4)) + "</div>" +
         unpinBtn("albums", k) + "</div>";
     } else if(editing && self){
-      bh += slotBtn("albums", k, "slot-sq");
+      bh += slotCell("albums", k, "slot-sq", "pl", "pn", "pm");
     }
   }
   $("albums").innerHTML = bh;
@@ -3012,17 +3027,19 @@ function loadSeed(){
   var mine = ++pickSeq;
   function done(){
     if(mine !== pickSeq) return;
-    var items = pickKind === "artist" ? (pickSeed.artists || []) : (pickSeed.tracks || []);
-    if(pickKind === "album" || !items.length){
+    var items = pickKind === "artist" ? (pickSeed.artists || [])
+              : pickKind === "album" ? (pickSeed.albums || [])
+              : (pickSeed.tracks || []);
+    if(!items.length){
       list.innerHTML = '<div class="pick-note">Search above to find ' +
-        (pickKind === "album" ? "an album" : "something") + ".</div>";
+        (pickKind === "album" ? "an album" : pickKind === "artist" ? "an artist" : "a song") + ".</div>";
       return;
     }
     showResults(items.slice(0, 40), "your most played");
   }
   if(pickSeed) return done();
   list.innerHTML = '<div class="pick-note">Loading your top ' +
-    (pickKind === "artist" ? "artists" : "songs") + "...</div>";
+    (pickKind === "artist" ? "artists" : pickKind === "album" ? "albums" : "songs") + "...</div>";
   fetch("/api/seed").then(function(r){
     if(!r.ok) throw new Error(r.status);
     return r.json();
@@ -3030,7 +3047,7 @@ function loadSeed(){
     pickSeed = d;
     done();
   }).catch(function(){
-    pickSeed = { tracks: [], artists: [] };
+    pickSeed = { tracks: [], artists: [], albums: [] };
     if(mine === pickSeq) offline();
   });
 }
