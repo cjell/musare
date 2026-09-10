@@ -1068,7 +1068,7 @@ details[open] summary .chev{transform:rotate(180deg)}
 .pick-item:hover{background:rgba(244,241,250,.05)}
 .pick-item:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .pick-item .thumb{width:44px;height:44px;border-radius:6px;flex:none;background:#221C33 center/cover no-repeat}
-.pick-item.artist .thumb{border-radius:50%}
+.pick-item.pk-artist .thumb{border-radius:50%}
 /* .pi-m is a flex item so it blockifies, but its own children are plain
    inline spans - without this the title and the artist share a line. */
 .pick-item .pi-m{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
@@ -1076,6 +1076,13 @@ details[open] summary .chev{transform:rotate(180deg)}
 .pick-item .pi-n{font-size:13.5px;font-weight:500}
 .pick-item .pi-s{font-size:11.5px;color:var(--ink-3)}
 .pick-item .pi-y{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);flex:none}
+.pick-item.pinned .thumb,.pick-item.pinned .pi-m{opacity:.42}
+.pi-tag{
+  font-family:"IBM Plex Mono",monospace;font-size:8.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--accent);flex:none;
+  border:1px solid var(--accent-line);background:var(--accent-tint);
+  padding:3px 7px;border-radius:99px;
+}
 .pick-group{
   font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.16em;
   text-transform:uppercase;color:var(--ink-3);margin:14px 0 6px;
@@ -3058,10 +3065,24 @@ function pinList(kind){
   for(var i = 0; i < PIN_SLOTS[kind]; i++) out.push(src[i] || null);
   return out;
 }
+function pinnedIndex(kind, id){
+  var list = pinList(kind);
+  for(var i = 0; i < list.length; i++) if(list[i] && list[i].id === id) return i;
+  return -1;
+}
+
 function setPin(kind, idx, item){
   var c = cust();
   if(!c.pins) c.pins = {};
   var list = pinList(kind);
+  /* One item, one slot. Choosing something already pinned moves it here rather
+     than duplicating it - the alternative is either a silent no-op, which
+     reads as broken, or two copies of the same record on one profile. */
+  if(item){
+    for(var i = 0; i < list.length; i++){
+      if(i !== idx && list[i] && list[i].id === item.id) list[i] = null;
+    }
+  }
   list[idx] = item;
   c.pins[kind] = list;
   saveCustom();
@@ -3183,11 +3204,17 @@ function pickRow(item, note){
   var sub = item.kind === "artist"
     ? (item.your_hours ? item.your_hours + " hours" : "Artist")
     : (item.artist_name || "");
-  return '<button class="pick-item ' + item.kind + '" type="button" data-pick="' + esc(item.id) + '">' +
+  var already = pickTarget && pinnedIndex(pickTarget.kind, item.id) >= 0;
+  var tail = already ? '<span class="pi-tag">Pinned</span>'
+           : note ? '<span class="pi-y">' + esc(note) + "</span>" : "";
+  /* Namespaced: a bare "artist" class collides with the profile's artist-circle
+     style, which is a centred flex column and turned every artist result into
+     a stacked card. */
+  return '<button class="pick-item pk-' + item.kind + (already ? " pinned" : "") +
+    '" type="button" data-pick="' + esc(item.id) + '">' +
     '<span class="thumb"' + img + "></span>" +
     '<span class="pi-m"><span class="pi-n">' + esc(item.name) + "</span>" +
-    '<span class="pi-s">' + esc(sub) + "</span></span>" +
-    (note ? '<span class="pi-y">' + esc(note) + "</span>" : "") + "</button>";
+    '<span class="pi-s">' + esc(sub) + "</span></span>" + tail + "</button>";
 }
 
 function showResults(items, heading){
