@@ -83,14 +83,20 @@ Measured on 2026-09-10, 54 cases:
 
 | | gpt-5.4-nano | gpt-5.4-mini |
 |---|---|---|
-| exact match | **96%** | 93% |
-| field accuracy | **97%** | 93% |
-| avg latency | 1660ms | 1684ms |
+| exact match | **100%** | 89% |
+| field accuracy | **100%** | 91% |
+| avg latency | 1696ms | 1597ms |
 
-The cheaper model wins. `mini` misses every inverted request - it reads "a big
-name" and "someone famous" as no constraint at all, scoring 40% on `min_fans`
-where `nano` scores 100%. Benchmarks would not have told you that about this
-task.
+The cheaper model wins, and not narrowly. `mini` misses every inverted request
+- it reads "a big name" and "someone famous" as no constraint at all - and
+scores 0% on gibberish where `nano` correctly refuses. Benchmarks would not
+have told you that about this task.
+
+**Read the 100% with suspicion.** The field descriptions were tuned against
+these exact cases, which is the definition of fitting to your own test set. It
+says the descriptions work on 54 known inputs, not that they generalise. The
+honest next step is a held-out split, or cases written by someone who has not
+seen the schema.
 
 Two findings from the first run worth keeping:
 

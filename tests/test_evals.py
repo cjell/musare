@@ -15,10 +15,11 @@ import pytest
 from evals.run import load_cases, run_case, summarise
 from musicshare.spec.generate import DEFAULT_MODEL
 
-# Held slightly under the 96% measured on 2026-09-10, so an ordinary wobble
-# does not fail the build but a real regression does.
-MIN_EXACT_MATCH = 0.90
-MIN_FIELD_ACCURACY = 0.92
+# The suite reads 100% on gpt-5.4-nano as of 2026-09-10. These floors sit well
+# under that on purpose: a gate that trips on ordinary model variance is a gate
+# people learn to ignore, and the point is to catch a real regression.
+MIN_EXACT_MATCH = 0.92
+MIN_FIELD_ACCURACY = 0.94
 
 
 @pytest.fixture(scope="module")
