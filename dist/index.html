@@ -3269,7 +3269,7 @@ $("tabCharts").addEventListener("click", function(){ showScreen("charts"); });
 var CHART_EXAMPLES = [
   "hours by month this year",
   "who I played most at 2am",
-  "my top artists, 2019 vs now",
+  "how my listening changed by year",
   "what I skip the most"
 ];
 
@@ -3286,8 +3286,17 @@ $("chartEg").addEventListener("click", function(e){
 
 var lastChart = null;
 
-function showChartResult(d, q){
-  lastChart = { data: d, q: q };
+/* Title is excluded on purpose: the same chart phrased two ways is one chart,
+   and the caption is the part most likely to differ. */
+function specId(spec){
+  var keys = Object.keys(spec).filter(function(k){ return k !== "title"; }).sort();
+  return "c" + seedOf(keys.map(function(k){
+    return k + ":" + JSON.stringify(spec[k]);
+  }).join("|")).toString(36);
+}
+
+function showChartResult(d, q, spec){
+  lastChart = { data: d, q: q, spec: spec, id: specId(spec) };
   $("chartResult").innerHTML = chartCard(d, {
     key: "live",
     actions: '<div class="chart-acts">' +
@@ -3322,7 +3331,7 @@ function askChart(){
       return;
     }
     note.textContent = "";
-    showChartResult(d.data, q);
+    showChartResult(d.data, q, d.spec);
   }).catch(function(){
     go.disabled = false;
     note.className = "ask-note bad";
@@ -3334,11 +3343,23 @@ $("chartResult").addEventListener("click", function(e){
   if(e.target.closest("#chartAgain")){ $("chartInput").focus(); $("chartInput").select(); return; }
   if(!e.target.closest("#chartPin") || !lastChart) return;
   var list = pinList("charts");
-  var slot = list.indexOf(null);
-  if(slot < 0) slot = PIN_SLOTS.charts - 1;   /* full: replace the last one */
-  setPin("charts", slot, { data: lastChart.data, q: lastChart.q, at: Date.now() });
   var note = $("chartNote");
   note.className = "ask-note";
+
+  var already = pinnedIndex("charts", lastChart.id);
+  if(already >= 0){
+    note.textContent = "Already on your profile.";
+    return;
+  }
+  var slot = list.indexOf(null);
+  if(slot < 0) slot = PIN_SLOTS.charts - 1;   /* full: replace the oldest one */
+  setPin("charts", slot, {
+    id: lastChart.id,
+    spec: lastChart.spec,
+    data: lastChart.data,
+    q: lastChart.q,
+    at: Date.now()
+  });
   note.textContent = "Pinned. It is on your profile now.";
 });
 
