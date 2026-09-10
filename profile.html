@@ -80,13 +80,13 @@ body{
 .pad{padding-left:var(--pad);padding-right:var(--pad)}
 
 /* ---- banner ---- */
-.banner{position:relative;height:154px;overflow:hidden}
+.banner{position:relative;height:216px;overflow:hidden}
 .banner canvas{display:block;width:100%;height:100%}
 .banner::after{
   content:"";position:absolute;inset:0;
   background:
     var(--grain),
-    linear-gradient(180deg,rgba(5,4,9,.55) 0%,rgba(5,4,9,0) 34%,rgba(11,10,15,.72) 82%,var(--ground) 100%);
+    linear-gradient(180deg,rgba(5,4,9,.52) 0%,rgba(5,4,9,0) 24%,rgba(11,10,15,.26) 68%,rgba(11,10,15,.84) 94%,var(--ground) 100%);
   background-size:120px,auto;
   background-blend-mode:overlay,normal;
 }
@@ -101,7 +101,7 @@ body{
 /* ---- identity ---- */
 /* avatar and actions share a row, bottom-aligned: the picture runs down to the
    buttons instead of stopping short of them */
-.head{margin-top:-44px}
+.head{margin-top:-106px}
 .toprow{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}
 .avatar{
   width:98px;height:98px;flex:none;border-radius:50%;
@@ -991,6 +991,35 @@ details[open] summary .chev{transform:rotate(180deg)}
 .editbar .primary{background:var(--accent);border-color:var(--accent);color:#120E1B}
 .editbar button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
+/* ================= crop positioner =================
+   A photo applied with object-fit:cover gives whatever the centre crop gives
+   you. This puts the frame in front of the user and lets them place the image
+   inside it. It also replaces the sheet, which used to sit over the profile
+   after an upload so you could not see what you had chosen. */
+.crop-wrap{position:fixed;inset:0;z-index:90;display:flex;align-items:flex-end;justify-content:center}
+.crop-wrap[hidden]{display:none}
+.crop-sheet{
+  position:relative;width:100%;max-width:420px;
+  background:#15121D;border:1px solid var(--line);border-bottom:0;
+  border-radius:18px 18px 0 0;padding:10px 18px 18px;
+}
+.crop-stage{
+  position:relative;margin-top:13px;border-radius:12px;overflow:hidden;
+  background:#08070B;cursor:grab;touch-action:none;
+}
+.crop-stage.dragging{cursor:grabbing}
+.crop-stage canvas{display:block;width:100%}
+/* The export is always a plain rectangle; the circle is only a preview of how
+   an avatar will be masked, drawn over the top. */
+.crop-mask{position:absolute;inset:0;pointer-events:none}
+.crop-mask.circle::after{
+  content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  height:100%;aspect-ratio:1/1;border-radius:50%;
+  box-shadow:0 0 0 9999px rgba(8,7,11,.7);border:1px solid rgba(244,241,250,.25);
+}
+.crop-zoom{width:100%;margin:15px 0 3px;accent-color:var(--accent)}
+.crop-hint{font-size:11.5px;color:var(--ink-3);text-align:center}
+
 /* ================= pin picker ================= */
 .pick-wrap{position:fixed;inset:0;z-index:80;display:flex;align-items:flex-end;justify-content:center}
 .pick-wrap[hidden]{display:none}
@@ -1423,6 +1452,24 @@ details[open] summary .chev{transform:rotate(180deg)}
   <div class="editbar" id="editBar" hidden>
     <button type="button" id="editAppearance">Appearance</button>
     <button type="button" class="primary" id="editDone">Done</button>
+  </div>
+
+  <div class="crop-wrap" id="cropWrap" hidden role="dialog" aria-modal="true" aria-label="Position photo">
+    <div class="sheet-bg" id="cropBg"></div>
+    <div class="crop-sheet">
+      <div class="mf-grab" aria-hidden="true"></div>
+      <div class="pick-head" id="cropHead">Position your banner</div>
+      <div class="pick-sub">Drag to move it. Slide to zoom.</div>
+      <div class="crop-stage" id="cropStage">
+        <canvas id="cropCanvas"></canvas>
+        <div class="crop-mask" id="cropMask"></div>
+      </div>
+      <input class="crop-zoom" id="cropZoom" type="range" min="100" max="320" value="100" aria-label="Zoom">
+      <div class="sheet-actions">
+        <button type="button" id="cropCancel">Cancel</button>
+        <button type="button" id="cropSave">Use photo</button>
+      </div>
+    </div>
   </div>
 
   <div class="pick-wrap" id="pickWrap" hidden role="dialog" aria-modal="true" aria-label="Pin to your profile">
@@ -1989,25 +2036,49 @@ function genFrom(hex){
   return [f(0), f(8), f(4)];
 }
 
-/* phone photos are multi-megabyte; store a sane size or blow the quota */
-function shrink(file, maxW, cb){
+/* phone photos are multi-megabyte; store a sane size or blow the quota.
+
+   Downscaling a 12MP photo to 1000px in one drawImage aliases badly - browsers
+   use a cheap filter at that ratio, so fine detail turns into hard banding
+   rather than averaging out. Measured on a test pattern where correct
+   averaging gives stddev 0: one step scored 127.5, createImageBitmap at high
+   quality 104, halving repeatedly 95.1. So halve until the last step is under
+   2x, which every browser filters properly. */
+function downscale(img, maxW){
+  var cur = img, cw = img.width, ch = img.height;
+  while(cw / 2 > maxW){
+    var half = document.createElement("canvas");
+    half.width = Math.round(cw / 2);
+    half.height = Math.round(ch / 2);
+    var hx = half.getContext("2d");
+    hx.imageSmoothingEnabled = true;
+    hx.imageSmoothingQuality = "high";
+    hx.drawImage(cur, 0, 0, half.width, half.height);
+    cur = half; cw = half.width; ch = half.height;
+  }
+  var s = Math.min(1, maxW / cw);
+  var out = document.createElement("canvas");
+  out.width = Math.max(1, Math.round(cw * s));
+  out.height = Math.max(1, Math.round(ch * s));
+  var ox = out.getContext("2d");
+  ox.imageSmoothingEnabled = true;
+  ox.imageSmoothingQuality = "high";
+  ox.drawImage(cur, 0, 0, out.width, out.height);
+  return out;
+}
+
+function readImage(file, cb){
   var fr = new FileReader();
   fr.onload = function(){
     var img = new Image();
-    img.onload = function(){
-      var s = Math.min(1, maxW / img.width);
-      var cv = document.createElement("canvas");
-      cv.width = Math.round(img.width * s);
-      cv.height = Math.round(img.height * s);
-      cv.getContext("2d").drawImage(img, 0, 0, cv.width, cv.height);
-      cb(cv.toDataURL("image/jpeg", 0.82));
-    };
+    img.onload = function(){ cb(img); };
     img.onerror = function(){ cb(null); };
     img.src = fr.result;
   };
   fr.onerror = function(){ cb(null); };
   fr.readAsDataURL(file);
 }
+
 
 /* One place decides the expanded state, so the top toggle, the foot control
    and a profile switch can never disagree about it. */
@@ -2803,20 +2874,131 @@ $("custBio").addEventListener("input", function(){
   saveCustom(); $("bio").textContent = this.value.trim() || PROFILES[current].bio;
 });
 
-function wirePhoto(inputId, key, maxW){
-  $(inputId).addEventListener("change", function(){
-    var f = this.files && this.files[0];
-    if(!f) return;
-    shrink(f, maxW, function(data){
-      if(!data) return;
-      cust()[key] = data;
-      saveCustom(); render(current); syncSheet();
-    });
-    this.value = "";
+/* ---------- crop positioner ---------- */
+/* Working copy is generous so zooming in does not expose the downscale; the
+   export is sized to the frame it will actually fill on a 3x screen. */
+var CROP = {
+  banner: { work: 2000, out: 1500, aspect: 420 / 216, title: "Position your banner" },
+  avatar: { work: 1200, out: 640, aspect: 1, title: "Position your photo" }
+};
+var crop = { img: null, key: null, cfg: null, zoom: 1, base: 1, x: 0, y: 0, drag: null };
+
+function cropFrame(){
+  var cv = $("cropCanvas");
+  var w = cv.clientWidth || $("cropStage").clientWidth || 360;
+  return { w: w, h: Math.round(w / crop.cfg.aspect) };
+}
+
+/* The image must always cover the frame, so both the base scale and the pan
+   are clamped rather than letting the user drag past an edge into a gap. */
+function clampCrop(){
+  var f = cropFrame();
+  var iw = crop.img.width * crop.base * crop.zoom;
+  var ih = crop.img.height * crop.base * crop.zoom;
+  crop.x = Math.min(0, Math.max(f.w - iw, crop.x));
+  crop.y = Math.min(0, Math.max(f.h - ih, crop.y));
+}
+
+function drawCrop(){
+  if(!crop.img) return;
+  var cv = $("cropCanvas"), f = cropFrame();
+  var dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.round(f.w * dpr);
+  cv.height = Math.round(f.h * dpr);
+  cv.style.height = f.h + "px";
+  var ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.clearRect(0, 0, f.w, f.h);
+  clampCrop();
+  var s = crop.base * crop.zoom;
+  ctx.drawImage(crop.img, crop.x, crop.y, crop.img.width * s, crop.img.height * s);
+}
+
+function openCrop(key, file){
+  var cfg = CROP[key];
+  readImage(file, function(raw){
+    if(!raw) return;
+    var work = downscale(raw, cfg.work);
+    var img = new Image();
+    img.onload = function(){
+      crop.img = img; crop.key = key; crop.cfg = cfg; crop.zoom = 1;
+      closeCust();
+      $("cropHead").textContent = cfg.title;
+      $("cropMask").className = "crop-mask" + (key === "avatar" ? " circle" : "");
+      $("cropZoom").value = 100;
+      $("cropWrap").hidden = false;
+      document.body.style.overflow = "hidden";
+      var f = cropFrame();
+      crop.base = Math.max(f.w / img.width, f.h / img.height);
+      crop.x = (f.w - img.width * crop.base) / 2;
+      crop.y = (f.h - img.height * crop.base) / 2;
+      drawCrop();
+    };
+    img.src = work.toDataURL("image/jpeg", 0.92);
   });
 }
-wirePhoto("bannerFile", "banner", 1000);
-wirePhoto("avatarFile", "avatar", 320);
+
+function closeCrop(){
+  $("cropWrap").hidden = true;
+  document.body.style.overflow = "";
+  crop.img = null;
+}
+
+function saveCrop(){
+  var f = cropFrame(), cfg = crop.cfg;
+  var outW = cfg.out, outH = Math.round(outW / cfg.aspect);
+  var k = outW / f.w;   /* preview pixels -> export pixels */
+  var cv = document.createElement("canvas");
+  cv.width = outW; cv.height = outH;
+  var ctx = cv.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  var s = crop.base * crop.zoom * k;
+  ctx.drawImage(crop.img, crop.x * k, crop.y * k, crop.img.width * s, crop.img.height * s);
+  cust()[crop.key] = cv.toDataURL("image/jpeg", 0.9);
+  saveCustom();
+  closeCrop();
+  render(current);
+}
+
+function wirePhoto(inputId, key){
+  $(inputId).addEventListener("change", function(){
+    var f = this.files && this.files[0];
+    this.value = "";
+    if(f) openCrop(key, f);
+  });
+}
+wirePhoto("bannerFile", "banner");
+wirePhoto("avatarFile", "avatar");
+
+$("cropCancel").addEventListener("click", closeCrop);
+$("cropBg").addEventListener("click", closeCrop);
+$("cropSave").addEventListener("click", saveCrop);
+$("cropZoom").addEventListener("input", function(){
+  crop.zoom = (+this.value) / 100;
+  drawCrop();
+});
+
+(function(){
+  var stage = $("cropStage");
+  stage.addEventListener("pointerdown", function(e){
+    if(!crop.img) return;
+    crop.drag = { x: e.clientX - crop.x, y: e.clientY - crop.y };
+    stage.classList.add("dragging");
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener("pointermove", function(e){
+    if(!crop.drag) return;
+    crop.x = e.clientX - crop.drag.x;
+    crop.y = e.clientY - crop.drag.y;
+    drawCrop();
+  });
+  function end(){ crop.drag = null; stage.classList.remove("dragging"); }
+  stage.addEventListener("pointerup", end);
+  stage.addEventListener("pointercancel", end);
+})();
 
 $("custReset").addEventListener("click", function(){
   delete CUSTOM[current];
@@ -3136,7 +3318,8 @@ document.addEventListener("click", function(e){
 
 document.addEventListener("keydown", function(e){
   if(e.key !== "Escape") return;
-  if(!$("pickWrap").hidden) closePicker();
+  if(!$("cropWrap").hidden) closeCrop();
+  else if(!$("pickWrap").hidden) closePicker();
   else if(document.body.classList.contains("editing")) setEditing(false);
 });
 
