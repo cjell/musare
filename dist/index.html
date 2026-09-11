@@ -1053,6 +1053,19 @@ details[open] summary .chev{transform:rotate(180deg)}
 .pl.chartpin{grid-column:1 / -1}
 .pl.chartpin .chartcard{padding:12px 12px 8px}
 
+.chart-keep{display:flex;flex-direction:column;gap:14px;margin-top:4px}
+.chart-badge{
+  position:absolute;top:12px;right:12px;
+  font-family:"IBM Plex Mono",monospace;font-size:8.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--accent);
+  border:1px solid var(--accent-line);background:var(--accent-tint);
+  padding:3px 7px;border-radius:99px;
+}
+.chart-q{
+  font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3);
+  margin-top:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+
 /* ---- filter sheet ---- */
 .ask{display:flex;gap:8px;align-items:center;margin:4px 0 2px}
 .ask input{
@@ -1524,6 +1537,11 @@ details[open] summary .chev{transform:rotate(180deg)}
 
       <section class="sec" id="chartResultSec" hidden>
         <div id="chartResult"></div>
+      </section>
+
+      <section class="sec anim" id="chartKeptSec" hidden>
+        <div class="sec-label"><span>Kept</span><span class="aux" id="keptAux"></span></div>
+        <div class="chart-keep" id="chartKept"></div>
       </section>
 
       <div class="empty">
@@ -3227,7 +3245,7 @@ function showScreen(which){
     loadShows();   /* fetches once, then the cache serves it */
     playIn($("showsBeen").hidden ? $("showsUpcoming") : $("showsBeen"));
   }
-  else if(which === "charts") playIn($("screenCharts"));
+  else if(which === "charts"){ renderKept(); playIn($("screenCharts")); }
   else { paint(); playIn($("screenProfile")); }
 }
 
@@ -3343,6 +3361,67 @@ $("chartEg").addEventListener("click", function(e){
   $("chartInput").focus();
 });
 
+/* Three tiers, not two. A chart you asked for is transient; keeping it puts it
+   in a collection on this tab; pinning promotes one of those to the profile,
+   where there are only two slots. Without the middle tier every chart was
+   either on your profile or gone, which is why this screen kept saying nothing
+   was charted. */
+var KEPT_MAX = 12;
+
+function keptList(){
+  var c = CUSTOM[current] || {};
+  return (c.kept || []).slice();
+}
+function saveKept(list){
+  cust().kept = list.slice(0, KEPT_MAX);
+  saveCustom();
+}
+function keptIndex(id){
+  var l = keptList();
+  for(var i = 0; i < l.length; i++) if(l[i] && l[i].id === id) return i;
+  return -1;
+}
+function addKept(item){
+  var l = keptList();
+  if(keptIndex(item.id) >= 0) return false;
+  l.unshift(item);          /* newest first - it is the one you just made */
+  saveKept(l);
+  return true;
+}
+function removeKept(id){
+  saveKept(keptList().filter(function(k){ return k.id !== id; }));
+}
+
+function renderKept(){
+  var l = keptList(), pins = pinList("charts");
+  var pinnedIds = pins.filter(Boolean).map(function(p){ return p.id; });
+
+  $("chartKept").innerHTML = l.map(function(k, i){
+    var isPinned = pinnedIds.indexOf(k.id) >= 0;
+    return chartCard(k.data, {
+      key: "kept" + i,
+      unpin: isPinned ? '<span class="chart-badge">On profile</span>' : "",
+      actions: '<div class="chart-q">' + esc(k.q) + "</div>" +
+        '<div class="chart-acts">' +
+        '<button class="btn ' + (isPinned ? "btn-ghost" : "btn-primary") + '" type="button" ' +
+        'data-pin="' + esc(k.id) + '"' + (isPinned ? " disabled" : "") + ">" +
+        (isPinned ? "On your profile" : "Pin to profile") + "</button>" +
+        '<button class="btn btn-ghost" type="button" data-drop="' + esc(k.id) + '">Remove</button>' +
+        "</div>"
+    });
+  }).join("");
+
+  $("chartKeptSec").hidden = !l.length;
+  $("keptAux").textContent = l.length ? l.length + " chart" + (l.length === 1 ? "" : "s") : "";
+  /* The empty state only belongs here when there is genuinely nothing kept. */
+  var empty = document.querySelector("#screenCharts .empty");
+  if(empty) empty.hidden = !!l.length;
+
+  l.forEach(function(k, i){
+    drawChart(document.querySelector('#chartKept [data-chart="kept' + i + '"]'), k.data);
+  });
+}
+
 var lastChart = null;
 
 /* Title is excluded on purpose: the same chart phrased two ways is one chart,
@@ -3359,7 +3438,7 @@ function showChartResult(d, q, spec){
   $("chartResult").innerHTML = chartCard(d, {
     key: "live",
     actions: '<div class="chart-acts">' +
-      '<button class="btn btn-primary" type="button" id="chartPin">Pin to profile</button>' +
+      '<button class="btn btn-primary" type="button" id="chartKeep">Keep</button>' +
       '<button class="btn btn-ghost" type="button" id="chartAgain">Ask again</button></div>'
   });
   $("chartResultSec").hidden = false;
@@ -3398,28 +3477,49 @@ function askChart(){
   });
 }
 
+function chartRecord(c){
+  return { id: c.id, spec: c.spec, data: c.data, q: c.q, at: Date.now() };
+}
+
 $("chartResult").addEventListener("click", function(e){
   if(e.target.closest("#chartAgain")){ $("chartInput").focus(); $("chartInput").select(); return; }
-  if(!e.target.closest("#chartPin") || !lastChart) return;
-  var list = pinList("charts");
+  if(!e.target.closest("#chartKeep") || !lastChart) return;
   var note = $("chartNote");
   note.className = "ask-note";
+  var added = addKept(chartRecord(lastChart));
+  note.textContent = added
+    ? "Kept. Pin it below to put it on your profile."
+    : "You already kept this one.";
+  renderKept();
+  $("chartResultSec").hidden = true;
+});
 
-  var already = pinnedIndex("charts", lastChart.id);
-  if(already >= 0){
-    note.textContent = "Already on your profile.";
+$("chartKept").addEventListener("click", function(e){
+  var drop = e.target.closest("[data-drop]");
+  if(drop){
+    var id = drop.dataset.drop;
+    /* Removing a kept chart takes it off the profile too - the profile shows a
+       subset of what you kept, so leaving a pin behind would strand it. */
+    var pins = pinList("charts");
+    for(var i = 0; i < pins.length; i++) if(pins[i] && pins[i].id === id) setPin("charts", i, null);
+    removeKept(id);
+    renderKept();
+    renderPins(PROFILES[current]);
     return;
   }
+  var pin = e.target.closest("[data-pin]");
+  if(!pin) return;
+  var k = keptList()[keptIndex(pin.dataset.pin)];
+  if(!k) return;
+  var list = pinList("charts");
   var slot = list.indexOf(null);
-  if(slot < 0) slot = PIN_SLOTS.charts - 1;   /* full: replace the oldest one */
-  setPin("charts", slot, {
-    id: lastChart.id,
-    spec: lastChart.spec,
-    data: lastChart.data,
-    q: lastChart.q,
-    at: Date.now()
-  });
-  note.textContent = "Pinned. It is on your profile now.";
+  if(slot < 0) slot = PIN_SLOTS.charts - 1;   /* full: replace the oldest */
+  setPin("charts", slot, chartRecord(k));
+  renderKept();
+  renderPins(PROFILES[current]);
+  var note = $("chartNote");
+  note.className = "ask-note";
+  note.textContent = "On your profile now.";
 });
 
 $("chartGo").addEventListener("click", askChart);
