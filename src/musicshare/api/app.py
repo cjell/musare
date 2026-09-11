@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from musicshare import home as home_mod
+from musicshare import live as live_mod
 from musicshare import regions as regions_mod
 from musicshare import shows as shows_mod
 from musicshare import taste
@@ -208,6 +209,17 @@ def home(refresh: bool = False) -> dict[str, object]:
     except Exception as e:
         log.error("home build failed: %s", e)
         raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
+
+
+@app.get("/api/now")
+def now() -> dict[str, object]:
+    """What the profile owner is playing this second, if anything.
+
+    Never an error. A status that cannot be read is a profile without a status,
+    not a broken page - so a missing token, a silent player and a Spotify outage
+    all come back the same way, with the reason only in the log.
+    """
+    return {"now": live_mod.now_playing()}
 
 
 @app.get("/api/map")

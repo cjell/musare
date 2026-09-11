@@ -16,8 +16,10 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 import duckdb
 import httpx
@@ -171,3 +173,64 @@ def prune(keep: int = 12) -> int:
     for f in stale:
         f.unlink()
     return len(stale)
+
+
+NOW = "https://api.spotify.com/v1/me/player/currently-playing"
+# What "now" is worth caching for. Long enough that a page polling every few
+# seconds does not become a request per second, short enough that the answer is
+# still true - a status that lags a minute behind is worse than no status.
+NOW_TTL = 5.0
+_now_cache: tuple[float, dict | None] | None = None
+
+
+def now_playing(ttl: float = NOW_TTL) -> dict[str, Any] | None:
+    """The track playing right now, or None when nothing is.
+
+    None covers three different situations on purpose - nothing playing, the
+    endpoint returning 204, and a player Spotify cannot see - because the
+    profile does the same thing in all three: shows no status. The distinction
+    only matters in the log.
+
+    Needs the user-read-currently-playing scope. Without it Spotify answers 401
+    "Permissions missing", which is what it did here for months: the scope was
+    never requested, so the feature looked impossible rather than unasked for.
+    """
+    global _now_cache
+    if _now_cache and time.monotonic() - _now_cache[0] < ttl:
+        return _now_cache[1]
+
+    try:
+        r = httpx.get(
+            NOW,
+            headers={"Authorization": f"Bearer {access_token()}"},
+            timeout=10,
+        )
+    except (httpx.HTTPError, NoToken) as e:
+        log.warning("now playing: %s", e)
+        return None
+
+    out: dict[str, Any] | None = None
+    if r.status_code == 200 and r.text.strip():
+        j = r.json()
+        item = j.get("item") or {}
+        if item:
+            album = item.get("album") or {}
+            images = album.get("images") or []
+            out = {
+                "track": item.get("name"),
+                "artist": ", ".join(a["name"] for a in item.get("artists") or []),
+                "album": album.get("name"),
+                # Smallest image that is still sharp at the size a status row
+                # draws it; the 640px one is wasted bytes on a 40px square.
+                "art": (images[-1] if images else {}).get("url"),
+                "is_playing": bool(j.get("is_playing")),
+                "progress_ms": j.get("progress_ms") or 0,
+                "duration_ms": item.get("duration_ms") or 0,
+                "url": (item.get("external_urls") or {}).get("spotify"),
+                "uri": item.get("uri"),
+            }
+    elif r.status_code not in (200, 204):
+        log.warning("now playing: HTTP %s %s", r.status_code, r.text[:120])
+
+    _now_cache = (time.monotonic(), out)
+    return out

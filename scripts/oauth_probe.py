@@ -47,6 +47,10 @@ SCOPES = " ".join(
         "user-read-email",
         "user-top-read",
         "user-read-recently-played",
+        # What is playing right now. Absent until now, which is why
+        # /me/player/currently-playing answered "Permissions missing" - that was a
+        # scope never asked for, not an endpoint Spotify withholds.
+        "user-read-currently-playing",
         "user-library-read",
         "playlist-read-private",
         "playlist-read-collaborative",
@@ -201,6 +205,23 @@ def probe(token: str) -> None:
         ),
     )
     call(
+        "/me/player/currently-playing",
+        "/me/player/currently-playing",
+        {},
+        lambda j: (
+            # A 204 means the permission is there and nothing is playing, which
+            # is a pass - so the formatter has to handle an empty body.
+            "nothing playing"
+            if not j
+            else (
+                ", ".join(a["name"] for a in (j.get("item") or {}).get("artists") or [])
+                + " - "
+                + (j.get("item") or {}).get("name", "?")
+                + ("" if j.get("is_playing") else " (paused)")
+            )
+        ),
+    )
+    call(
         "/me/player/recently-played",
         "/me/player/recently-played",
         {"limit": 5},
@@ -243,8 +264,8 @@ def probe(token: str) -> None:
         if items:
             pid = items[0]["id"]
             call(
-                f"MY playlist tracks ({items[0]['name'][:20]})",
-                f"/playlists/{pid}/tracks",
+                f"MY playlist items ({items[0]['name'][:20]})",
+                f"/playlists/{pid}/items",
                 {"limit": 3},
                 lambda j: (
                     f"{j.get('total', '?')} tracks"
@@ -255,11 +276,20 @@ def probe(token: str) -> None:
                     )
                 ),
             )
+            # The endpoint this used to test. It answers 403 and that answer was
+            # read as "playlists are closed to us", which was wrong for months -
+            # it is deprecated, not forbidden. Kept so the table says so.
+            call(
+                "MY playlist tracks (deprecated path)",
+                f"/playlists/{pid}/tracks",
+                {"limit": 3},
+                lambda j: f"{j.get('total', '?')} tracks",
+            )
 
     # A public playlist owned by someone else - the pinning use case.
     call(
-        "SOMEONE ELSE's playlist tracks",
-        "/playlists/6i0HGU6npcXakgBxocOKUo/tracks",
+        "SOMEONE ELSE's playlist items",
+        "/playlists/6i0HGU6npcXakgBxocOKUo/items",
         {"limit": 3},
         lambda j: (
             f"{j.get('total', '?')} tracks"
