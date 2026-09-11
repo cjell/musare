@@ -331,6 +331,37 @@ body{
 .gapnote[hidden]{display:none}
 .gapnote b{color:var(--ink-2);font-weight:600}
 
+.pl .art.photo{background-size:cover;background-position:center}
+/* Constrained to the phone column the way .mapfull is. inset:0 looks right
+   until you see it: the overlay is a sibling of the frame, not a child, so a
+   full-viewport dialog spills across the desktop page beside the mockup. */
+.pl-open{
+  position:fixed;top:0;bottom:0;left:50%;transform:translateX(-50%);
+  width:100%;max-width:420px;z-index:70;display:flex;align-items:flex-end;
+  background:rgba(6,5,10,.72);backdrop-filter:blur(3px);
+}
+.pl-open[hidden]{display:none}
+/* Same surface and corners as .sheet, which is the existing bottom-sheet shape.
+   The first version invented --bg-2, which is not a variable this stylesheet
+   defines - an undefined custom property is not an error, it just resolves to
+   nothing, so the card came out transparent and the profile read through it. */
+.pl-card{
+  width:100%;max-height:78vh;display:flex;flex-direction:column;
+  background:var(--ground);border-radius:16px 16px 0 0;
+  border-top:1px solid var(--line-2);
+  padding:14px var(--pad) calc(16px + env(safe-area-inset-bottom));
+}
+.pl-head{display:flex;gap:11px;align-items:center;margin-bottom:12px}
+.pl-head .cv{width:52px;height:52px;border-radius:9px;object-fit:cover;background:var(--line-2);flex:0 0 auto}
+.pl-head .nm{font-size:15px;font-weight:650;line-height:1.25}
+.pl-head .mt{font-size:11px;color:var(--ink-3);margin-top:2px}
+.pl-list{overflow:auto;-webkit-overflow-scrolling:touch;margin:0 -4px}
+.pl-tr{display:flex;gap:9px;align-items:center;padding:5px 4px}
+.pl-tr img{width:32px;height:32px;border-radius:5px;object-fit:cover;background:var(--line-2);flex:0 0 auto}
+.pl-tr .tn{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-tr .ta2{font-size:10.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-tr .mx{min-width:0;flex:1 1 auto}
+
 /* ---- listening now ---- */
 .now{
   display:flex;align-items:center;gap:11px;margin-top:11px;
@@ -1783,6 +1814,20 @@ details[open] summary .chev{transform:rotate(180deg)}
     </div>
   </div>
 
+  <div class="pl-open" id="plOpen" hidden role="dialog" aria-modal="true" aria-label="Playlist">
+    <div class="pl-card">
+      <div class="pl-head">
+        <img class="cv" id="plCover" alt="">
+        <div style="min-width:0;flex:1 1 auto">
+          <div class="nm" id="plName"></div>
+          <div class="mt" id="plMeta"></div>
+        </div>
+        <button class="btn btn-ghost" type="button" id="plClose">Close</button>
+      </div>
+      <div class="pl-list" id="plList"></div>
+    </div>
+  </div>
+
   <div class="mapfull" id="mapFull" hidden role="dialog" aria-modal="true" aria-label="Full taste map">
     <div class="mf-grab" aria-hidden="true"></div>
     <div class="mf-top">
@@ -2557,9 +2602,15 @@ function render(i){
 
   $("simNote").textContent = p.sim.note;
 
-  $("playlists").innerHTML = p.playlists.map(function(x){
-    return '<div class="pl" tabindex="0" role="button"><div class="art" style="' + artStyle(x[0], p.artHue) + '"></div>' +
-           '<div class="pn">' + x[0] + '</div><div class="pm">' + x[1] + "</div></div>";
+  /* x is [name, meta, image, id]. The demo profiles supply the first two and
+     generate their cover from the name; real ones carry Spotify's artwork and
+     an id, which is what makes a card openable. */
+  $("playlists").innerHTML = p.playlists.map(function(x, i){
+    var art = x[2]
+      ? 'class="art photo" style="background-image:url(' + x[2] + ')"'
+      : 'class="art" style="' + artStyle(x[0], p.artHue) + '"';
+    return '<div class="pl" tabindex="0" role="button" data-pl="' + i + '"><div ' + art + "></div>" +
+           '<div class="pn">' + esc(x[0]) + '</div><div class="pm">' + esc(x[1]) + "</div></div>";
   }).join("");
   setPlaylists(false);
 
@@ -4013,6 +4064,71 @@ document.addEventListener("visibilitychange", function(){
   else { loadNow(); nowPolling(true); }
 });
 
+/* Real playlists, for the owner only. Spotify allows a listener their own
+   playlists and refuses everyone else's - /playlists/{someone else}/items is
+   403 even with the right scope - so the three demo profiles keep their
+   generated ones rather than showing an empty shelf. */
+function loadPlaylists(){
+  fetch("/api/playlists").then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(d){
+      if(!d || !d.playlists || !d.playlists.length) return;
+      PROFILES[0].playlists = d.playlists.map(function(p){
+        return [p.name, p.tracks + (p.tracks === 1 ? " track" : " tracks"), p.image, p.id];
+      });
+      if(current === 0) render(0);
+    }).catch(function(){});
+}
+
+function openPlaylist(i){
+  var p = PROFILES[current], x = p.playlists[i];
+  if(!x || !x[3]) return;            /* a demo card has no id and nothing behind it */
+  $("plName").textContent = x[0];
+  $("plMeta").textContent = x[1];
+  var cov = $("plCover");
+  if(x[2]){ cov.src = x[2]; cov.hidden = false; } else { cov.hidden = true; }
+  $("plList").innerHTML = '<div class="pl-tr"><span class="ta2">Loading...</span></div>';
+  $("plOpen").hidden = false;
+  document.body.style.overflow = "hidden";
+  $("plClose").focus();
+
+  fetch("/api/playlists/" + encodeURIComponent(x[3]) + "/tracks?limit=60")
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(d){
+      var ts = (d && d.tracks) || [];
+      if(!ts.length){
+        $("plList").innerHTML = '<div class="pl-tr"><span class="ta2">Nothing to show.</span></div>';
+        return;
+      }
+      $("plList").innerHTML = ts.map(function(t){
+        return '<div class="pl-tr">' +
+          (t.image ? '<img src="' + t.image + '" alt="">' : '<img alt="">') +
+          '<span class="mx"><span class="tn">' + esc(t.name) + "</span><br>" +
+          '<span class="ta2">' + esc(t.artist || "") + "</span></span></div>";
+      }).join("");
+    }).catch(function(){
+      $("plList").innerHTML = '<div class="pl-tr"><span class="ta2">Could not load.</span></div>';
+    });
+}
+
+function closePlaylist(){
+  $("plOpen").hidden = true;
+  document.body.style.overflow = "";
+}
+
+$("playlists").addEventListener("click", function(e){
+  var card = e.target.closest("[data-pl]");
+  if(card) openPlaylist(parseInt(card.dataset.pl, 10));
+});
+$("playlists").addEventListener("keydown", function(e){
+  if(e.key !== "Enter" && e.key !== " ") return;
+  var card = e.target.closest("[data-pl]");
+  if(card){ e.preventDefault(); openPlaylist(parseInt(card.dataset.pl, 10)); }
+});
+$("plClose").addEventListener("click", closePlaylist);
+$("plOpen").addEventListener("click", function(e){
+  if(e.target === $("plOpen")) closePlaylist();
+});
+
 $("tasteMapBtn").addEventListener("click", openMap);
 $("tasteMapBtn").addEventListener("keydown", function(e){
   if(e.key === "Enter" || e.key === " "){ e.preventDefault(); openMap(); }
@@ -4020,6 +4136,7 @@ $("tasteMapBtn").addEventListener("keydown", function(e){
 $("mfClose").addEventListener("click", closeMap);
 $("mfCloseBottom").addEventListener("click", closeMap);
 document.addEventListener("keydown", function(e){
+  if(e.key === "Escape" && !$("plOpen").hidden) closePlaylist();
   if(e.key === "Escape" && !$("mapFull").hidden) closeMap();
 });
 
@@ -4545,6 +4662,7 @@ render(0);
 loadMap();
 loadNow();
 nowPolling(true);
+loadPlaylists();
 showScreen("home");
 
 

@@ -16,6 +16,7 @@ from fastapi.responses import HTMLResponse
 
 from musicshare import home as home_mod
 from musicshare import live as live_mod
+from musicshare import playlists as pl_mod
 from musicshare import regions as regions_mod
 from musicshare import shows as shows_mod
 from musicshare import taste
@@ -227,6 +228,31 @@ def home(refresh: bool = False) -> dict[str, object]:
         "missed": bool(synced and synced.missed),
     }
     return data
+
+
+@app.get("/api/playlists")
+def playlists(refresh: bool = False, limit: int = Query(300, ge=1, le=1000)) -> dict[str, object]:
+    """The owner's playlists, with covers and track counts."""
+    try:
+        return {"playlists": pl_mod.mine(refresh=refresh, limit=limit)}
+    except Exception as e:
+        log.error("playlists failed: %s", e)
+        raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
+
+
+@app.get("/api/playlists/{playlist_id}/tracks")
+def playlist_tracks(playlist_id: str, limit: int = Query(60, ge=1, le=200)) -> dict[str, object]:
+    """What is in one playlist.
+
+    Only the owner's own. Spotify answers 403 for anyone else's, with the right
+    scope and the correct endpoint - that one is a real limit, unlike the 403 on
+    the deprecated /tracks path that made this feature look impossible.
+    """
+    try:
+        return {"tracks": pl_mod.tracks(playlist_id, limit=limit)}
+    except Exception as e:
+        log.error("playlist tracks failed: %s", e)
+        raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
 
 
 @app.get("/api/now")
