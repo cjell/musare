@@ -326,22 +326,21 @@ body{
 /* ---- listening now ---- */
 .now{
   display:flex;align-items:center;gap:11px;margin-top:11px;
-  padding:8px 14px 8px 8px;border:1px solid var(--accent-line);
+  padding:8px 14px 8px 12px;border:1px solid var(--accent-line);
   background:var(--accent-tint);border-radius:13px;width:100%;
   text-decoration:none;color:inherit;
 }
 .now[hidden]{display:none}
 .now .cov{width:42px;height:42px;border-radius:8px;object-fit:cover;flex:0 0 auto;background:var(--line-2)}
-/* Takes the slack, so the equaliser sits at the far edge rather than trailing
-   the artist name - at full width a live indicator reads better as a corner
-   light than as punctuation. */
+/* Takes the slack. The equaliser leads the row, so the live indicator is the
+   first thing read rather than something trailing the artist name. */
 .now .txt{min-width:0;display:flex;flex-direction:column;line-height:1.3;flex:1 1 auto}
 .now .t{font-size:12.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .now .a{font-size:10.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* Three bars rather than a dot, because a dot says "online" and this says
    "playing" - and it stops moving when the track is paused, which is the only
    honest way to draw a paused player. */
-.eq{display:flex;align-items:flex-end;gap:2.5px;height:14px;flex:0 0 auto;margin-left:4px}
+.eq{display:flex;align-items:flex-end;gap:2.5px;height:14px;flex:0 0 auto}
 .eq i{width:3px;background:var(--accent);border-radius:1px;height:35%}
 .now.on .eq i{animation:eqb .9s ease-in-out infinite}
 .now.on .eq i:nth-child(2){animation-delay:.18s}
@@ -1437,12 +1436,12 @@ details[open] summary .chev{transform:rotate(180deg)}
         <span class="badges" id="badges"></span>
       </div>
       <a class="now" id="nowRow" hidden target="_blank" rel="noopener">
+        <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
         <img class="cov" id="nowArt" alt="">
         <span class="txt">
           <span class="t" id="nowTrack"></span>
           <span class="a" id="nowArtist"></span>
         </span>
-        <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
       </a>
       <p class="bio" id="bio"></p>
       <div class="genres-top" id="topGenres"></div>
