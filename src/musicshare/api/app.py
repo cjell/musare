@@ -263,7 +263,11 @@ def now() -> dict[str, object]:
     not a broken page - so a missing token, a silent player and a Spotify outage
     all come back the same way, with the reason only in the log.
     """
-    return {"now": live_mod.now_playing()}
+    now = live_mod.now_playing()
+    # When nothing is playing the status does not disappear, it goes quiet - so
+    # the page still needs something true to say. The last play is already on
+    # disk and costs no request.
+    return {"now": now, "last": None if now else live_mod.last_played()}
 
 
 @app.get("/api/map")

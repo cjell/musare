@@ -385,7 +385,25 @@ body{
 .now.on .eq i:nth-child(2){animation-delay:.18s}
 .now.on .eq i:nth-child(3){animation-delay:.36s}
 @keyframes eqb{0%,100%{height:30%}50%{height:100%}}
-@media (prefers-reduced-motion:reduce){.now.on .eq i{animation:none;height:65%}}
+
+/* Quiet rather than gone. A status that disappears when nothing is playing
+   reads as a broken component; one that says so reads as a person who has
+   stopped listening, which is the true thing and the more interesting one. */
+.now.idle{border-color:var(--line-2);background:rgba(244,241,250,.03)}
+.now.idle .t{color:var(--ink-2);font-weight:600}
+.now.idle .eq{align-items:center;height:14px}
+.now.idle .eq i{
+  width:4px;height:4px;border-radius:50%;background:var(--ink-3);
+  animation:dotflow 1.5s ease-in-out infinite;
+}
+.now.idle .eq i:nth-child(2){animation-delay:.2s}
+.now.idle .eq i:nth-child(3){animation-delay:.4s}
+@keyframes dotflow{0%,100%{opacity:.25;transform:translateY(1.5px)}50%{opacity:.9;transform:translateY(-1.5px)}}
+
+@media (prefers-reduced-motion:reduce){
+  .now.on .eq i{animation:none;height:65%}
+  .now.idle .eq i{animation:none;opacity:.55;transform:none}
+}
 
 /* ---- taste map ---- */
 .map{position:relative;border:1px solid var(--line-2);border-radius:13px;overflow:hidden;background:rgba(13,11,20,.72);cursor:pointer}
@@ -4030,25 +4048,48 @@ $("mapFullCanvas").addEventListener("pointermove", function(e){
 /* What the owner is playing, polled while the page is actually being looked at.
    Only profile 0 has a player behind it; the other three are demos, and a
    status invented for them would be the one part of this page that lies. */
-var NOW = null, nowTimer = null;
+var NOW = null, LASTPLAY = null, nowTimer = null;
 
 function paintNow(){
   var row = $("nowRow");
-  if(!NOW || current !== 0){ row.hidden = true; return; }
+  /* The row only ever hides on someone else's profile, where there is no player
+     to report on. On the owner's it always says something: playing, paused, or
+     not listening. */
+  if(current !== 0){ row.hidden = true; return; }
   row.hidden = false;
-  row.classList.toggle("on", !!NOW.is_playing);
-  row.href = NOW.url || "#";
-  $("nowTrack").textContent = NOW.track || "";
-  $("nowArtist").textContent = (NOW.is_playing ? "" : "Paused \u00B7 ") + (NOW.artist || "");
+
   var art = $("nowArt");
-  if(NOW.art){ art.src = NOW.art; art.hidden = false; } else { art.hidden = true; }
+  if(NOW){
+    row.classList.toggle("on", !!NOW.is_playing);
+    row.classList.remove("idle");
+    row.href = NOW.url || "#";
+    $("nowTrack").textContent = NOW.track || "";
+    $("nowArtist").textContent = (NOW.is_playing ? "" : "Paused \u00B7 ") + (NOW.artist || "");
+    if(NOW.art){ art.src = NOW.art; art.hidden = false; } else { art.hidden = true; }
+    return;
+  }
+
+  row.classList.remove("on");
+  row.classList.add("idle");
+  row.removeAttribute("href");
+  art.hidden = true;
+  $("nowTrack").textContent = "Not listening";
+  /* The last play is worth more than an empty second line - it dates the
+     silence, which is the only interesting thing about it. */
+  $("nowArtist").textContent = LASTPLAY
+    ? "Last played " + LASTPLAY.track + (LASTPLAY.artist ? " \u00B7 " + LASTPLAY.artist : "")
+    : "";
 }
 
 function loadNow(){
   /* A hidden tab should not keep polling someone's player. */
   if(document.hidden) return;
   fetch("/api/now").then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(d){ NOW = d && d.now ? d.now : null; paintNow(); })
+    .then(function(d){
+      NOW = d && d.now ? d.now : null;
+      if(d && d.last) LASTPLAY = d.last;
+      paintNow();
+    })
     .catch(function(){ NOW = null; paintNow(); });
 }
 

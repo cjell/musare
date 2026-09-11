@@ -273,3 +273,27 @@ def sync_if_stale(max_age: timedelta = FRESH_FOR) -> SyncResult | None:
             result.watermark,
         )
     return result
+
+
+def last_played() -> dict[str, Any] | None:
+    """The most recent play on record, for when nothing is playing now.
+
+    Read from the local history rather than from Spotify: the export and the
+    synced window are already there, it costs no request, and "what they last
+    played" does not need to be fresher than the feed itself.
+    """
+    try:
+        con = connect()
+        row = con.execute("""
+            select track_name, artist_name, played_at
+            from plays
+            where track_name is not null
+            order by played_at desc
+            limit 1
+        """).fetchone()
+    except Exception as e:  # no history ingested is a normal state
+        log.debug("last played: %s", e)
+        return None
+    if not row:
+        return None
+    return {"track": row[0], "artist": row[1], "at": row[2].isoformat() if row[2] else None}
