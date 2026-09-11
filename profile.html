@@ -2179,7 +2179,14 @@ function hexRGB(hex){
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 /* The genre hue is derived, never chosen. One picked colour can't produce an
-   illegible pair, and every profile gets a harmonious two-colour set. */
+   illegible pair, and every profile gets a harmonious two-colour set.
+
+   The rotation was +155 - near-complementary, chosen when the accent was
+   orange and the pair came out orange/cyan. On the pink accent it derived
+   green, which is legible and wrong: the built-in profile says violet, so
+   picking an accent silently repainted the genre chips. -65 keeps them
+   neighbours instead of opposites: pink derives violet, orange derives pink,
+   teal derives green. Every swatch still clears 7:1 on the ground. */
 function genFrom(hex){
   var c = hexRGB(hex).map(function(v){ return v / 255; });
   var mx = Math.max.apply(null, c), mn = Math.min.apply(null, c), d = mx - mn, h = 0;
@@ -2189,7 +2196,7 @@ function genFrom(hex){
     else h = (c[0] - c[1]) / d + 4;
     h *= 60;
   }
-  var g = (h + 155) % 360, s = 0.78, l = 0.73;
+  var g = (h + 295) % 360, s = 0.78, l = 0.73;   /* -65 degrees */
   var a = s * Math.min(l, 1 - l);
   function f(n){
     var k = (n + g / 30) % 12;
