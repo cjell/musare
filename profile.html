@@ -1309,7 +1309,7 @@ details[open] summary .chev{transform:rotate(180deg)}
 
     <div class="pad" id="tabYou">
       <section class="sec anim">
-        <div class="sec-label"><span>Your map moved</span><span class="aux">Last 4 weeks</span></div>
+        <div class="sec-label"><span id="mvTitle">Your map moved</span><span class="aux" id="mvAux">Last 4 weeks</span></div>
         <div class="map" id="moveMapBtn" role="button" tabindex="0" aria-label="Open full taste map">
           <canvas id="movemap"></canvas>
           <span class="map-ax ax-l" id="mvAxL">Ambient</span>
@@ -2749,6 +2749,10 @@ function closeMap(){
   var mf = $("mapFull"), startY = null, dy = 0;
   mf.addEventListener("pointerdown", function(e){
     if(e.target.closest("button")) return;
+    /* Dragging the map is not dragging the sheet. Without this, panning left or
+       right also hauled the whole dialog downward, and the sheet's pointer
+       capture swallowed the release the map was waiting for. */
+    if(e.target.id === "mapFullCanvas" && MAPDATA && current === 0) return;
     startY = e.clientY; dy = 0;
     mf.classList.remove("snap");
     mf.setPointerCapture(e.pointerId);
@@ -3468,8 +3472,22 @@ $("discoverSegs").addEventListener("click", function(e){
 
 function paintYou(){
   var p = PROFILES[0];
-  tasteMap($("movemap"), HOME.you.map, p._accent || p.accent,
-           p._accentRGB || hexRGB(p.accent).join(","), p._genRGB || p.genRGB, false, "move");
+  var btn = $("moveMapBtn");
+  if(MAPDATA){
+    /* The generated version drew a "you moved 0.12 toward club" trail between
+       two points. There is no such measurement here and there cannot be: a
+       person is not a point on this projection, and distance on it is flat past
+       about three units. So the section shows where they actually are and says
+       something true underneath. */
+    btn.classList.add("real");
+    realMap($("movemap"), false);
+    $("mvNote").textContent = MAP_ARTISTS.toLocaleString() + " artists \u00B7 " +
+      MAP_YOURS + " regions";
+  } else {
+    btn.classList.remove("real");
+    tasteMap($("movemap"), HOME.you.map, p._accent || p.accent,
+             p._accentRGB || hexRGB(p.accent).join(","), p._genRGB || p.genRGB, false, "move");
+  }
 }
 
 /* ---------- screen switching ---------- */
@@ -4002,7 +4020,10 @@ function loadMap(){
     MAPDATA = d;
     MAP_ARTISTS = d.artists.length;
     MAP_YOURS = d.regions.filter(function(r){ return r.yours; }).length;
+    $("mvTitle").textContent = "Your taste map";
+    $("mvAux").textContent = "All time";
     render(current);
+    if(!$("screenHome").hidden) paintYou();
   }).catch(function(){
     /* No server, or nothing fitted yet. The generated map stays; the map is not
        worth an error banner on a profile page. */
@@ -4022,10 +4043,17 @@ var mapDrag = null;
 $("mapFullCanvas").addEventListener("pointerdown", function(e){
   if(!MAPDATA || current !== 0) return;
   mapDrag = { x: e.clientX, y: e.clientY };
-  $("mapFullCanvas").setPointerCapture(e.pointerId);
 });
-$("mapFullCanvas").addEventListener("pointerup", function(){ mapDrag = null; });
+/* On the window, not the canvas. A release outside the canvas - or one consumed
+   by whatever else captured the pointer - still has to end the drag, and the
+   first version did not: it left the map following the cursor with no button
+   held. */
+window.addEventListener("pointerup", function(){ mapDrag = null; });
+window.addEventListener("pointercancel", function(){ mapDrag = null; });
 $("mapFullCanvas").addEventListener("pointermove", function(e){
+  /* Belt and braces: if no button is down, no drag is in progress, whatever
+     state this was left in. */
+  if(e.buttons === 0){ mapDrag = null; return; }
   if(!mapDrag) return;
   var cv = $("mapFullCanvas");
   var k = Math.min(cv.clientWidth, cv.clientHeight) * MAPZ;
@@ -4164,6 +4192,13 @@ $("plOpen").addEventListener("click", function(e){
 });
 
 $("tasteMapBtn").addEventListener("click", openMap);
+/* The home screen's map carries the same "Open full map" affordance and was
+   never wired to anything - role="button", an aria-label promising it opens,
+   and no listener. */
+$("moveMapBtn").addEventListener("click", openMap);
+$("moveMapBtn").addEventListener("keydown", function(e){
+  if(e.key === "Enter" || e.key === " "){ e.preventDefault(); openMap(); }
+});
 $("tasteMapBtn").addEventListener("keydown", function(e){
   if(e.key === "Enter" || e.key === " "){ e.preventDefault(); openMap(); }
 });
@@ -4293,7 +4328,12 @@ function renderShelf(){
     var art = x[2]
       ? 'class="art photo" style="background-image:url(' + x[2] + ')"'
       : 'class="art" style="' + artStyle(x[0], p.artHue) + '"';
-    return '<div class="pl" tabindex="0" role="button" data-pl="' + i + '"><div ' + art + "></div>" +
+    /* The same remove control every other pinned section has. Without it a
+       playlist could be pinned and never taken off, which made the six slots a
+       one-way door. */
+    var kill = (editing && self && lAny) ? unpinBtn("playlists", i) : "";
+    return '<div class="pl' + (kill ? " pinbox" : "") + '" tabindex="0" role="button" data-pl="' + i +
+           '"><div ' + art + "></div>" + kill +
            '<div class="pn">' + esc(x[0]) + '</div><div class="pm">' + esc(x[1]) + "</div></div>";
   }).join("");
   if(editing && self){

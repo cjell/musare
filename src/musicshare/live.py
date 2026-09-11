@@ -34,6 +34,31 @@ TOKEN_URL = "https://accounts.spotify.com/api/token"
 RECENT = "https://api.spotify.com/v1/me/player/recently-played"
 
 
+def pick_image(images: list[dict[str, Any]] | None, want: int) -> str | None:
+    """The smallest image still big enough for the size it will be drawn at.
+
+    Spotify returns these largest-first, so the tempting images[-1] is the 60px
+    thumbnail - which is what made the playlist grid blurry, since a grid cell is
+    about 110 CSS pixels and twice that on a retina screen. Taking the smallest
+    that clears the requested width keeps it sharp without shipping the 640px
+    version to draw a 32px row.
+
+    Some playlist covers come back as a single entry with null dimensions. There
+    is nothing to choose between, so it is used as-is.
+    """
+    if not images:
+        return None
+    sized = [i for i in images if i.get("width")]
+    if not sized:
+        return images[0].get("url")
+    big_enough = [i for i in sized if i["width"] >= want]
+    return (
+        min(big_enough, key=lambda i: i["width"])
+        if big_enough
+        else max(sized, key=lambda i: i["width"])
+    )["url"]
+
+
 class NoToken(RuntimeError):
     pass
 
@@ -220,9 +245,9 @@ def now_playing(ttl: float = NOW_TTL) -> dict[str, Any] | None:
                 "track": item.get("name"),
                 "artist": ", ".join(a["name"] for a in item.get("artists") or []),
                 "album": album.get("name"),
-                # Smallest image that is still sharp at the size a status row
-                # draws it; the 640px one is wasted bytes on a 40px square.
-                "art": (images[-1] if images else {}).get("url"),
+                # 42px square on screen, so 96 covers a 2x display. The 640px
+                # one is wasted bytes and the 64px one is visibly soft.
+                "art": pick_image(images, 96),
                 "is_playing": bool(j.get("is_playing")),
                 "progress_ms": j.get("progress_ms") or 0,
                 "duration_ms": item.get("duration_ms") or 0,

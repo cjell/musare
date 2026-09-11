@@ -29,7 +29,7 @@ from typing import Any
 import httpx
 
 from musicshare.config import ROOT
-from musicshare.live import access_token
+from musicshare.live import access_token, pick_image
 
 log = logging.getLogger(__name__)
 
@@ -76,8 +76,8 @@ def _shape(p: dict[str, Any]) -> dict[str, Any]:
         "id": p.get("id"),
         "name": p.get("name") or "Untitled",
         "tracks": _count(p),
-        # Spotify returns these largest-first; the grid draws them small.
-        "image": (images[-1] if images else {}).get("url"),
+        # The grid cell is about 110 CSS pixels, so ask for twice that.
+        "image": pick_image(images, 240),
         "url": (p.get("external_urls") or {}).get("spotify"),
         "public": bool(p.get("public")),
         "owner": ((p.get("owner") or {}).get("display_name")) or "",
@@ -148,7 +148,8 @@ def tracks(playlist_id: str, limit: int = 100) -> list[dict[str, Any]]:
                     "name": t["name"],
                     "artist": ", ".join(a["name"] for a in t.get("artists") or []),
                     "album": album.get("name"),
-                    "image": (images[-1] if images else {}).get("url"),
+                    # A 32px row on a 2x screen wants 64.
+                    "image": pick_image(images, 64),
                     "uri": t.get("uri"),
                     "url": (t.get("external_urls") or {}).get("spotify"),
                 }
