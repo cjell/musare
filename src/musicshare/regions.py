@@ -48,8 +48,25 @@ OUT_DIR = ROOT / "data" / "embed"
 ATLAS_JSON = OUT_DIR / "atlas.json"
 ATLAS_ASSIGN = OUT_DIR / "atlas_assign.npy"
 
+# The starting split. The final count is higher, because a region that turns out
+# to be two things is cut in two - see `_partition`.
 K = 80
 SEED = 20260910
+# A region whose average pair of artists is less alike than this is not a place,
+# it is a drawer. Measured across a real fit: the median region scored 0.464 and
+# the tightest 0.767, while "latin mix" held 7,271 artists at 0.018 - a sample
+# statistically indistinguishable from the corpus at large, named after one small
+# corner of itself. Size predicts this (size against looseness correlates -0.59),
+# because a fixed k spends clusters evenly over a space whose density is not.
+COHESION_FLOOR = 0.45
+COHESION_SAMPLE = 300
+# Do not cut below this, however loose: past a point a region is small enough
+# that its looseness is the corpus being thin there, not two scenes glued.
+MIN_REGION = 250
+# A ceiling on the recursion, so a pathological corner cannot shatter into
+# hundreds of slivers. Splitting takes the worst region first, so if this is ever
+# reached the ones left unsplit are the least broken.
+MAX_REGIONS = 160
 # Two regions this close are one region cut in half. Used to report the twin rate
 # rather than to gate k, because at this scale a few twins are expected and the
 # naming step has to tell them apart regardless.
@@ -100,6 +117,62 @@ class Atlas:
         return self.regions[int(self.assign[i])]
 
 
+def _cohesion(Z: Any, rng: Any) -> float:
+    """Mean similarity of a random pair inside a region. Its tightness."""
+    n = len(Z)
+    if n < 2:
+        return 1.0
+    if n > COHESION_SAMPLE:
+        Z = Z[rng.choice(n, COHESION_SAMPLE, replace=False)]
+        n = COHESION_SAMPLE
+    S = Z @ Z.T
+    return float((S.sum() - n) / (n * n - n))
+
+
+def _partition(space: Space, labels: Any, k: int, seed: int) -> list[Any]:
+    """Cut every region that is really two, worst first.
+
+    A bigger k is the obvious alternative and is the wrong move: it carves the
+    regions that are already fine even finer, while the one drawer holding 5% of
+    the corpus stays a drawer. Splitting on measured looseness instead puts the
+    cuts where the data needs them, and the criterion that diagnoses the problem
+    is the same one that decides when to stop.
+    """
+    from sklearn.cluster import KMeans
+
+    rng = np.random.default_rng(seed)
+    parts = [np.where(labels == c)[0] for c in range(k)]
+    scores = [_cohesion(space.Z[p], rng) for p in parts]
+
+    while len(parts) < MAX_REGIONS:
+        # The loosest region that is still big enough to divide.
+        worst, best = -1, COHESION_FLOOR
+        for i, (part, sc) in enumerate(zip(parts, scores, strict=True)):
+            if sc < best and len(part) >= 2 * MIN_REGION:
+                worst, best = i, sc
+        if worst < 0:
+            break
+
+        rows = parts[worst]
+        km = KMeans(n_clusters=2, n_init=5, random_state=seed).fit(space.Z[rows])
+        left, right = rows[km.labels_ == 0], rows[km.labels_ == 1]
+        if min(len(left), len(right)) < MIN_REGION:
+            # Splitting would only shave off a sliver; leave it and stop
+            # reconsidering it, or the loop picks it again forever.
+            scores[worst] = 1.0
+            continue
+        parts[worst : worst + 1] = [left, right]
+        scores[worst : worst + 1] = [_cohesion(space.Z[left], rng), _cohesion(space.Z[right], rng)]
+
+    log.info(
+        "regions: %d after splitting from %d, loosest now %.3f",
+        len(parts),
+        k,
+        min(scores) if scores else 1.0,
+    )
+    return parts
+
+
 def _label(taglists: list[list[str]], n: int = 2) -> tuple[str, list[str]]:
     counts: dict[str, int] = {}
     for tl in taglists:
@@ -125,7 +198,14 @@ def fit(
 
     space = space or load_space()
     km = KMeans(n_clusters=k, n_init=3, random_state=seed).fit(space.Z)
-    C = km.cluster_centers_ / np.linalg.norm(km.cluster_centers_, axis=1, keepdims=True)
+    parts = _partition(space, km.labels_, k, seed)
+
+    # Centres are recomputed from the parts, since splitting moved them.
+    C = np.array([space.Z[p].mean(axis=0) for p in parts])
+    C = C / np.linalg.norm(C, axis=1, keepdims=True)
+    assign = np.empty(len(space.Z), dtype=np.int16)
+    for c, part_rows in enumerate(parts):
+        assign[part_rows] = c
 
     S = C @ C.T
     np.fill_diagonal(S, -1.0)
@@ -149,18 +229,44 @@ def fit(
     ntags = np.array([len(t) for t in space.tags])
 
     regions = []
-    for c in range(k):
-        rows = np.where(km.labels_ == c)[0]
-        # Fans, then tag count, then name - the last only so ties are stable.
+    for c, rows in enumerate(parts):
+        # Two terms, not one. Ranking by fans alone names a region after its most
+        # famous member rather than its most typical, which is how a region
+        # holding My Bloody Valentine and Slowdive came back as "clairo,
+        # beabadoobee, suki waterhouse" - all real members, none of them the
+        # point. Ranking by closeness to the centre alone returns unknowns,
+        # because typical in tag space means thinly tagged. So take the best
+        # known, then prefer those among them that sit nearest the middle.
+        by_fame = sorted(
+            rows,
+            key=lambda i: (-prom.get(space.artists[i], -1), -ntags[i], space.artists[i]),
+        )
+        # Both terms, as ranks. Two earlier versions each used one and each failed
+        # in its own direction: ranking by fame alone named a region holding My
+        # Bloody Valentine after Clairo and Beabadoobee, and gating on fame then
+        # sorting by typicality returned "star horse, romulus wolf, pure ghost" -
+        # nobody, because within the eligible set the least famous are the most
+        # typical. Adding the two ranks asks for someone who is decently known and
+        # decently central, which is what an exemplar is for.
+        mid = space.Z[rows].mean(axis=0)
+        mid = mid / (np.linalg.norm(mid) or 1.0)
+        fame_rank = {i: n for n, i in enumerate(by_fame)}
+        close_rank = {
+            i: n for n, i in enumerate(sorted(rows, key=lambda i: -float(space.Z[i] @ mid)))
+        }
+        # An artist nobody has heard of cannot be an exemplar however typical, so
+        # the unknown are pushed to the back rather than merely ranked low.
+        unknown = len(rows)
         ranked = sorted(
             rows,
             key=lambda i: (
-                -prom.get(space.artists[i], -1),
-                -ntags[i],
-                space.artists[i],
+                fame_rank[i]
+                + close_rank[i]
+                + (unknown if prom.get(space.artists[i], -1) <= 0 else 0)
             ),
         )
-        label, tags = _label([space.tags[i] for i in ranked[:200]])
+        known = by_fame
+        label, tags = _label([space.tags[i] for i in known[:200]])
         regions.append(
             Region(
                 index=c,
@@ -176,17 +282,17 @@ def fit(
     log.info(
         "atlas: %d regions, %d with a near-twin, smallest %d artists, "
         "%d with a known-prominence exemplar",
-        k,
+        len(regions),
         twins,
         min(r.n_artists for r in regions),
         named,
     )
     return Atlas(
         regions=regions,
-        k=k,
+        k=len(parts),
         seed=seed,
         twins=twins,
-        assign=km.labels_.astype(np.int16),
+        assign=assign,
         space=stamp(space),
     )
 

@@ -47,7 +47,10 @@ PER_REGION = 120
 # from a connection count.
 RATE = 9.0  # requests per second, just under the documented ceiling
 CONCURRENCY = 4
-CHECKPOINT = 500
+# The cache is rewritten whole at each checkpoint, and it ends up holding every
+# artist in the corpus - so checkpoint rarely enough that the writing is not the
+# bottleneck, often enough that an interrupted run loses minutes rather than hours.
+CHECKPOINT = 2000
 
 
 class Pacer:
@@ -120,6 +123,14 @@ async def run(todo: list[str], cache: dict[str, int]) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--per-region", type=int, default=PER_REGION)
+    ap.add_argument(
+        "--all",
+        action="store_true",
+        help="every artist in the corpus rather than a per-region sample. Hours, not "
+        "minutes - but sampling is what left My Bloody Valentine without a fan count "
+        "while 'star horse' had one, and no ranking can fix an artist that was never "
+        "looked up.",
+    )
     args = ap.parse_args()
 
     space = load_space()
@@ -128,20 +139,25 @@ def main() -> None:
     if FANS_CACHE.exists():
         cache = json.loads(FANS_CACHE.read_text(encoding="utf-8"))
 
-    rng = np.random.default_rng(regions.SEED)
-    wanted: list[str] = []
-    for k in range(len(atlas)):
-        rows = np.where(atlas.assign == k)[0]
-        pool = rng.choice(rows, min(args.per_region, len(rows)), replace=False)
-        wanted += [space.artists[i] for i in pool]
+    if args.all:
+        wanted = list(space.artists)
+    else:
+        rng = np.random.default_rng(regions.SEED)
+        wanted = []
+        for k in range(len(atlas)):
+            rows = np.where(atlas.assign == k)[0]
+            pool = rng.choice(rows, min(args.per_region, len(rows)), replace=False)
+            wanted += [space.artists[i] for i in pool]
 
     todo = sorted({n for n in wanted if n.lower() not in cache})
     log.info(
-        "%d artists sampled across %d regions, %d already cached, %d to fetch",
+        "%d artists wanted (%s), %d already cached, %d to fetch - about %.1f hours at %.0f/s",
         len(wanted),
-        len(atlas),
+        "whole corpus" if args.all else f"sampled across {len(atlas)} regions",
         len(wanted) - len(todo),
         len(todo),
+        len(todo) / RATE / 3600,
+        RATE,
     )
     if todo:
         asyncio.run(run(todo, cache))

@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 # braces rather than the real constraint - `validate_naming` is given the actual
 # count and rejects any index at or above it, so a too-high index cannot survive
 # whichever of the two is being named.
-MAX_NAMED = 128
+MAX_NAMED = 256
 MAX_NAME_CHARS = 28
 MAX_NAME_WORDS = 3
 

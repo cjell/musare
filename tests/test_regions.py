@@ -64,34 +64,54 @@ def test_region_of_finds_an_artists_place(atlas, space):
 # -------------------------------------------------------------- the exemplars
 
 
-def test_exemplars_follow_prominence_when_it_is_given(space):
-    """The whole reason `prominence` is a parameter: tags cannot rank fame."""
-    star = "bluegrass band 7"
-    a = regions.fit(space, k=K, seed=regions.SEED, prominence={star: 900_000})
-    r = a.region_of(space, star)
-    assert r.exemplars[0] == star
+def test_exemplars_are_drawn_only_from_artists_people_know(space):
+    """The guarantee: an exemplar is always someone recognisable.
+
+    Order within them is by typicality, not by fame - ranking on fame alone named
+    a region holding My Bloody Valentine after Clairo and Beabadoobee.
+    """
+    famous = {f"bluegrass band {i}": 900_000 - i for i in range(10)}
+    a = regions.fit(space, k=K, seed=regions.SEED, prominence=famous)
+    r = a.region_of(space, "bluegrass band 0")
+    assert set(r.exemplars) <= set(famous)
 
 
 def test_prominence_lookup_is_case_insensitive(space):
     star = "doom band 3"
     a = regions.fit(space, k=K, seed=regions.SEED, prominence={star.upper(): 500_000})
-    assert a.region_of(space, star).exemplars[0] == star
+    assert star in a.region_of(space, star).exemplars
 
 
 def test_unknown_prominence_does_not_outrank_known(space):
     """A -1 for "not on Deezer" must sort below a real count, not above it."""
     a = regions.fit(space, k=K, seed=regions.SEED, prominence={"techno band 9": 12})
-    r = a.region_of(space, "techno band 9")
-    assert r.exemplars[0] == "techno band 9"
+    assert "techno band 9" in a.region_of(space, "techno band 9").exemplars
 
 
-def test_exemplars_fall_back_to_tag_count_without_prominence(atlas, space):
-    """Worth little, but it must at least be deterministic and in-region."""
+def test_exemplars_fall_back_when_nothing_is_known(atlas, space):
+    """With no prominence at all the exemplars are worth little, but must be real."""
     for r in atlas.regions:
         members = {space.artists[i] for i in np.where(atlas.assign == r.index)[0]}
         assert set(r.exemplars) <= members
-        counts = [len(space.tags[space.row(a)]) for a in r.exemplars]
-        assert counts == sorted(counts, reverse=True)
+        assert len(r.exemplars) == len(set(r.exemplars))
+
+
+def test_loose_regions_are_split_and_tight_ones_are_not(space):
+    """Three orthogonal genres are each coherent, so nothing should be cut."""
+    a = regions.fit(space, k=K, seed=regions.SEED)
+    assert len(a) == K  # no split: every genre clears the floor
+    assert a.k == len(a.regions)
+
+
+def test_a_region_of_two_glued_scenes_gets_cut(space, monkeypatch):
+    """The point of splitting: one label over two unrelated things is not a place."""
+    monkeypatch.setattr(regions, "MIN_REGION", 10)
+    monkeypatch.setattr(regions, "COHESION_FLOOR", 0.95)  # demand near-identity
+    a = regions.fit(space, k=2, seed=regions.SEED)
+    assert len(a) > 2
+    # and every artist still belongs to exactly one region
+    assert len(a.assign) == len(space.artists)
+    assert sum(r.n_artists for r in a.regions) == len(space.artists)
 
 
 # -------------------------------------------------------------- the occupancy
