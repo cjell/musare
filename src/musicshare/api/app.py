@@ -14,6 +14,7 @@ import logging
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
+from musicshare import home as home_mod
 from musicshare import shows as shows_mod
 from musicshare import taste
 from musicshare.spec import ChartSpec, run_chart, validate, validate_chart
@@ -172,6 +173,20 @@ def chart(
             "note": d.note,
         },
     }
+
+
+@app.get("/api/home")
+def home(refresh: bool = False) -> dict[str, object]:
+    """This week, who is climbing and cooling, what is on repeat.
+
+    All of it from the local history - /me/top/artists has no counts and three
+    fixed windows, so none of these numbers are expressible through the API.
+    """
+    try:
+        return home_mod.build(refresh=refresh)
+    except Exception as e:
+        log.error("home build failed: %s", e)
+        raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
 
 
 @app.get("/", response_class=HTMLResponse)

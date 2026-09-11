@@ -1220,11 +1220,11 @@ details[open] summary .chev{transform:rotate(180deg)}
       </section>
 
       <section class="sec anim">
-        <div class="sec-label"><span>This week</span><span class="aux">vs last</span></div>
+        <div class="sec-label"><span>This week</span><span class="aux" id="weekAux">vs last</span></div>
         <div class="stats">
-          <div class="stat"><span class="n">14.2</span><span class="l">Hours</span></div>
-          <div class="stat"><span class="n">218</span><span class="l">Tracks</span></div>
-          <div class="stat"><span class="n">11</span><span class="l">New artists</span></div>
+          <div class="stat"><span class="n" id="wkHours">14.2</span><span class="l">Hours</span></div>
+          <div class="stat"><span class="n" id="wkTracks">218</span><span class="l">Tracks</span></div>
+          <div class="stat"><span class="n" id="wkNew">11</span><span class="l">New artists</span></div>
         </div>
       </section>
 
@@ -2771,6 +2771,43 @@ function applyShowFilter(){
     showFilter.minFans != null || showFilter.artists.length > 0);
 }
 
+/* ---------- home, from the local history ----------
+   Every number on this screen comes from the export plus whatever the live
+   sync has added. None of it is expressible through /me/top/artists, which
+   returns a ranked list over three fixed windows with no counts. */
+var homeLoaded = false;
+
+function loadHome(){
+  if(homeLoaded) return;
+  homeLoaded = true;
+  fetch("/api/home").then(function(r){
+    if(!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(function(d){
+    if(!d || !d.week) return;
+    var w = d.week;
+    $("wkHours").textContent = w.hours;
+    $("wkTracks").textContent = w.tracks;
+    $("wkNew").textContent = w.new_artists;
+
+    /* The comparison is the point of the section, so say which way it went
+       rather than leaving a bare "vs last". */
+    var delta = w.hours - w.hours_prev;
+    $("weekAux").textContent = w.hours_prev
+      ? (delta >= 0 ? "up " : "down ") + Math.abs(Math.round(delta * 10) / 10) + "h vs last"
+      : "vs last";
+
+    HOME.you.up = d.up.map(function(a){ return [a.name, "+" + a.pct + "%", a.image]; });
+    HOME.you.down = d.down.map(function(a){ return [a.name, a.pct + "%", a.image]; });
+    HOME.you.tracks = d.on_repeat.map(function(t){
+      return [t.name, t.artist, String(t.plays), t.image];
+    });
+    renderYou();
+  }).catch(function(){
+    /* No server: the generated figures already on the page stay as they are. */
+  });
+}
+
 var showsLoaded = false;
 function loadShows(){
   if(showsLoaded) return;
@@ -2897,9 +2934,13 @@ $("askInput").addEventListener("keydown", function(e){
 
 function artistCircles(list, down){
   return list.map(function(a){
+    var art = a[2]
+      ? 'class="art photo" style="display:block;background-image:url(' + a[2] + ')"'
+      : 'class="art" style="display:block;' + artStyle(a[0], 200) + '"';
     return '<div class="rise" tabindex="0" role="button">' +
-      '<span class="ring"><span class="art" style="display:block;' + artStyle(a[0], 200) + '"></span></span>' +
-      '<span class="rn">' + a[0] + '</span><span class="rd' + (down ? " down" : "") + '">' + a[1] + "</span></div>";
+      '<span class="ring"><span ' + art + "></span></span>" +
+      '<span class="rn">' + esc(a[0]) + '</span><span class="rd' + (down ? " down" : "") + '">' +
+      esc(a[1]) + "</span></div>";
   }).join("");
 }
 
@@ -2911,11 +2952,14 @@ function renderYou(){
   $("youUp").innerHTML = artistCircles(y.up);
   $("youDown").innerHTML = artistCircles(y.down, true);
   $("youTracks").innerHTML = y.tracks.map(function(t, n){
+    var art = t[3]
+      ? 'class="art photo" style="background-image:url(' + t[3] + ')"'
+      : 'class="art" style="' + artStyle(t[0], 200) + '"';
     return '<div class="row" tabindex="0" role="button">' +
       '<span class="idx">' + (n + 1) + "</span>" +
-      '<div class="art" style="' + artStyle(t[0], 200) + '"></div>' +
-      '<div class="meta"><div class="tt">' + t[0] + '</div><div class="ta">' + t[1] + "</div></div>" +
-      '<span class="plays">' + t[2] + "</span></div>";
+      "<div " + art + "></div>" +
+      '<div class="meta"><div class="tt">' + esc(t[0]) + '</div><div class="ta">' + esc(t[1]) + "</div></div>" +
+      '<span class="plays">' + esc(t[2]) + "</span></div>";
   }).join("");
 }
 
@@ -3161,7 +3205,7 @@ function showScreen(which){
 
   window.scrollTo(0, which === "profile" ? 0 : screenScroll[which]);
 
-  if(which === "home"){ playIn($("tabYou")); paintYou(); }
+  if(which === "home"){ loadHome(); playIn($("tabYou")); paintYou(); }
   else if(which === "discover") playIn($("tabGlobal").hidden ? $("tabCommunity") : $("tabGlobal"));
   else if(which === "activity") playIn($("screenActivity"));
   else if(which === "shows"){
