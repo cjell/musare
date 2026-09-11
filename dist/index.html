@@ -661,13 +661,21 @@ body{
 }
 .txt:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
 .sheet-actions{display:flex;gap:9px;padding:18px 0 0;border-top:1px solid var(--line);margin-top:16px}
+/* Styled by role rather than by id: only the customize sheet's two buttons
+   were ever given colours, so the filter, picker and crop sheets fell through
+   to the browser default and rendered grey. */
 .sheet-actions button{
   height:44px;border-radius:9px;cursor:pointer;font-family:"Public Sans",sans-serif;
-  font-size:14px;font-weight:600;
+  font-size:14px;font-weight:600;flex:none;padding:0 16px;
+  background:none;border:1px solid var(--line-2);color:var(--ink-2);
 }
-#custReset{flex:none;padding:0 16px;background:none;border:1px solid var(--line-2);color:var(--ink-2)}
-#custReset:hover{color:var(--ink);border-color:var(--ink-3)}
-#custDone{flex:1;background:var(--ink);color:#0B0A0F;border:0}
+.sheet-actions button:hover{color:var(--ink);border-color:var(--ink-3)}
+/* The confirm action matches Ask and Chart it - one accent-filled button per
+   surface, so there is never a question which one commits. */
+.sheet-actions button.primary{
+  flex:1;background:var(--accent);border-color:var(--accent);color:#120E1B;
+}
+.sheet-actions button.primary:hover{color:#120E1B;border-color:var(--accent);filter:brightness(1.06)}
 .sheet-actions button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* ---- activity ----
@@ -1627,7 +1635,7 @@ details[open] summary .chev{transform:rotate(180deg)}
       </div>
       <div class="sheet-actions">
         <button type="button" id="filtReset">Reset</button>
-        <button type="button" id="filtDone">Done</button>
+        <button type="button" class="primary" id="filtDone">Done</button>
       </div>
     </div>
   </div>
@@ -1645,7 +1653,7 @@ details[open] summary .chev{transform:rotate(180deg)}
       <input class="crop-zoom" id="cropZoom" type="range" min="100" max="320" value="100" aria-label="Zoom">
       <div class="sheet-actions">
         <button type="button" id="cropCancel">Cancel</button>
-        <button type="button" id="cropSave">Use photo</button>
+        <button type="button" class="primary" id="cropSave">Use photo</button>
       </div>
     </div>
   </div>
@@ -1709,7 +1717,7 @@ details[open] summary .chev{transform:rotate(180deg)}
 
       <div class="sheet-actions">
         <button type="button" id="custReset">Reset</button>
-        <button type="button" id="custDone">Done</button>
+        <button type="button" class="primary" id="custDone">Done</button>
       </div>
     </div>
   </div>
