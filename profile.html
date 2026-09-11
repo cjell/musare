@@ -2620,17 +2620,7 @@ function render(i){
 
   $("simNote").textContent = p.sim.note;
 
-  /* x is [name, meta, image, id]. The demo profiles supply the first two and
-     generate their cover from the name; real ones carry Spotify's artwork and
-     an id, which is what makes a card openable. */
-  $("playlists").innerHTML = p.playlists.map(function(x, i){
-    var art = x[2]
-      ? 'class="art photo" style="background-image:url(' + x[2] + ')"'
-      : 'class="art" style="' + artStyle(x[0], p.artHue) + '"';
-    return '<div class="pl" tabindex="0" role="button" data-pl="' + i + '"><div ' + art + "></div>" +
-           '<div class="pn">' + esc(x[0]) + '</div><div class="pm">' + esc(x[1]) + "</div></div>";
-  }).join("");
-  setPlaylists(false);
+  renderShelf();
 
   if(MAPDATA && self){
     $("mapAux").textContent = MAP_ARTISTS + " artists plotted";
@@ -4113,6 +4103,7 @@ function loadPlaylists(){
   fetch("/api/playlists").then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
       if(!d || !d.playlists || !d.playlists.length) return;
+      ALL_PLAYLISTS = d.playlists;
       PROFILES[0].playlists = d.playlists.map(function(p){
         return [p.name, p.tracks + (p.tracks === 1 ? " track" : " tracks"), p.image, p.id];
       });
@@ -4121,7 +4112,9 @@ function loadPlaylists(){
 }
 
 function openPlaylist(i){
-  var p = PROFILES[current], x = p.playlists[i];
+  /* The shelf, not the profile's full list - what is on screen is whatever the
+     pins chose, so an index into the other one opens the wrong playlist. */
+  var x = (PL_SHELF && PL_SHELF[i]) || PROFILES[current].playlists[i];
   if(!x || !x[3]) return;            /* a demo card has no id and nothing behind it */
   $("plName").textContent = x[0];
   $("plMeta").textContent = x[1];
@@ -4201,8 +4194,8 @@ $("badges").addEventListener("click", function(e){
    Pinned items are references, not copies: an id, a name, a picture URL. They
    live beside the rest of the personalization in localStorage, so testing costs
    nobody an account. When auth exists they move to Postgres unchanged. */
-var PIN_SLOTS = { tracks: 5, artists: 8, albums: 6, charts: 2 };
-var PIN_KIND = { tracks: "track", artists: "artist", albums: "album" };
+var PIN_SLOTS = { tracks: 5, artists: 8, albums: 6, charts: 2, playlists: 6 };
+var PIN_KIND = { tracks: "track", artists: "artist", albums: "album", playlists: "playlist" };
 
 function esc(v){
   return String(v == null ? "" : v)
@@ -4270,6 +4263,49 @@ function slotCell(kind, idx, shape, wrapCls, nameCls, metaCls){
 /* Sections render pins when any exist, and the sample data when none do, so a
    profile nobody has customized still looks like a profile. Edit mode always
    shows the truth - your pins and the gaps between them. */
+/* Which playlists are shown is a choice, not a dump. 210 of them is a directory;
+   a profile is the six you would actually hand someone. Pins decide it, and only
+   when there are none does the full list stand in - a blank shelf would teach
+   nobody what the section is for.
+
+   Declared as a function rather than assigned to a var, because renderPins calls
+   it and renderPins runs before this point in the file. Declarations hoist;
+   assignments do not, which is how a `var PL_RENDER` version of this silently
+   did nothing. */
+function renderShelf(){
+  var p = PROFILES[current], self = current === 0;
+  var editing = document.body.classList.contains("editing");
+  var lp = pinList("playlists"), lAny = self && lp.some(Boolean);
+  var shelf;
+  if(lAny){
+    shelf = lp.filter(Boolean).map(function(q){ return [q.name, q.meta, q.image, q.id]; });
+  } else if(editing && self){
+    /* The stand-in list has to get out of the way while editing, the same as the
+       sample tracks do. Leaving all 210 up meant the slots were appended after
+       them and never reached - six empty squares behind a directory. */
+    shelf = [];
+  } else {
+    shelf = p.playlists;
+  }
+  PL_SHELF = shelf;
+
+  var ph = shelf.map(function(x, i){
+    var art = x[2]
+      ? 'class="art photo" style="background-image:url(' + x[2] + ')"'
+      : 'class="art" style="' + artStyle(x[0], p.artHue) + '"';
+    return '<div class="pl" tabindex="0" role="button" data-pl="' + i + '"><div ' + art + "></div>" +
+           '<div class="pn">' + esc(x[0]) + '</div><div class="pm">' + esc(x[1]) + "</div></div>";
+  }).join("");
+  if(editing && self){
+    /* Empty slots only while editing, the same as every other pinned section. */
+    for(var lq = shelf.length; lq < PIN_SLOTS.playlists; lq++){
+      ph += '<div class="pl">' + slotBtn("playlists", lq, "slot-sq") + "</div>";
+    }
+  }
+  $("playlists").innerHTML = ph;
+  setPlaylists(false);
+}
+
 function renderPins(p){
   var editing = document.body.classList.contains("editing");
   var hue = p.artHue, self = current === 0;
@@ -4355,6 +4391,8 @@ function renderPins(p){
       drawChart(document.querySelector('#charts [data-chart="pin' + z + '"]'), cp[z].data);
     }
   }
+
+  renderShelf();
 
   $("albums").innerHTML = bh;
   $("albumSection").hidden = !bAny && !(editing && self);
@@ -4558,6 +4596,28 @@ function offline(){
     "and open this page from there.</div>";
 }
 
+/* The owner's playlists, held for the picker. The grid draws from pins; this
+   is the full list to choose them from. */
+var ALL_PLAYLISTS = [], PL_SHELF = [];
+
+function showPlaylistPicks(q){
+  var needle = (q || "").toLowerCase();
+  var hits = ALL_PLAYLISTS.filter(function(p){
+    return !needle || p.name.toLowerCase().indexOf(needle) >= 0;
+  });
+  if(!ALL_PLAYLISTS.length){
+    $("pickList").innerHTML = '<div class="pick-note">Playlists need the local server.</div>';
+    return;
+  }
+  showResults(hits.slice(0, 60).map(function(p){
+    return {
+      id: p.id, kind: "playlist", name: p.name, image: p.image,
+      artist_name: p.tracks + (p.tracks === 1 ? " track" : " tracks"),
+      meta: p.tracks + (p.tracks === 1 ? " track" : " tracks")
+    };
+  }), needle ? "" : "your playlists");
+}
+
 function loadSeed(){
   var list = $("pickList");
   var mine = ++pickSeq;
@@ -4610,11 +4670,21 @@ function openPicker(kind, idx){
     b.setAttribute("aria-pressed", b.dataset.k === pickKind ? "true" : "false");
   });
   $("pickHead").textContent = pickKind === "artist" ? "Pin an artist"
-    : pickKind === "album" ? "Pin an album" : "Pin a song";
+    : pickKind === "album" ? "Pin an album"
+    : pickKind === "playlist" ? "Pin a playlist" : "Pin a song";
+  /* The tabs switch between Spotify's catalogue types. A playlist is not one of
+     them - the list is the listener's own, already loaded - so they are hidden
+     rather than left there doing nothing. */
+  $("pickTabs").hidden = pickKind === "playlist";
+  $("pickSub").textContent = pickKind === "playlist"
+    ? "Your own playlists. Type to narrow them down."
+    : "Your most played, or search for anything.";
+  $("pickInput").placeholder = pickKind === "playlist" ? "Filter your playlists" : "Search Spotify";
   $("pickInput").value = "";
   $("pickWrap").hidden = false;
   document.body.style.overflow = "hidden";
-  loadSeed();
+  if(pickKind === "playlist") showPlaylistPicks("");
+  else loadSeed();
   setTimeout(function(){ $("pickInput").focus(); }, 60);
 }
 function closePicker(){
@@ -4648,6 +4718,8 @@ $("pickTabs").addEventListener("click", function(e){
 $("pickInput").addEventListener("input", function(){
   clearTimeout(pickTimer);
   var q = this.value.trim();
+  /* Filtering a list already in memory needs no debounce and no request. */
+  if(pickKind === "playlist"){ showPlaylistPicks(q); return; }
   /* 220ms: typing a word is one request, and it still feels live */
   pickTimer = setTimeout(function(){ if(q) runSearch(q); else loadSeed(); }, 220);
 });
