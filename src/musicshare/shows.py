@@ -202,7 +202,12 @@ def fan_counts(names: list[str], refresh: bool = False) -> dict[str, int]:
     """
     cache: dict[str, int] = {}
     if FANS_CACHE.exists() and not refresh:
-        cache = json.loads(FANS_CACHE.read_text(encoding="utf-8"))
+        try:
+            cache = json.loads(FANS_CACHE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            # A half-written cache is a slow lookup, not a failed request: the
+            # writer rewrites the file whole, so a reader can land mid-write.
+            log.warning("fan cache unreadable, refetching this batch")
 
     todo = [n for n in names if n.lower() not in cache]
     if todo:

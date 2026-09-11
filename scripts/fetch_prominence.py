@@ -107,9 +107,15 @@ async def run(todo: list[str], cache: dict[str, int]) -> None:
             for name, fans in await asyncio.gather(*(one(client, sem, pacer, n) for n in batch)):
                 cache[name] = fans
             done += len(batch)
-            # Checkpointed so an interrupted run is not a wasted run.
+            # Checkpointed so an interrupted run is not a wasted run - and written
+            # to a temporary file first, because this rewrites the whole cache and
+            # shows.fan_counts reads the same path. A reader landing mid-write gets
+            # truncated JSON and raises; a rename is atomic, so it gets either the
+            # old file or the new one.
             FANS_CACHE.parent.mkdir(parents=True, exist_ok=True)
-            FANS_CACHE.write_text(json.dumps(cache, indent=0, ensure_ascii=False), encoding="utf-8")
+            tmp = FANS_CACHE.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(cache, indent=0, ensure_ascii=False), encoding="utf-8")
+            tmp.replace(FANS_CACHE)
             rate = done / max(time.time() - t0, 1e-9)
             log.info(
                 "%d/%d looked up (%.1f/s, %.0f min left)",

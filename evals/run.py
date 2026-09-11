@@ -46,6 +46,11 @@ class Suite:
 SUITES: dict[str, Suite] = {
     "shows": Suite(SHOWS, "shows.yaml", validate),
     "charts": Suite(CHARTS, "charts.yaml", validate_chart),
+    # Held-out. Same schemas, cases the prompts were never tuned against - which
+    # is the only version of these numbers worth quoting, and the only one that
+    # stops being true the moment a case is edited to let an answer through.
+    "shows-heldout": Suite(SHOWS, "shows_heldout.yaml", validate),
+    "charts-heldout": Suite(CHARTS, "charts_heldout.yaml", validate_chart),
 }
 
 
