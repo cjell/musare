@@ -61,29 +61,76 @@ JUNK = {
     "mp3",
 }
 
-# Geographic and demographic tags. Real signal for some questions, noise for
-# "does this sound like that" - kept behind a flag so the choice is measured
-# rather than assumed.
-SOFT = {
+# Where an artist is from, when that does not predict what they sound like.
+#
+# This list is measured, not assumed. Group artists by a nationality tag, remove
+# that tag from their vectors, and ask whether they still resemble each other on
+# everything else. Against a random-pair floor of 0.033:
+#
+#     korean    +0.421     swedish   +0.103     german   +0.054
+#     brazilian +0.208     french    +0.089     british  +0.032
+#     norwegian +0.181     canadian  +0.086     american +0.016
+#     japanese  +0.122     italian   +0.076
+#
+# Korean artists are fourteen times more alike than random on tags that have
+# nothing to do with being Korean, because K-pop is a real scene. American
+# artists are indistinguishable from a random sample, because in this corpus
+# American music simply *is* the mainstream and the tag adds nothing.
+#
+# Keeping the bottom of that list is not merely redundant, it does damage, and
+# more than it looks: tf-idf weights a tag by rarity, so "united states" (2,937
+# artists) pulls harder than "rock" (18,420). Two artists whose only shared tag
+# is "united states" score 0.321 against a random-pair floor of 0.035 - Cocomelon
+# and Russ read as more alike than two shoegaze bands sharing only "shoegaze".
+# That false similarity is the same number "artists like X" and profile matching
+# are built on, so it does not stay on the map.
+#
+# Every tag pulls artists together. The question is only whether the pull is
+# true. Nationalities that predict a sound are therefore deliberately absent from
+# this list: korean, japanese, brazilian, norwegian, finnish, spanish, nigerian,
+# indian, mexican, turkish, chinese, irish, danish.
+PLACE_NOISE = {
     "american",
+    "america",
     "usa",
+    "united states",
+    "us",
     "british",
     "uk",
-    "german",
-    "japanese",
-    "french",
-    "swedish",
+    "united kingdom",
+    "great britain",
+    "england",
+    "english",
+    "scotland",
+    "scottish",
+    "wales",
+    "welsh",
     "canadian",
+    "canada",
     "australian",
+    "australia",
+    "german",
+    "germany",
+    "deutschland",
+    "french",
+    "france",
     "italian",
-    "spanish",
-    "norwegian",
-    "finnish",
-    "russian",
+    "italy",
     "polish",
+    "poland",
+    "russian",
+    "russia",
     "dutch",
-    "brazilian",
-    "korean",
+    "netherlands",
+    "holland",
+    "swedish",
+    "sweden",
+}
+
+# Who is singing rather than what it sounds like. These sit near the floor too -
+# "female vocalists" scores +0.039, "male vocalists" +0.037 - and unlike a
+# nationality there is no version of them that carries a sound.
+DEMOGRAPHIC = {
     "female vocalists",
     "male vocalists",
     "female vocalist",
@@ -91,8 +138,19 @@ SOFT = {
     "female",
     "male",
     "females",
-    "singer songwriter",
+    "males",
+    "female fronted",
+    "female voices",
 }
+
+SOFT = PLACE_NOISE | DEMOGRAPHIC
+
+# A listener describing themselves rather than the music. JUNK catches the ones
+# that were known in advance; this catches the shape, because a hand-typed list
+# can only block what somebody thought of. "my top songs" got through one and
+# then formed a region of its own - Billie Eilish beside Raffaella Carra, bound
+# together by having been in somebody's playlist.
+_SELF_TAG = re.compile(r"^(my|our) | i | we |^i |^artists i|^bands i|^stuff ")
 
 _WS = re.compile(r"[\s_\-/]+")
 
@@ -136,7 +194,7 @@ def load_corpus(csv: Path = CORPUS_CSV, drop_soft: bool = False, min_tags: int =
         tags = []
         for t in str(raw).split(";"):
             t = normalise_tag(t)
-            if t and t not in drop and len(t) < 40:
+            if t and t not in drop and len(t) < 40 and not _SELF_TAG.search(t):
                 tags.append(t)
         tags = list(dict.fromkeys(tags))  # order-preserving dedupe
         if len(tags) >= min_tags:

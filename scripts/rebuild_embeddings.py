@@ -90,8 +90,15 @@ def main() -> None:
         user = path.stem.removeprefix("modes_")
         log.info("5/5 refitting profile %r against the new space", user)
         p = modes.profile(space=space)
+        # A refit produces fresh modes with no names, so they need naming again -
+        # forgetting this leaves a profile showing tag labels like "rnb, pop"
+        # where it used to say "alternative r&b".
+        if not args.no_names:
+            p, mode_problems = namerun.name(p)
+            if mode_problems:
+                log.error("    mode naming rejected, tag labels kept: %s", mode_problems[:3])
         modes.save(p, user=user)
-        log.info("    k=%d, %s", p.k, ", ".join(m.label for m in p.modes))
+        log.info("    k=%d, %s", p.k, ", ".join(m.display for m in p.modes))
 
     log.info("done in %.0fs", time.time() - t0)
 
