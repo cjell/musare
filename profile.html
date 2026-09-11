@@ -792,6 +792,18 @@ body{
 .ss-actions .btn-primary{flex:1}
 .ss-actions .btn-ghost{width:auto;padding:0 18px}
 
+.map.real .map-ax{display:none}          /* a projection has no axes to name */
+.mapfull.real .mf-ax{display:none}       /* nor does the full one */
+.map-zoom{
+  position:absolute;right:10px;bottom:34px;display:flex;flex-direction:column;gap:4px;
+}
+.map-zoom button{
+  width:26px;height:26px;border-radius:8px;border:1px solid var(--line-2);
+  background:rgba(13,11,20,.78);color:var(--ink-2);font:14px/1 system-ui;cursor:pointer;
+  display:grid;place-items:center;padding:0;
+}
+.map-zoom button:active{background:var(--accent-tint);color:var(--accent)}
+
 /* ---- full taste map ---- */
 .mapfull{
   position:fixed;top:0;bottom:0;left:50%;
@@ -1734,6 +1746,10 @@ details[open] summary .chev{transform:rotate(180deg)}
     </div>
     <div class="mf-canvas">
       <canvas id="mapFullCanvas"></canvas>
+      <div class="map-zoom" id="mapZoom" hidden>
+        <button type="button" id="mzIn" aria-label="Zoom in">+</button>
+        <button type="button" id="mzOut" aria-label="Zoom out">&minus;</button>
+      </div>
       <span class="mf-ax mf-l" id="mfAxL">Ambient</span>
       <span class="mf-ax mf-r" id="mfAxR">Club</span>
       <span class="mf-ax mf-t" id="mfAxT">Instrumental</span>
@@ -2033,6 +2049,108 @@ function bokeh(cv, hues, seed, density){
     ctx.fillStyle = hg;
     ctx.beginPath(); ctx.arc(hx, hy, hr * 5, 0, Math.PI * 2); ctx.fill();
   }
+}
+
+/* The real map, drawn from /api/map: named genre territory with the listener's
+   own artists on it.
+
+   tasteMap below still draws the generated one for the demo profiles, which have
+   no history behind them. Both are kept because they are different things: that
+   one invents a plausible picture from four cluster centres, this one plots
+   5,176 real positions and cannot be asked to draw a person who does not exist.
+
+   Two rules from the fitting side travel with the data and are honoured here.
+   Positions are for drawing only - distance on this picture tracks real
+   similarity within about 3 units and nothing beyond it - so nothing in the UI
+   measures anything off these coordinates. And labels appear by zoom: each
+   region carries the smallest zoom at which its label was measured to fit, so
+   this filters on a number instead of running collision tests every frame. */
+var MAPDATA = null;
+var MAPZ = 1, MAPCX = 0.5, MAPCY = 0.5;   /* zoom, and the centre in 0..1 */
+var MAP_MAX_Z = 16;
+
+function mapBounds(d){
+  var xs = [], ys = [];
+  d.backdrop.forEach(function(p){ xs.push(p[0]); ys.push(p[1]); });
+  d.artists.forEach(function(a){ xs.push(a.x); ys.push(a.y); });
+  var lox = Math.min.apply(null, xs), hix = Math.max.apply(null, xs);
+  var loy = Math.min.apply(null, ys), hiy = Math.max.apply(null, ys);
+  /* One span for both axes. Scaling them independently would stretch the
+     clusters into streaks and misreport which regions sit near which. */
+  var span = Math.max(hix - lox, hiy - loy) || 1;
+  return { lox: lox, loy: loy, span: span };
+}
+
+function realMap(cv, big){
+  var d = MAPDATA;
+  if(!d) return;
+  var dpr = Math.min(window.devicePixelRatio || 1, 2);
+  var w = cv.clientWidth, h = cv.clientHeight;
+  if(!w || !h) return;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  var ctx = cv.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  var b = mapBounds(d);
+  var z = big ? MAPZ : 1;
+  var cxN = big ? MAPCX : 0.5, cyN = big ? MAPCY : 0.5;
+  /* The map is square in data space; the canvas usually is not. Fit the square
+     to the LONGER side: the picture is never distorted either way, but fitting
+     the shorter side leaves the strip on the profile mostly empty, and - worse -
+     draws at half the width the label thresholds were computed for, so labels
+     that were measured to fit collide. Filling and cropping is what panning a
+     real map does anyway. */
+  var k = Math.max(w, h) * z;
+  function X(v){ return w / 2 + ((v - b.lox) / b.span - cxN) * k; }
+  function Y(v){ return h / 2 - ((v - b.loy) / b.span - cyN) * k; }
+
+  ctx.fillStyle = "rgba(244,241,250,.075)";
+  d.backdrop.forEach(function(p){
+    var x = X(p[0]), y = Y(p[1]);
+    if(x < -2 || x > w + 2 || y < -2 || y > h + 2) return;
+    ctx.fillRect(x, y, 1, 1);
+  });
+
+  /* Hours span four orders of magnitude, so the radius is on a log scale - a
+     linear one draws the top artist as a disc covering the shoegaze island. */
+  var maxH = 1;
+  d.artists.forEach(function(a){ if(a.hours > maxH) maxH = a.hours; });
+  var lg = Math.log(1 + maxH);
+  ctx.fillStyle = "rgba(" + ACCENT_RGB_NOW + ",.62)";
+  d.artists.forEach(function(a){
+    var x = X(a.x), y = Y(a.y);
+    if(x < -4 || x > w + 4 || y < -4 || y > h + 4) return;
+    var r = (big ? 1.1 : 0.75) + (big ? 4.2 : 2.4) * (Math.log(1 + a.hours) / lg);
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  });
+
+  ctx.textAlign = "center";
+  ctx.font = '500 ' + (big ? 10.5 : 8) + 'px "IBM Plex Mono", monospace';
+  var shown = 0;
+  d.regions.forEach(function(r){
+    if(!r.yours || r.x === null || r.min_zoom === null || r.min_zoom > z) return;
+    var x = X(r.x), y = Y(r.y);
+    if(x < 0 || x > w || y < 0 || y > h) return;
+    var label = r.name.toUpperCase();
+    var half = ctx.measureText(label).width / 2 + 4;
+    x = Math.max(half, Math.min(w - half, x));
+    y = Math.max(big ? 16 : 11, Math.min(h - (big ? 8 : 16), y));
+    ctx.fillStyle = "rgba(13,11,20,.82)";
+    ctx.fillText(label, x + 0.6, y + 0.6);
+    ctx.fillStyle = "rgba(244,241,250,.94)";
+    ctx.fillText(label, x, y);
+    shown++;
+  });
+  return shown;
+}
+
+function mapZoomBy(f){
+  MAPZ = Math.max(1, Math.min(MAP_MAX_Z, MAPZ * f));
+  var half = 0.5 / MAPZ;
+  MAPCX = Math.max(half, Math.min(1 - half, MAPCX));
+  MAPCY = Math.max(half, Math.min(1 - half, MAPCY));
+  paintFull();
 }
 
 function tasteMap(cv, cfg, accent, accentRGB, genRGB, big, mode){
@@ -2398,11 +2516,16 @@ function render(i){
   }).join("");
   setPlaylists(false);
 
-  $("mapAux").textContent = p.map.count;
+  if(MAPDATA && self){
+    $("mapAux").textContent = MAP_ARTISTS + " artists plotted";
+    $("mapNote").textContent = MAP_YOURS + " of " + MAPDATA.regions.length + " regions";
+  } else {
+    $("mapAux").textContent = p.map.count;
+    var top = p.map.clusters.slice().sort(function(a,b){ return b[3] - a[3]; })[0][4];
+    $("mapNote").textContent = self ? ("Your centre \u00B7 dense in " + top) : p.map.note;
+  }
   $("axL").textContent = p.map.l;
   $("axR").textContent = p.map.r;
-  var top = p.map.clusters.slice().sort(function(a,b){ return b[3] - a[3]; })[0][4];
-  $("mapNote").textContent = self ? ("Your centre \u00B7 dense in " + top) : p.map.note;
 
   $("moreLabel").textContent = "More about " + p.name.split(" ")[0];
   $("genres").innerHTML = p.genres.map(function(g){ return '<span class="chip">' + g + "</span>"; }).join("");
@@ -2411,14 +2534,21 @@ function render(i){
   paint();
 }
 
+var ACCENT_RGB_NOW = "231,64,148";
+
 function paint(){
   var p = PROFILES[current], c = CUSTOM[current] || {};
+  ACCENT_RGB_NOW = p._accentRGB || ACCENT_RGB_NOW;
   if(!c.banner) bokeh($("banner"), p.bannerHues, p.map.seed, 26);
   /* the wallpaper takes its colour from the chosen photo, so personalizing the
      banner tints the whole page rather than one strip of it */
   if(c.banner) wallFromImage(c.banner);
   else bokeh($("wall"), p.bannerHues, p.map.seed + 7, 16);
-  tasteMap($("tastemap"), p.map, p._accent, p._accentRGB, p._genRGB, false, current === 0 ? "self" : "");
+  /* Real data only exists for the profile owner; the other three are demos. */
+  var realHere = !!MAPDATA && current === 0;
+  $("tasteMapBtn").classList.toggle("real", realHere);
+  if(realHere) realMap($("tastemap"), false);
+  else tasteMap($("tastemap"), p.map, p._accent, p._accentRGB, p._genRGB, false, "");
   if(!$("screenHome").hidden) paintYou();
   if(!$("mapFull").hidden) paintFull();
 }
@@ -2440,7 +2570,16 @@ function wallFromImage(src){
 
 function paintFull(){
   var p = PROFILES[current];
-  tasteMap($("mapFullCanvas"), p.map, p._accent, p._accentRGB, p._genRGB, true, current === 0 ? "self" : "");
+  var realHere = !!MAPDATA && current === 0;
+  $("mapZoom").hidden = !realHere;
+  $("mapFull").classList.toggle("real", realHere);
+  if(realHere){
+    var n = realMap($("mapFullCanvas"), true);
+    $("mfDist").innerHTML = n + " of " + MAP_YOURS + " regions named<br>zoom in for the rest";
+  } else {
+    tasteMap($("mapFullCanvas"), p.map, p._accent, p._accentRGB, p._genRGB, true,
+             current === 0 ? "self" : "");
+  }
 }
 
 function openMap(){
@@ -2454,17 +2593,34 @@ function openMap(){
   $("mfAxR").textContent = p.map.r;
   $("mfAxT").textContent = p.map.t;
   $("mfAxB").textContent = p.map.b;
-  $("mfDist").innerHTML = p.map.note.replace(" \u00B7 ", "<br>");
+  /* The placeholder line here read "0.34 apart - closer than 82% of UNC": a
+     distance between two people measured on this picture. Map distance is flat
+     past about three units, so that number cannot mean what it says. With real
+     data the line says what is actually on screen instead; paintFull rewrites it
+     as the zoom changes. */
+  $("mfDist").innerHTML = (MAPDATA && mine) ? "" : p.map.note.replace(" \u00B7 ", "<br>");
 
-  var total = p.map.clusters.reduce(function(a, c){ return a + c[3]; }, 0);
-  var top = p.map.clusters.slice().sort(function(a, b){ return b[3] - a[3]; });
-  var peak = top[0][3] / total;
-  $("mfClusters").innerHTML = top.map(function(c){
-    var share = c[3] / total;
-    return '<div class="mf-cl"><span class="nm">' + c[4] + "</span>" +
-           '<span class="track"><i style="width:' + (share / peak * 100).toFixed(1) + '%"></i></span>' +
-           '<span class="pc">' + Math.round(share * 100) + "%</span></div>";
+  /* With real data these are the regions with the most hours in them, which is
+     a different quantity from the invented clusters' point counts - so the share
+     is read off the data rather than recomputed from bar lengths. Six, because
+     the listener occupies seventy-odd and a bar chart of seventy is a texture. */
+  var bars;
+  if(MAPDATA && mine){
+    bars = MAPDATA.regions.filter(function(r){ return r.yours; })
+      .sort(function(a, b){ return b.hours - a.hours; }).slice(0, 6)
+      .map(function(r){ return { nm: r.name, share: r.share }; });
+  } else {
+    var total = p.map.clusters.reduce(function(a, c){ return a + c[3]; }, 0);
+    bars = p.map.clusters.slice().sort(function(a, b){ return b[3] - a[3]; })
+      .map(function(c){ return { nm: c[4], share: c[3] / total }; });
+  }
+  var peak = bars.length ? bars[0].share : 1;
+  $("mfClusters").innerHTML = bars.map(function(b){
+    return '<div class="mf-cl"><span class="nm">' + b.nm + "</span>" +
+           '<span class="track"><i style="width:' + (b.share / peak * 100).toFixed(1) + '%"></i></span>' +
+           '<span class="pc">' + Math.round(b.share * 100) + "%</span></div>";
   }).join("");
+  MAPZ = 1; MAPCX = 0.5; MAPCY = 0.5;
   $("mapFull").hidden = false;
   document.body.style.overflow = "hidden";
   /* the canvas has no size until it is shown, so draw on the next frame */
@@ -3715,6 +3871,57 @@ $("custReset").addEventListener("click", function(){
   saveCustom(); render(current); syncSheet();
 });
 
+var MAP_ARTISTS = 0, MAP_YOURS = 0;
+
+/* The fitted artefacts are hundreds of megabytes and live on the server, so the
+   map arrives after first paint rather than blocking it. Until it does, the
+   generated map is what is on screen - which is why this repaints rather than
+   waiting: a blank square while 400KB loads is worse than a placeholder that is
+   replaced. */
+function loadMap(){
+  var cv = $("tastemap");
+  var px = Math.round((cv && cv.clientWidth) || 360);
+  fetch("/api/map?view_px=" + px).then(function(r){
+    if(!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(function(d){
+    if(!d || !d.artists || !d.artists.length) return;
+    MAPDATA = d;
+    MAP_ARTISTS = d.artists.length;
+    MAP_YOURS = d.regions.filter(function(r){ return r.yours; }).length;
+    render(current);
+  }).catch(function(){
+    /* No server, or nothing fitted yet. The generated map stays; the map is not
+       worth an error banner on a profile page. */
+  });
+}
+
+$("mzIn").addEventListener("click", function(){ mapZoomBy(1.7); });
+$("mzOut").addEventListener("click", function(){ mapZoomBy(1 / 1.7); });
+
+$("mapFullCanvas").addEventListener("wheel", function(e){
+  if(!MAPDATA || current !== 0) return;
+  e.preventDefault();
+  mapZoomBy(e.deltaY < 0 ? 1.16 : 1 / 1.16);
+}, { passive: false });
+
+var mapDrag = null;
+$("mapFullCanvas").addEventListener("pointerdown", function(e){
+  if(!MAPDATA || current !== 0) return;
+  mapDrag = { x: e.clientX, y: e.clientY };
+  $("mapFullCanvas").setPointerCapture(e.pointerId);
+});
+$("mapFullCanvas").addEventListener("pointerup", function(){ mapDrag = null; });
+$("mapFullCanvas").addEventListener("pointermove", function(e){
+  if(!mapDrag) return;
+  var cv = $("mapFullCanvas");
+  var k = Math.min(cv.clientWidth, cv.clientHeight) * MAPZ;
+  MAPCX -= (e.clientX - mapDrag.x) / k;
+  MAPCY += (e.clientY - mapDrag.y) / k;
+  mapDrag = { x: e.clientX, y: e.clientY };
+  mapZoomBy(1);   /* clamps and repaints */
+});
+
 $("tasteMapBtn").addEventListener("click", openMap);
 $("tasteMapBtn").addEventListener("keydown", function(e){
   if(e.key === "Enter" || e.key === " "){ e.preventDefault(); openMap(); }
@@ -4244,6 +4451,7 @@ document.addEventListener("keydown", function(e){
 
 renderHome();
 render(0);
+loadMap();
 showScreen("home");
 
 

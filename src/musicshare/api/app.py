@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
 from musicshare import home as home_mod
+from musicshare import regions as regions_mod
 from musicshare import shows as shows_mod
 from musicshare import taste
 from musicshare.spec import ChartSpec, run_chart, validate, validate_chart
@@ -29,6 +30,13 @@ log = logging.getLogger(__name__)
 app = FastAPI(title="MusicShare dev")
 
 _client: SpotifyClient | None = None
+# The fitted artefacts are 105MB of vectors and a 414MB projection index. Loading
+# them per request is not slow, it is impossible - so they are held for the life
+# of the process and the computed map is cached on top, keyed by the width it was
+# laid out for. A history gains a few plays an hour; nothing here needs to be
+# recomputed more often than someone asks for it fresh.
+_atlas_cache: dict[str, object] = {}
+_map_cache: dict[float, dict[str, object]] = {}
 
 
 def spotify() -> SpotifyClient:
@@ -37,6 +45,19 @@ def spotify() -> SpotifyClient:
     if _client is None:
         _client = SpotifyClient()
     return _client
+
+
+def _fitted() -> tuple[object, object, object]:
+    """The space, the basemap and the atlas, loaded once."""
+    if not _atlas_cache:
+        from musicshare.embed import load_space
+        from musicshare.project import load_basemap
+
+        log.info("loading fitted artefacts (once per process)")
+        _atlas_cache["space"] = load_space()
+        _atlas_cache["basemap"] = load_basemap()
+        _atlas_cache["atlas"] = regions_mod.load()
+    return _atlas_cache["space"], _atlas_cache["basemap"], _atlas_cache["atlas"]
 
 
 @app.get("/health")
@@ -187,6 +208,37 @@ def home(refresh: bool = False) -> dict[str, object]:
     except Exception as e:
         log.error("home build failed: %s", e)
         raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
+
+
+@app.get("/api/map")
+def taste_map(
+    refresh: bool = False,
+    view_px: float = Query(360.0, ge=120, le=4000, description="width the client will draw at"),
+) -> dict[str, object]:
+    """The taste map: named genre territory, with this listener's artists on it.
+
+    `view_px` matters. Label thresholds are decided by whether a label's box
+    collides at a given zoom, so they depend on how wide the map is drawn - the
+    answer for a 900px desktop frame is wrong for a 360px phone. The client says
+    what it has and gets thresholds for that.
+    """
+    if refresh:
+        _map_cache.clear()
+    if view_px in _map_cache:
+        return _map_cache[view_px]
+    try:
+        space, basemap, atlas = _fitted()
+        from musicshare.project import atlas_map
+
+        data = atlas_map(atlas, b=basemap, space=space, view_px=view_px)
+    except FileNotFoundError as e:
+        # A checkout without the fitted artefacts is a normal state; say what to run.
+        raise HTTPException(503, f"{e} - run scripts/rebuild_embeddings.py to fit them") from e
+    except Exception as e:
+        log.error("map build failed: %s", e)
+        raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
+    _map_cache[view_px] = data
+    return data
 
 
 @app.get("/", response_class=HTMLResponse)
