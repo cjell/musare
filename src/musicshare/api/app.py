@@ -204,11 +204,29 @@ def home(refresh: bool = False) -> dict[str, object]:
     All of it from the local history - /me/top/artists has no counts and three
     fixed windows, so none of these numbers are expressible through the API.
     """
+    # Opening the page is what pulls. Nothing else ever called sync, so the feed
+    # sat as far behind as the last time someone ran the script by hand - a day,
+    # when this was wired - while looking perfectly current.
+    synced = live_mod.sync_if_stale()
+    if synced and synced.added:
+        # The cached feed was computed before those plays existed.
+        refresh = True
+
     try:
-        return home_mod.build(refresh=refresh)
+        data = home_mod.build(refresh=refresh)
     except Exception as e:
         log.error("home build failed: %s", e)
         raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
+
+    # Recently-played is a rolling window of fifty, so plays fall out of it. When
+    # they do, say so: a feed that quietly drops a day is worse than one that
+    # admits to it, and this is the only moment the loss is detectable.
+    data["live"] = {
+        "synced": bool(synced),
+        "added": synced.added if synced else 0,
+        "missed": bool(synced and synced.missed),
+    }
+    return data
 
 
 @app.get("/api/now")

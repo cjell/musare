@@ -18,7 +18,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import duckdb
@@ -234,3 +234,42 @@ def now_playing(ttl: float = NOW_TTL) -> dict[str, Any] | None:
 
     _now_cache = (time.monotonic(), out)
     return out
+
+
+# How stale the store may be before opening the app is allowed to cost a request
+# to Spotify. Loading a page should pull; refreshing it ten times should not.
+FRESH_FOR = timedelta(minutes=5)
+
+
+def sync_if_stale(max_age: timedelta = FRESH_FOR) -> SyncResult | None:
+    """Pull only when what we hold has gone stale. None means it had not.
+
+    The freshness test is on the newest play we hold, not on when the last sync
+    ran. Those differ in the case that matters: someone who has not listened all
+    afternoon has a store that is hours old and perfectly current, and asking
+    Spotify again would tell us nothing. Either way this costs one request at
+    most, and the window it reads is fifty plays wide regardless.
+    """
+    mark = watermark()
+    if mark is not None:
+        age = datetime.now(UTC) - (mark if mark.tzinfo else mark.replace(tzinfo=UTC))
+        if age < max_age:
+            return None
+    try:
+        result = sync()
+    except (NoToken, httpx.HTTPError) as e:
+        # A feed that cannot refresh is a feed showing older numbers, not a page
+        # that fails. The export is still underneath it.
+        log.warning("live sync skipped: %s", e)
+        return None
+    if result.added:
+        # Each sync writes a file; nothing else ever removed them.
+        prune()
+    if result.missed:
+        log.warning(
+            "gap: Spotify's window starts at %s but our newest play is %s - "
+            "the plays between are gone unless a later export covers them",
+            result.oldest,
+            result.watermark,
+        )
+    return result
