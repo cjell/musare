@@ -46,11 +46,16 @@ class ShowFilter(BaseModel):
         description=(
             "How far the user will travel, in miles, or null if they did not say. "
             "Null is the right answer for any request that does not mention distance "
-            "at all, including short ones like 'concerts' or 'what's on'. Map their "
-            "words when they do: "
+            "at all, including short ones like 'concerts' or 'what's on'. "
+            "These are calibration points on a scale, not a list to match against: "
             "'walking distance' or 'on campus' = 2; 'nearby', 'close', 'in town' = 15; "
             "'a short drive' = 50; 'an hour' = 70; 'a couple hours' or 'a few hours' = 200; "
-            "'a long drive', 'road trip', 'anywhere', 'I'll travel' = 500."
+            "'a long drive', 'road trip', 'anywhere', 'I'll travel' = 500. "
+            "Any way of saying how far someone will go lands somewhere on that scale, "
+            "including ways not written here. A stated travel time is a distance: "
+            "convert it at roughly 60 miles an hour and place it accordingly. Reach "
+            "for null because distance was never raised, never because the phrasing "
+            "was unfamiliar."
         ),
     )
     within_days: int | None = Field(
@@ -77,7 +82,12 @@ class ShowFilter(BaseModel):
             "'underground', 'obscure' - is 50000. "
             "Wording about not being big yet - 'not too big', 'up and coming' - "
             "is 250000. "
-            "Null unless the request is actually about how known the artist is."
+            "Those are examples of each tier, not the only ways to reach one. "
+            "Anything that says how known an artist is belongs on this scale however "
+            "it is phrased - by the size of room they play, by how early a listener "
+            "would be to them, by who else has heard of them. Null when the request "
+            "is not about how known the artist is at all, not merely when the wording "
+            "is new."
         ),
     )
     min_fans: int | None = Field(
@@ -85,7 +95,10 @@ class ShowFilter(BaseModel):
         description=(
             "Lower bound on an artist's fan count, for requests about big or popular "
             "acts. 'popular', 'well known' = 250000; 'big', 'huge', 'famous' = 1000000. "
-            "Null unless the request is about the artist being well known."
+            "As with max_fans these are tiers rather than a list of accepted words: "
+            "any way of asking for an artist who has an audience belongs here, "
+            "including phrasing about having a following, drawing a crowd, or being "
+            "established. Null when the request does not raise how known they are."
         ),
     )
     artists: list[str] = Field(

@@ -61,8 +61,11 @@ class ChartSpec(BaseModel):
         default="artist",
         description=(
             "What goes along the bottom. 'date' for anything over time - use it with "
-            "grain, and use it whenever the request says 'over time', 'by month', "
-            "'trend' or 'year over year', even when an artist is named. A named "
+            "grain. The test is whether time is the thing being varied, not whether "
+            "some particular phrase appears: any request asking how something changed "
+            "as time passed means 'date', however it is worded. This holds when an "
+            "artist is named too - 'everything by X, month by month' is a date chart "
+            "restricted to X, not a chart of artists. A named "
             "artist belongs in the artists field, not here; 'artist' as a dimension "
             "means one bar per artist. 'hour_of_day' for questions about times of day ('2am', 'mornings'), "
             "'day_of_week' for weekdays and weekends, 'platform' for phone versus "
