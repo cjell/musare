@@ -2572,14 +2572,17 @@ function readImage(file, cb){
 /* One place decides the expanded state, so the top toggle, the foot control
    and a profile switch can never disagree about it. */
 function setPlaylists(open, keepPlace){
-  var p = PROFILES[current];
   var grid = $("playlists"), toggle = $("plToggle"), collapse = $("plCollapse");
-  var hasMore = p.playlists.length > PL_COLLAPSED;
+  /* Count what is on the shelf, not what exists. Once playlists became pinnable
+     the grid drew the chosen few while this still counted all 210, so three
+     pinned playlists offered to "Show all 210" and then showed three. */
+  var shown = PL_SHELF.length;
+  var hasMore = shown > PL_COLLAPSED;
 
   grid.classList.toggle("open", open);
   toggle.hidden = !hasMore;
   toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  toggle.textContent = open ? "Show less" : "Show all " + p.playlists.length;
+  toggle.textContent = open ? "Show less" : "Show all " + shown;
   collapse.hidden = !(open && hasMore);
 
   /* Collapsing from the foot control removes content above the viewport, which
