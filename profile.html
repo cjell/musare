@@ -362,6 +362,30 @@ body{
 .pl-tr .ta2{font-size:10.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pl-tr .mx{min-width:0;flex:1 1 auto}
 
+.moodgif{
+  width:44px;height:44px;border-radius:9px;object-fit:cover;flex:0 0 auto;
+  background:var(--line-2);margin-left:2px;
+}
+.moodgif[hidden]{display:none}
+/* The slots in the customise sheet. Square, because whatever someone uploads
+   gets drawn square on the profile and they should see that while choosing. */
+.moodgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;width:100%}
+.moodslot{
+  position:relative;aspect-ratio:1/1;border-radius:10px;overflow:hidden;cursor:pointer;
+  border:1px dashed var(--line-2);background:rgba(244,241,250,.03);
+  display:flex;align-items:flex-end;justify-content:center;padding:0;
+}
+.moodslot.filled{border-style:solid;border-color:var(--accent-line)}
+.moodslot img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.moodslot span{
+  position:relative;z-index:2;width:100%;text-align:center;
+  font-family:"IBM Plex Mono",monospace;font-size:8px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-2);padding:3px 2px;
+  background:linear-gradient(transparent,rgba(13,11,20,.85));
+}
+.moodslot input{display:none}
+.moodnote{font-size:10.5px;color:var(--ink-3);line-height:1.45;margin-top:2px}
+
 /* ---- listening now ---- */
 .now{
   display:flex;align-items:center;gap:11px;margin-top:11px;
@@ -1505,6 +1529,7 @@ details[open] summary .chev{transform:rotate(180deg)}
           <span class="t" id="nowTrack"></span>
           <span class="a" id="nowArtist"></span>
         </span>
+        <img class="moodgif" id="moodGif" alt="" hidden>
       </a>
       <p class="bio" id="bio"></p>
       <div class="genres-top" id="topGenres"></div>
@@ -1803,6 +1828,14 @@ details[open] summary .chev{transform:rotate(180deg)}
       <div class="srow">
         <span class="k">Profile photo</span>
         <label class="pick"><span class="has" id="hasAvatar" hidden></span>Choose<input type="file" accept="image/*" id="avatarFile"></label>
+      </div>
+      <div class="srow col">
+        <div class="k">Avatar states</div>
+        <div class="moodgrid" id="moodGrid"></div>
+        <div class="moodnote">
+          A picture or GIF for each state. Which one shows is decided by what you
+          are playing &mdash; you do not set it.
+        </div>
       </div>
       <div class="srow col">
         <div class="k">Accent colour</div>
@@ -2489,8 +2522,12 @@ try { CUSTOM = JSON.parse(localStorage.getItem(STORE) || "{}") || {}; }
 catch(e){ CUSTOM = {}; }
 
 function saveCustom(){
-  try { localStorage.setItem(STORE, JSON.stringify(CUSTOM)); }
-  catch(e){ /* private window, or quota: the session still works, it just won't persist */ }
+  /* Returns whether it stuck. For a colour or a bio, failing quietly is right -
+     the session still works and the stake is low. For an uploaded image it is
+     not: the user watches it appear, believes it is saved, and finds it gone.
+     Callers that can lose real work check the answer. */
+  try { localStorage.setItem(STORE, JSON.stringify(CUSTOM)); return true; }
+  catch(e){ return false; }
 }
 function cust(){ return CUSTOM[current] || (CUSTOM[current] = {}); }
 
@@ -2707,6 +2744,7 @@ function render(i){
   $("makesLink").textContent = p.makes;
 
   paintNow();
+  paintMood();
   paint();
 }
 
@@ -3923,6 +3961,7 @@ function syncSheet(){
   $("custBio").value = c.bio || p.bio;
   $("hasBanner").hidden = !c.banner;
   $("hasAvatar").hidden = !c.avatar;
+  renderMoodSlots();
 }
 
 function openCust(){ $("custWrap").hidden = false; syncSheet(); document.body.style.overflow = "hidden"; }
@@ -4167,6 +4206,75 @@ $("mapFullCanvas").addEventListener("pointermove", function(e){
    status invented for them would be the one part of this page that lies. */
 var NOW = null, LASTPLAY = null, nowTimer = null;
 
+/* The states the avatar can be in. Fixed on purpose and owned by the app: the
+   user owns what each one looks like, not what they are. If people defined their
+   own the classifier would have nothing to aim at.
+
+   Six come from the music, by way of the region the current artist sits in.
+   Sleeping is what nothing-playing looks like and unknown is an artist the
+   corpus has not caught up with - neither is a property music can have, so
+   neither is something a region can be classified as. */
+var MOOD_STATES = ["hype", "happy", "chilling", "sad", "angry", "peaceful",
+                   "sleeping", "unknown"];
+var MOOD_STATE = "sleeping";
+/* Per slot. localStorage holds a few megabytes in total and this is competing
+   with a banner and a profile photo, so a loop has to be short rather than
+   lovely. The cap is on the encoded string, which is about a third larger than
+   the file. */
+var MOOD_MAX_BYTES = 700 * 1024;
+
+function moodArt(state){
+  var c = CUSTOM[current] || {};
+  return (c.moods && c.moods[state]) || null;
+}
+
+function paintMood(){
+  var img = $("moodGif");
+  var art = current === 0 ? moodArt(MOOD_STATE) : null;
+  if(art){ img.src = art; img.hidden = false; }
+  else { img.removeAttribute("src"); img.hidden = true; }
+}
+
+function renderMoodSlots(){
+  var c = CUSTOM[current] || {};
+  $("moodGrid").innerHTML = MOOD_STATES.map(function(st){
+    var art = (c.moods && c.moods[st]) || null;
+    return '<label class="moodslot' + (art ? " filled" : "") + '" data-mood="' + st + '">' +
+      (art ? '<img src="' + art + '" alt="">' : "") +
+      "<span>" + st + "</span>" +
+      '<input type="file" accept="image/*" data-moodfile="' + st + '"></label>';
+  }).join("");
+}
+
+$("moodGrid").addEventListener("change", function(e){
+  var input = e.target.closest("[data-moodfile]");
+  if(!input) return;
+  var st = input.dataset.moodfile, f = input.files && input.files[0];
+  input.value = "";
+  if(!f) return;
+  var fr = new FileReader();
+  fr.onload = function(){
+    /* Stored as the file arrived. The banner goes through a crop step, which
+       draws to a canvas - doing that here would hand back a single frame and
+       silently turn every GIF into a still. */
+    if(String(fr.result).length > MOOD_MAX_BYTES){
+      alert("That file is too large to keep on the phone. Try one under about "
+            + Math.round(MOOD_MAX_BYTES / 1024 / 1.37) + "KB.");
+      return;
+    }
+    var c = cust();
+    if(!c.moods) c.moods = {};
+    c.moods[st] = fr.result;
+    if(!saveCustom()){
+      delete c.moods[st];
+      alert("No room left in this browser's storage. Remove a state or use smaller files.");
+    }
+    renderMoodSlots();
+    paintMood();
+  };
+  fr.readAsDataURL(f);
+});
+
 function paintNow(){
   var row = $("nowRow");
   /* The row only ever hides on someone else's profile, where there is no player
@@ -4199,13 +4307,18 @@ function paintNow(){
 }
 
 function loadNow(){
-  /* A hidden tab should not keep polling someone's player. */
-  if(document.hidden) return;
+  /* Always fetches. The visibility check belongs on the repeat, not here: a page
+     opened in a background tab, or restored when the browser starts, loads while
+     hidden - and skipping the first fetch left the status blank until a
+     visibility change that may never come. What a hidden tab should not do is
+     keep asking every twenty seconds, which is nowPolling's job. */
   fetch("/api/now").then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
       NOW = d && d.now ? d.now : null;
       if(d && d.last) LASTPLAY = d.last;
+      MOOD_STATE = (d && d.state) || "sleeping";
       paintNow();
+      paintMood();
     })
     .catch(function(){ NOW = null; paintNow(); });
 }
@@ -4214,7 +4327,9 @@ function nowPolling(on){
   if(nowTimer){ clearInterval(nowTimer); nowTimer = null; }
   /* 20s: a track is three minutes, so this is wrong by at most a few percent of
      one, and it is 180 requests an hour rather than 3600. */
-  if(on) nowTimer = setInterval(loadNow, 20000);
+  if(on) nowTimer = setInterval(function(){
+    if(!document.hidden) loadNow();
+  }, 20000);
 }
 
 document.addEventListener("visibilitychange", function(){
@@ -4285,6 +4400,18 @@ $("playlists").addEventListener("keydown", function(e){
   var card = e.target.closest("[data-pl]");
   if(card){ e.preventDefault(); openPlaylist(parseInt(card.dataset.pl, 10)); }
 });
+$("moodGrid").addEventListener("contextmenu", function(e){
+  var slot = e.target.closest("[data-mood]");
+  if(!slot) return;
+  var c = CUSTOM[current] || {};
+  if(!(c.moods && c.moods[slot.dataset.mood])) return;
+  e.preventDefault();
+  delete cust().moods[slot.dataset.mood];
+  saveCustom();
+  renderMoodSlots();
+  paintMood();
+});
+
 $("plClose").addEventListener("click", closePlaylist);
 $("plOpen").addEventListener("click", function(e){
   if(e.target === $("plOpen")) closePlaylist();

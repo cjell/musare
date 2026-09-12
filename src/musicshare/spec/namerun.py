@@ -222,3 +222,48 @@ def name_atlas(
         if i in by_index:
             r.name = by_index[i]
     return atlas, []
+
+
+# ------------------------------------------------------------------- moods
+
+
+def as_moods_input(regions: list[Any]) -> str:
+    """The atlas again, for sorting into states rather than naming."""
+    lines = []
+    for i, r in enumerate(regions):
+        tags = ", ".join(f'"{_flat(t, MAX_TAG_CHARS)}"' for t in r.tags[:TAGS_SHOWN] if t.strip())
+        who = ", ".join(
+            f'"{_flat(a, MAX_ARTIST_CHARS)}"' for a in r.exemplars[:ARTISTS_SHOWN] if a.strip()
+        )
+        name = _flat(getattr(r, "display", "") or r.label, MAX_TAG_CHARS)
+        lines.append(f'Region {i} - "{name}"\n  tags: {tags}\n  best known: {who}')
+    return "\n\n".join(lines)
+
+
+def mood_atlas(atlas: Any, model: str = NAME_MODEL, force: bool = False) -> tuple[Any, list[Any]]:
+    """Give every region a state, or leave them all alone.
+
+    Fails closed like the naming does, and for a sharper reason: the avatar is
+    the one thing on the profile that strangers watch change. A half-assigned
+    atlas would leave some music silently falling through to the neutral state,
+    which looks like the feature being broken rather than the listener being
+    between songs.
+    """
+    from musicshare.spec.generate import MOODS
+    from musicshare.spec.validate import validate_moods
+
+    if not force and atlas.regions and all(getattr(r, "state", "") for r in atlas.regions):
+        return atlas, []
+
+    g = generate(as_moods_input(atlas.regions), task=MOODS, model=model)
+    moods = g.spec
+    problems = validate_moods(moods, len(atlas.regions))
+    if problems or not moods.understood:
+        log.warning("mood sorting rejected: %s", problems[:4])
+        return atlas, problems
+
+    by_index = {m.index: str(m.state.value) for m in moods.moods}
+    for i, r in enumerate(atlas.regions):
+        if i in by_index:
+            r.state = by_index[i]
+    return atlas, []

@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 from musicshare.spec.chart import DATA_FIRST_YEAR, ChartSpec
 from musicshare.spec.filter import ShowFilter
+from musicshare.spec.mood import Moods
 from musicshare.spec.name import Naming
 
 MAX_ARTISTS = 12
@@ -119,4 +120,26 @@ def validate_naming(naming: Naming, k: int, artists: set[str] | None = None) -> 
         if artists and name.lower() in artists:
             problems.append(SpecProblem("name", f"'{name}' is an artist, not a genre"))
 
+    return problems
+
+
+def validate_moods(moods: Moods, k: int) -> list[SpecProblem]:
+    """Every region placed exactly once.
+
+    Deliberately no distinctness check, which is the opposite of validate_naming.
+    Two regions cannot share a name because they are two places; dozens of regions
+    share a state because a state is a grouping. Reusing the naming validator here
+    would have rejected every correct answer.
+    """
+    if not moods.understood:
+        return []
+    problems: list[SpecProblem] = []
+
+    got = [m.index for m in moods.moods]
+    if len(got) != k:
+        problems.append(SpecProblem("moods", f"{len(got)} states for {k} regions"))
+    if len(set(got)) != len(got):
+        problems.append(SpecProblem("index", "a region was given two states"))
+    if any(i >= k for i in got):
+        problems.append(SpecProblem("index", f"names a region above {k - 1}"))
     return problems
