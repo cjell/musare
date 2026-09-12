@@ -193,9 +193,11 @@ def positions(b: Basemap, names: list[str]) -> tuple[Any, list[int]]:
     return b.xy[np.array(rows)], keep
 
 
-# How many corpus artists to draw faintly behind a person's own. Enough to show
-# the shape of recorded music, few enough that a phone can draw it.
-BACKDROP = 5000
+# How many corpus artists to draw behind a person's own. Enough that the corpus
+# reads as a field of its own colour rather than as speckle - 5,000 single pixels
+# lose to 5,000 listener dots several pixels across, however bright they are,
+# because what the eye reads is area.
+BACKDROP = 11000
 
 
 def backdrop(b: Basemap, n: int = BACKDROP, seed: int = SEED) -> Any:
