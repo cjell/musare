@@ -24,7 +24,36 @@ a name, and `understood` is how the model reports that it was got at.
 
 from __future__ import annotations
 
+from enum import Enum
+
 from pydantic import BaseModel, Field
+
+from musicshare.spec.vocab import GENRES
+
+
+def _members() -> dict[str, str]:
+    """Enum member names from the vocabulary, kept unique.
+
+    "drum n bass" and "drum'n'bass" both normalise to the same identifier, so a
+    collision is not hypothetical - and a silently dropped member would remove a
+    genre from the vocabulary without anything failing.
+    """
+    out: dict[str, str] = {}
+    for g in GENRES:
+        key = "".join(c if c.isalnum() else "_" for c in g).strip("_").upper()
+        base, n = key, 2
+        while key in out:
+            key, n = f"{base}_{n}", n + 1
+        out[key] = g
+    return out
+
+
+# The labels, as a closed set. This is the whole point of the change: naming used
+# to be free text and was the only part of this project that drifted between
+# runs. A schema enum cannot return a word that is not here, so "mainstream rap"
+# cannot replace "hip hop" on a rebuild and a French bias in the fan counts
+# cannot invent a French name for a region of American rappers.
+Genre = Enum("Genre", _members(), type=str)
 
 # This schema names two different things: a listener's six-ish modes, and the
 # corpus's eighty-ish regions. The bound covers the larger, and is belt and
@@ -47,20 +76,15 @@ class ModeName(BaseModel):
             "input. Name every one once and none twice."
         ),
     )
-    name: str = Field(
-        max_length=MAX_NAME_CHARS,
+    name: Genre = Field(
         description=(
-            "What a person would call this music out loud - 'emo rap', 'shoegaze', "
-            "'quiet storm', 'bedroom pop', 'outlaw country'. Three words at most, and "
-            "one is usually better. Lowercase unless it is a proper noun. "
-            "Prefer the specific scene over the broad category: 'shoegaze' rather than "
-            "'alternative rock', 'drill' rather than 'hip hop'. The best name is often "
-            "not one of the tags - read the tags and the artists together and say what "
-            "the pair of them adds up to. One or two words is almost always right. "
-            "Never stack tags next to each other: 'indie pop rnb singer pop' and "
-            "'cloud rap emo trap' are lists of tags, not names, and are wrong even "
-            "though every word in them is real. Never a sentence, never punctuation at "
-            "the end, and never the word 'mode'."
+            "The genre this is, chosen from the list. Pick the most specific label "
+            "that is still true of the group as a whole: 'shoegaze' over 'alternative "
+            "rock' when the artists really are shoegaze, but the broader label when "
+            "they are a mixture and the narrow one would only describe a corner of "
+            "them. Read the tags and the artists together - the artists say which of "
+            "several plausible labels actually fits, and the tags say what the group "
+            "is made of. Every label must be different from the others."
         ),
     )
 

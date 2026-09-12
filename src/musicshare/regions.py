@@ -226,6 +226,7 @@ def fit(
     # count and are worth little - the atlas still fits, but do not expect the
     # names to be good.
     prom = {k_.lower(): v for k_, v in (prominence or {}).items()}
+    rng = np.random.default_rng(seed)
     ntags = np.array([len(t) for t in space.tags])
 
     regions = []
@@ -265,8 +266,14 @@ def fit(
                 + (unknown if prom.get(space.artists[i], -1) <= 0 else 0)
             ),
         )
-        known = by_fame
-        label, tags = _label([space.tags[i] for i in known[:200]])
+        # From the whole region, not from the famous end of it. Taking the top
+        # 200 by fan count meant the tag profile inherited Deezer's geography:
+        # a 4,689-artist hip hop region that is 98% not French was described to
+        # the namer as "rap, hip hop, french rap, rap francais, deutschrap",
+        # because those were the tags of its best-known members. Both of the
+        # namer's inputs said France and it named the region france.
+        sample = rows if len(rows) <= 1500 else rng.choice(rows, 1500, replace=False)
+        label, tags = _label([space.tags[i] for i in sample])
         regions.append(
             Region(
                 index=c,

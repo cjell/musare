@@ -8,9 +8,10 @@ injection behaviour is actually observed.
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from musicshare.modes import Mode, TasteProfile
-from musicshare.spec.name import MAX_NAME_WORDS, ModeName, Naming
+from musicshare.spec.name import Genre, ModeName, Naming
 from musicshare.spec.namerun import TAGS_SHOWN, apply_names, as_input, name, name_modes
 from musicshare.spec.validate import validate_naming
 
@@ -52,11 +53,31 @@ def naming(*pairs: tuple[int, str], understood: bool = True) -> Naming:
     )
 
 
+def test_a_word_outside_the_vocabulary_cannot_be_built():
+    """The whole point of the enum: the drift is impossible, not merely caught.
+
+    "mainstream rap" is exactly the sort of name the free-text version produced,
+    and exactly what replaced "hip hop" between two rebuilds.
+    """
+    with pytest.raises(ValidationError):
+        ModeName(index=0, name="mainstream rap")
+    with pytest.raises(ValidationError):
+        ModeName(index=0, name="indie pop rnb singer pop")
+
+
+def test_the_vocabulary_holds_the_niche_scenes_and_not_the_opinions():
+    vocab = {g.value for g in Genre}
+    for good in ("shoegaze", "emo rap", "visual kei", "chanson", "phonk", "afrobeats"):
+        assert good in vocab
+    for bad in ("best", "underrated", "essential", "detroit", "guilty pleasure"):
+        assert bad not in vocab
+
+
 # ------------------------------------------------------------------ validator
 
 
 def test_a_clean_naming_passes():
-    assert validate_naming(naming((0, "emo rap"), (1, "bro country")), 2) == []
+    assert validate_naming(naming((0, "emo rap"), (1, "country")), 2) == []
 
 
 def test_a_refusal_is_not_judged():
@@ -82,44 +103,8 @@ def test_names_must_cover_every_mode():
 
 def test_two_modes_cannot_share_a_name():
     """The defect the whole step exists to remove."""
-    problems = validate_naming(naming((0, "indie"), (1, "Indie")), 2)
+    problems = validate_naming(naming((0, "indie"), (1, "indie")), 2)
     assert any("twice" in p.message for p in problems)
-
-
-def test_a_phrase_is_not_a_name():
-    long = " ".join(["word"] * (MAX_NAME_WORDS + 1))
-    problems = validate_naming(naming((0, long), (1, "country")), 2)
-    assert any("phrase" in p.message for p in problems)
-
-
-def test_tag_soup_is_rejected():
-    """What the small model actually returned, and why it is not a name."""
-    problems = validate_naming(naming((0, "indie pop rnb singer pop"), (1, "country")), 2)
-    assert problems
-
-
-@pytest.mark.parametrize("bad", ["<script>", "rap {0}", "a|b", "name`x`", "rap\nname"])
-def test_names_outside_the_character_allowlist_are_rejected(bad):
-    problems = validate_naming(naming((0, bad), (1, "country")), 2)
-    assert any(p.field == "name" for p in problems)
-
-
-@pytest.mark.parametrize("ok", ["hip-hop", "r&b", "rock 'n' roll", "2000s pop", "post-punk/wave"])
-def test_real_genre_punctuation_survives(ok):
-    assert validate_naming(naming((0, ok), (1, "country")), 2) == []
-
-
-def test_an_empty_name_is_caught():
-    problems = validate_naming(naming((0, "   "), (1, "country")), 2)
-    assert any("empty" in p.message for p in problems)
-
-
-def test_a_mode_cannot_be_named_after_one_of_its_artists():
-    """A smaller model answered 'drake rap'; naming a mode after a member says nothing."""
-    problems = validate_naming(
-        naming((0, "juice wrld"), (1, "country")), 2, artists={"juice wrld", "morgan wallen"}
-    )
-    assert any("artist" in p.message for p in problems)
 
 
 # --------------------------------------------------------- the untrusted input
@@ -160,7 +145,7 @@ def test_only_a_fixed_number_of_tags_is_shown(profile):
 
 
 def test_names_sit_beside_the_derived_labels(profile):
-    apply_names(profile, naming((0, "emo rap"), (1, "bro country")))
+    apply_names(profile, naming((0, "emo rap"), (1, "country")))
     assert profile.modes[0].display == "emo rap"
     assert profile.modes[0].label == "trap, rap"  # evidence survives
 
@@ -227,7 +212,7 @@ def test_an_injected_tag_cannot_dictate_a_name(profile, payload):
 
 def test_an_already_named_profile_is_not_renamed(profile, monkeypatch):
     """The call is not deterministic, so a name that exists is kept."""
-    apply_names(profile, naming((0, "emo rap"), (1, "bro country")))
+    apply_names(profile, naming((0, "emo rap"), (1, "country")))
 
     def explode(*a, **k):
         raise AssertionError("should not have called the model")
@@ -235,15 +220,15 @@ def test_an_already_named_profile_is_not_renamed(profile, monkeypatch):
     monkeypatch.setattr("musicshare.spec.namerun.name_modes", explode)
     out, problems = name(profile)
     assert problems == []
-    assert [m.name for m in out.modes] == ["emo rap", "bro country"]
+    assert [m.name for m in out.modes] == ["emo rap", "country"]
 
 
 def test_force_renames_an_already_named_profile(profile, monkeypatch):
-    apply_names(profile, naming((0, "emo rap"), (1, "bro country")))
+    apply_names(profile, naming((0, "emo rap"), (1, "country")))
     monkeypatch.setattr(
         "musicshare.spec.namerun.name_modes",
-        lambda p, model=None: (naming((0, "cloud rap"), (1, "outlaw country")), [], None),
+        lambda p, model=None: (naming((0, "cloud rap"), (1, "country rock")), [], None),
     )
     out, problems = name(profile, force=True)
     assert problems == []
-    assert [m.name for m in out.modes] == ["cloud rap", "outlaw country"]
+    assert [m.name for m in out.modes] == ["cloud rap", "country rock"]

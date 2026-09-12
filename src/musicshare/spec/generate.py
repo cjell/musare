@@ -87,11 +87,17 @@ Each numbered region is a cluster of artists who are tagged alike. You get the
 tags its members carry and the best known of those members. Name the region the
 way someone who listens to that music would refer to it.
 
-The artists are the stronger signal. Tags are crowd-sourced and repeat across
-regions - a dozen of these will say "rock" - so what separates one region from
-the next is usually who is in it. Metallica and Slipknot together are metal of a
-particular kind; Led Zeppelin and Lynyrd Skynyrd are not the same place even
-though both carry "rock".
+The tags say what a region is made of; the artists tell you which of several
+plausible labels fits it. Use them in that order. The artist list is the best
+known members by fan count, and that count comes from a service whose audience is
+not evenly spread - French and Brazilian artists carry several times the following
+of American ones there - so a few names from one country is not evidence that the
+region belongs to that country. If the tags say rap and hip hop, the label is a
+kind of rap, not a nationality.
+
+Within that, the artists do real work: Metallica and Slipknot together are metal
+of a particular kind, and Led Zeppelin and Lynyrd Skynyrd are not the same place
+even though both carry "rock".
 
 Every name must be different from every other, because these are places and two
 places cannot share a name. Where two regions look alike, the artists will tell

@@ -97,7 +97,7 @@ def name_modes(
 
 def apply_names(p: TasteProfile, naming: Naming) -> TasteProfile:
     """Write validated names onto the profile. Call only on a clean validation."""
-    by_index = {n.index: n.name.strip() for n in naming.names}
+    by_index = {n.index: str(n.name.value).strip() for n in naming.names}
     for i, m in enumerate(p.modes):
         if i in by_index:
             m.name = by_index[i]
@@ -162,6 +162,41 @@ def name_regions(
     return naming, problems, g
 
 
+def _resolve_duplicates(atlas: Any, chosen: dict[int, str]) -> dict[int, str]:
+    """Give a repeated label to one region and something true to the other.
+
+    With free text a duplicate meant the model was confused and failing closed
+    was right. With a closed vocabulary it is arithmetic: 152 regions drawing
+    from 385 labels will collide, and refusing to name anything because two
+    regions both looked like "broadway" would mean never naming anything.
+
+    The first region to claim a label keeps it; the other falls back to its own
+    highest-ranked tag that is still free, and to its tag label if none is. Index
+    order, so the outcome is the same every run.
+    """
+    from musicshare.spec.vocab import GENRES
+
+    allowed = set(GENRES)
+    taken: set[str] = set()
+    out: dict[int, str] = {}
+    for i, r in enumerate(atlas.regions):
+        want = chosen.get(i)
+        if want and want not in taken:
+            out[i] = want
+            taken.add(want)
+            continue
+        alt = next((t for t in r.tags if t in allowed and t not in taken), None)
+        if alt:
+            log.info("region %d: %r was taken, using %r", i, want, alt)
+            out[i] = alt
+            taken.add(alt)
+        elif want:
+            # Nothing left that fits. A duplicate label beats no label.
+            log.warning("region %d: keeping duplicate %r", i, want)
+            out[i] = want
+    return out
+
+
 def name_atlas(
     atlas: Any, model: str = NAME_MODEL, force: bool = False
 ) -> tuple[Any, list[SpecProblem]]:
@@ -174,9 +209,15 @@ def name_atlas(
     if not force and atlas.regions and all(r.name for r in atlas.regions):
         return atlas, []
     naming, problems, _ = name_regions(atlas.regions, model=model)
-    if problems or not naming.understood:
+    if not naming.understood:
         return atlas, problems
-    by_index = {n.index: n.name.strip() for n in naming.names}
+    # A duplicate is the one problem that is resolved rather than refused.
+    blocking = [p for p in problems if "used twice" not in p.message]
+    if blocking:
+        return atlas, blocking
+    by_index = _resolve_duplicates(
+        atlas, {n.index: str(n.name.value).strip() for n in naming.names}
+    )
     for i, r in enumerate(atlas.regions):
         if i in by_index:
             r.name = by_index[i]

@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 from musicshare.spec.chart import DATA_FIRST_YEAR, ChartSpec
 from musicshare.spec.filter import ShowFilter
-from musicshare.spec.name import MAX_NAME_WORDS, Naming
+from musicshare.spec.name import Naming
 
 MAX_ARTISTS = 12
 
@@ -102,18 +102,20 @@ def validate_naming(naming: Naming, k: int, artists: set[str] | None = None) -> 
 
     seen: set[str] = set()
     for n in naming.names:
-        name = n.name.strip()
+        # An enum member, so the shape checks below are belt and braces now -
+        # the schema already guarantees the word is one of the 446. Distinctness
+        # is the part it cannot enforce.
+        name = str(getattr(n.name, "value", n.name)).strip()
         if not name:
             problems.append(SpecProblem("name", f"mode {n.index} came back empty"))
             continue
         if name.lower() in seen:
             problems.append(SpecProblem("name", f"'{name}' is used twice"))
         seen.add(name.lower())
-        if len(name.split()) > MAX_NAME_WORDS:
-            problems.append(SpecProblem("name", f"'{name}' is a phrase, not a name"))
-        bad = {c for c in name if not (c.isalnum() or c in NAME_MARKS)}
-        if bad:
-            problems.append(SpecProblem("name", f"'{name}' contains {''.join(sorted(bad))!r}"))
+        # No word-count or character rules any more: a name is an enum member,
+        # so its shape is guaranteed by the schema. Enforcing "three words at
+        # most" here rejected "east coast hip hop", which is a real label from
+        # the vocabulary - the rule outlived the free text it was written for.
         if artists and name.lower() in artists:
             problems.append(SpecProblem("name", f"'{name}' is an artist, not a genre"))
 
