@@ -314,6 +314,7 @@ def atlas_map(
     backdrop_n: int = BACKDROP,
     min_hours: float = 1.0,
     view_px: float = 900.0,
+    recent_days: int = 14,
 ) -> dict[str, Any]:
     """The map as named territory with one listener's artists on it.
 
@@ -325,12 +326,31 @@ def atlas_map(
     many hours they have in each.
     """
     from musicshare import regions as regions_mod
-    from musicshare.modes import artist_hours
+    from musicshare.modes import MIN_MS, artist_hours
 
     space = space or load_space()
     b = b or load_basemap()
 
     hours = artist_hours(con)
+    # The same artists over a short window. There is no honest single point for
+    # "you" on this map - a person-as-a-vector scored 0.701 against the corpus
+    # centroid where a random one scored 0.699 - but a subset of real positions
+    # is not a claim about geometry, it is just fewer dots. Where you have been
+    # lately, drawn on top of everywhere you have been.
+    from musicshare.history import connect as _connect
+
+    con = con or _connect()
+    recent = {
+        a: ms / 3_600_000.0
+        for a, ms in con.execute(f"""
+            select lower(trim(artist_name)), sum(ms_played)
+            from plays
+            where artist_name is not null and ms_played >= {MIN_MS}
+              and played_at >= (select max(played_at) from plays)
+                               - interval {int(recent_days)} day
+            group by 1 having sum(ms_played) > 0
+        """).fetchall()
+    }
     names = [n for n in hours if space.row(n) is not None]
     xy, keep = positions(b, names)
     names = [names[j] for j in keep]
@@ -344,6 +364,7 @@ def atlas_map(
             "x": round(float(xy[j, 0]), 2),
             "y": round(float(xy[j, 1]), 2),
             "hours": round(hours[names[j]], 2),
+            "recent": round(recent.get(names[j], 0.0), 2),
             "region": int(atlas.assign[space.row(names[j])]),
         }
         for j in range(len(names))
@@ -397,6 +418,8 @@ def atlas_map(
         # a different size should recompute rather than reuse them.
         "extent": round(span, 2),
         "view_px": view_px,
+        "recent_days": recent_days,
+        "recent_artists": sum(1 for a in artists if a["recent"] > 0),
         "note": "2D positions are for drawing only; similarity is measured in 200d",
     }
 

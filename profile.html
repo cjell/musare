@@ -1869,7 +1869,7 @@ details[open] summary .chev{transform:rotate(180deg)}
     <div class="mf-foot">
       <div class="mf-foot-row">
         <div class="mf-key">
-          <span><i style="background:#F4F1FA"></i>You</span>
+          <span id="mfKeyMine"><i style="background:#F4F1FA"></i>You</span>
           <span><i id="mfKeyThem"></i><span id="mfKeyName">cjell</span></span>
         </div>
         <div class="mf-dist" id="mfDist"></div>
@@ -2176,6 +2176,9 @@ function bokeh(cv, hues, seed, density){
    region carries the smallest zoom at which its label was measured to fit, so
    this filters on a number instead of running collision tests every frame. */
 var MAPDATA = null;
+/* Whether the map highlights the recent window. Off shows every artist at one
+   weight, which is the honest fallback when a history has no recent plays. */
+var MAP_RECENT = true;
 var MAPZ = 1, MAPCX = 0.5, MAPCY = 0.5;   /* zoom, and the centre in 0..1 */
 var MAP_MAX_Z = 16;
 
@@ -2227,13 +2230,46 @@ function realMap(cv, big){
   var maxH = 1;
   d.artists.forEach(function(a){ if(a.hours > maxH) maxH = a.hours; });
   var lg = Math.log(1 + maxH);
-  ctx.fillStyle = "rgba(" + ACCENT_RGB_NOW + ",.62)";
-  d.artists.forEach(function(a){
-    var x = X(a.x), y = Y(a.y);
-    if(x < -4 || x > w + 4 || y < -4 || y > h + 4) return;
-    var r = (big ? 1.1 : 0.75) + (big ? 4.2 : 2.4) * (Math.log(1 + a.hours) / lg);
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-  });
+
+  /* Two passes. Everything you have ever played, dim; then the last couple of
+     weeks over the top of it, lit.
+
+     This is what stands in for a "you are here" dot. There is no honest single
+     point for a person on this projection - a listener as one vector scored
+     0.701 against the corpus centre where a random one scored 0.699, and
+     distance here goes flat past about three units - so a marker would be a
+     precise-looking mark that means nothing. A short window is not a claim
+     about geometry at all. It is the same real positions, fewer of them. */
+  function dots(pick, alpha, grow){
+    ctx.fillStyle = "rgba(" + ACCENT_RGB_NOW + "," + alpha + ")";
+    d.artists.forEach(function(a){
+      if(!pick(a)) return;
+      var x = X(a.x), y = Y(a.y);
+      if(x < -4 || x > w + 4 || y < -4 || y > h + 4) return;
+      var r = (big ? 1.1 : 0.75) + (big ? 4.2 : 2.4) * (Math.log(1 + a.hours) / lg);
+      ctx.beginPath(); ctx.arc(x, y, r * grow, 0, Math.PI * 2); ctx.fill();
+    });
+  }
+  var anyRecent = MAP_RECENT && d.artists.some(function(a){ return a.recent > 0; });
+  if(anyRecent){
+    dots(function(a){ return !a.recent; }, ".20", 1);
+    /* A ring rather than just a brighter dot: at this size a lone recent artist
+       in an empty corner has nothing to be brighter than. */
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.5)";
+    ctx.lineWidth = big ? 1 : 0.7;
+    d.artists.forEach(function(a){
+      if(!a.recent) return;
+      var x = X(a.x), y = Y(a.y);
+      if(x < -6 || x > w + 6 || y < -6 || y > h + 6) return;
+      var r = ((big ? 1.1 : 0.75) + (big ? 4.2 : 2.4) * (Math.log(1 + a.hours) / lg)) * 1.15;
+      ctx.beginPath(); ctx.arc(x, y, r + (big ? 2 : 1.4), 0, Math.PI * 2); ctx.stroke();
+    });
+    ctx.restore();
+    dots(function(a){ return a.recent > 0; }, ".95", 1.15);
+  } else {
+    dots(function(){ return true; }, ".62", 1);
+  }
 
   ctx.textAlign = "center";
   ctx.font = '500 ' + (big ? 10.5 : 8) + 'px "IBM Plex Mono", monospace';
@@ -2693,6 +2729,16 @@ function openMap(){
   var p = PROFILES[current], first = p.name.split(" ")[0];
   var mine = current === 0;
   $("mfWho").textContent = mine ? "Your taste map" : "You & " + first;
+  /* The white dot this used to describe was the "you are here" marker, and there
+     is no honest place to put one. With real data the same swatch means the
+     recent window instead, which is a subset of real positions rather than a
+     claim about where a person sits. */
+  if(MAPDATA && mine){
+    $("mfKeyMine").innerHTML = '<i style="background:#F4F1FA"></i>Last ' +
+      (MAPDATA.recent_days || 14) + " days";
+  } else {
+    $("mfKeyMine").innerHTML = '<i style="background:#F4F1FA"></i>You';
+  }
   $("mfKeyName").textContent = first;
   $("mfKeyName").parentNode.hidden = mine;
   $("mfKeyThem").style.background = p.accent;
