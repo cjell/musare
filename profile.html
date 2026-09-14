@@ -906,6 +906,10 @@ body{
 
 /* ---- show detail sheet ---- */
 .ss-head{display:flex;gap:15px;align-items:center;padding:8px 0 0}
+/* Tapping the backdrop and pressing Escape both closed this already; neither is
+   visible, and one of them does not exist on a phone. Pushed to the corner so
+   it does not compete with the artist's name, which is what the sheet is for. */
+.ss-x{margin-left:auto;align-self:flex-start;flex:none}
 .ss-art{width:66px;flex:none}
 .ss-art .ring{display:block;border-color:var(--line-2);padding:2.5px}
 .ss-name{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:22px;letter-spacing:-.025em;line-height:1.1}
@@ -1791,10 +1795,13 @@ details[open] summary .chev{transform:rotate(180deg)}
       <div class="pop-head">
         <div class="ss-head">
           <div class="ss-art"><span class="ring"><span class="art" id="ssArt" style="display:block"></span></span></div>
-          <div>
+          <div style="min-width:0">
             <div class="ss-name" id="ssName"></div>
             <div class="ss-when" id="ssWhen"></div>
           </div>
+          <button class="icon-btn ss-x" id="ssClose" type="button" aria-label="Close">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
         </div>
         <div class="ss-stats">
           <div class="ss-stat"><b id="ssDist"></b><s>From you</s></div>
@@ -3703,6 +3710,7 @@ document.addEventListener("click", function(e){
   if(row && row.dataset.i) openShow(parseInt(row.dataset.i, 10), row);
 });
 $("showBg").addEventListener("click", closeShow);
+$("ssClose").addEventListener("click", closeShow);
 document.addEventListener("keydown", function(e){
   if(e.key === "Escape" && !$("showWrap").hidden) closeShow();
 });
