@@ -5042,6 +5042,10 @@ function renderPins(p){
   var editing = document.body.classList.contains("editing");
   var hue = p.artHue, self = current === 0;
 
+  /* No play count on these rows. A pin is a choice rather than a statistic, and
+     the count only existed for tracks pinned from this listener's own history -
+     anything pinned from search had none, so the column read as half-broken.
+     On repeat and the song movers keep their counts, which do mean something. */
   var tp = pinList("tracks"), tAny = self && tp.some(Boolean), th = "";
   for(var i = 0; i < PIN_SLOTS.tracks; i++){
     var pin = self ? tp[i] : null;
@@ -5052,15 +5056,13 @@ function renderPins(p){
         "<div " + artAttr(pin, pin.name, hue) + "></div>" +
         '<div class="meta"><div class="tt">' + esc(pin.name) + '</div><div class="ta">' +
         esc(pin.artist_name) + "</div></div>" +
-        '<span class="plays">' + esc(pin.your_plays || "") + "</span>" +
         unpinBtn("tracks", i) + "</div>";
     } else if(demo && !editing){
       th += '<div class="row" tabindex="0" role="button">' +
         '<span class="idx">' + (i + 1) + "</span>" +
         '<div class="art" style="' + artStyle(demo[0], hue) + '"></div>' +
         '<div class="meta"><div class="tt">' + esc(demo[0]) + '</div><div class="ta">' +
-        esc(demo[1]) + "</div></div>" +
-        '<span class="plays">' + esc(demo[2]) + "</span></div>";
+        esc(demo[1]) + "</div></div></div>";
     } else if(editing && self){
       th += slotBtn("tracks", i, "slot-row");
     }
