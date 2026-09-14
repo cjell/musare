@@ -140,6 +140,10 @@ def build() -> int:
             "tags": [str(t) for t in (r.get("tags") or [])],
             "dominant": dominant[int(r["index"])],
             "n_artists": int(r.get("n_artists") or 0),
+            # The avatar state, carried here so the status row can answer without
+            # the fitted artefacts. It is decided once per region at naming time;
+            # this is a copy of that answer, not a second opinion.
+            "state": str(r.get("state") or "") or None,
         }
         for r in regions
     }
@@ -220,6 +224,23 @@ def of(artist: str) -> str | None:
     m = by_artist()
     a = artist.strip().lower()
     return m.get(a) or m.get(a.split(",")[0].strip())
+
+
+def state_of(artist: str) -> str | None:
+    """The avatar state for whoever is playing, or None if unplaceable.
+
+    The point of this living here rather than on the atlas is weight. Resolving
+    it through the fitted artefacts costs 523MB and twenty-five seconds on a
+    cold process, so the status row was gated on those being loaded already and
+    answered "unknown" until something else loaded them - which meant an artist
+    played for years read as unrecognised until the map was opened. Two small
+    files answer the same question: 1.5MB of artist-to-region and a 152-entry
+    index.
+    """
+    name = of(artist)
+    if not name:
+        return None
+    return (index().get(name) or {}).get("state")
 
 
 def attach(con) -> None:

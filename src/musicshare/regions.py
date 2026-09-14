@@ -378,21 +378,11 @@ def occupancy(
 # What the avatar does when there is no music, and when there is music the corpus
 # has not caught up with. Neither is a property a region can have, so neither is
 # in the Mood enum - they are runtime answers, not classifications.
+# Resolution lives in genres.state_of(), which answers from a 1.5MB table
+# rather than from the fitted artefacts - the version that lived here needed
+# the atlas in memory, so the status row read "unknown" for every artist
+# until the map had been opened. The names stay here with the rest of the
+# region vocabulary.
 SLEEPING = "sleeping"
 UNKNOWN = "unknown"
 
-
-def state_for(a: Atlas, space: Space, artist: str | None) -> str:
-    """The avatar state for whoever is playing. Never raises, always answers.
-
-    Spotify credits a collaboration as "A, B" and the corpus keys on one name, so
-    a miss on the whole string is retried on the first - that alone is the
-    difference between resolving a track and not, for anything featuring someone.
-    """
-    if not artist:
-        return SLEEPING
-    for candidate in (artist, artist.split(",")[0]):
-        r = a.region_of(space, candidate.strip().lower())
-        if r and r.state:
-            return r.state
-    return UNKNOWN

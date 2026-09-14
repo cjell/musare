@@ -344,23 +344,23 @@ def now() -> dict[str, object]:
     # The avatar state. A dictionary lookup, not a model call: the classification
     # happened once, per region, and is stored on the atlas - so this costs the
     # same whether the page polls every twenty seconds or every second.
+    # Paused is not listening. Spotify keeps returning the track with
+    # is_playing false, so without this the avatar sits on whatever was playing
+    # when you stopped, which is the opposite of what the sleeping state is for.
+    listening = bool(now and now.get("artist") and now.get("is_playing"))
+
     state = regions_mod.SLEEPING
-    if now and now.get("artist"):
-        # Only if the artefacts are already in memory. Calling _fitted() here
-        # would make the first request for the status wait on half a gigabyte of
-        # vectors and a projection index - twenty-five seconds during which the
-        # profile shows "not listening" to someone who is listening. The map
-        # loads them soon enough on its own, and until it does the avatar sits on
-        # its neutral state, which is what that state is for.
-        if _atlas_cache:
-            try:
-                state = regions_mod.state_for(
-                    _atlas_cache["atlas"], _atlas_cache["space"], now["artist"]
-                )
-            except Exception as e:
-                log.warning("avatar state unavailable: %s", e)
-                state = regions_mod.UNKNOWN
-        else:
+    if listening:
+        # Two small files rather than the fitted artefacts. This used to be
+        # gated on the atlas already being in memory, which it only is after the
+        # map has been opened - so on a cold process every song came back
+        # "unknown", including artists played for years, and whether it worked
+        # depended on what the user had looked at first. The lookup below costs
+        # 1.5MB and no fitting.
+        try:
+            state = genrelib.state_of(now["artist"]) or regions_mod.UNKNOWN
+        except Exception as e:
+            log.warning("avatar state unavailable: %s", e)
             state = regions_mod.UNKNOWN
 
     # When nothing is playing the status does not disappear, it goes quiet - so

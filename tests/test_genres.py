@@ -104,3 +104,30 @@ def test_no_genre_asked_for_keeps_everything():
     rows = [_show("A", "nu metal"), _show("C", None)]
     got = apply(ShowFilter(within_days=365), rows, today=date(2026, 9, 13))
     assert len(got) == 2
+
+
+# ------------------------------------------------------------ avatar state
+
+
+def test_state_resolves_without_the_fitted_artefacts():
+    """The status row used to answer "unknown" for everything until the map had
+    been opened, because it was gated on the atlas already being in memory.
+    Nothing here touches umap, numpy or the 393MB basemap."""
+    assert genres.state_of("metallica") == "angry"
+    assert genres.state_of("brian eno") == "peaceful"
+    assert genres.state_of("juice wrld") == "hype"
+
+
+def test_state_is_case_insensitive_and_handles_collaborations():
+    assert genres.state_of("Metallica") == genres.state_of("metallica")
+    assert genres.state_of("metallica, someone else") == "angry"
+
+
+def test_an_unplaceable_artist_has_no_state():
+    assert genres.state_of("an artist who does not exist at all") is None
+
+
+def test_every_region_carries_a_state():
+    """A region without one would show as unknown for everyone in it."""
+    missing = [n for n, m in genres.index().items() if not m.get("state")]
+    assert not missing, f"regions with no avatar state: {missing[:5]}"
