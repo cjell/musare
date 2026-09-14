@@ -461,3 +461,26 @@ select cron.schedule('listen-recent', '*/30 * * * *', 'select listen.poll_recent
 -- A job every 30 seconds is 2,880 run records a day in pg_cron's own log.
 select cron.schedule('listen-trim-cron-log', '17 4 * * *',
   $$delete from cron.job_run_details where end_time < now() - interval '2 days'$$);
+
+
+-- --------------------------------------------------------------- keepalive
+
+-- Free projects pause after a week without activity, and a paused project runs
+-- no jobs - capture would stop silently. Supabase's docs describe activity as
+-- requests from users and applications and do not say whether a project's own
+-- cron jobs count, so this does not rely on them: a daily GitHub Actions
+-- workflow calls this through the public API, which is unambiguously a request.
+--
+-- It writes rather than only reading, which covers the stricter reading of
+-- "activity", and it records itself in listen.status so `capture.py status`
+-- shows when the last one arrived. Callable with the anon key; the most anyone
+-- holding that key can do with it is bump one counter.
+create or replace function public.keepalive() returns timestamptz
+language plpgsql security definer set search_path = '' as $$
+begin
+  perform listen._record('keepalive', true, null, 0);
+  return now();
+end $$;
+revoke all on function public.keepalive() from public;
+grant execute on function public.keepalive() to anon;
+notify pgrst, 'reload schema';

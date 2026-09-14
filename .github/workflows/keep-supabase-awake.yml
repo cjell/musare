@@ -1,0 +1,45 @@
+# Free Supabase projects pause after a week without activity, and a paused
+# project runs no jobs - listening capture would stop without saying so. This
+# makes one request a day through the public API, which is the kind of activity
+# Supabase's docs describe. See the keepalive section of supabase/capture.sql.
+#
+# Needs two repository secrets: SUPABASE_URL and SUPABASE_ANON_KEY.
+#
+# GitHub only runs scheduled workflows from the default branch, and disables
+# them in a public repository after 60 days without a commit.
+
+name: Keep Supabase awake
+
+on:
+  schedule:
+    - cron: "23 13 * * *"  # daily, 13:23 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Call keepalive
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::error::SUPABASE_URL and SUPABASE_ANON_KEY repository secrets are not set"
+            exit 1
+          fi
+          # A legacy anon key is a JWT and also goes in Authorization; a newer
+          # publishable key (sb_publishable_...) is not a JWT and must not.
+          auth=()
+          case "$SUPABASE_ANON_KEY" in
+            eyJ*) auth=(-H "Authorization: Bearer $SUPABASE_ANON_KEY") ;;
+          esac
+          curl --fail-with-body --silent --show-error --retry 3 --retry-delay 30 \
+            -X POST "${SUPABASE_URL%/}/rest/v1/rpc/keepalive" \
+            -H "apikey: $SUPABASE_ANON_KEY" "${auth[@]}" \
+            -H "Content-Type: application/json" \
+            -d '{}'
+          echo

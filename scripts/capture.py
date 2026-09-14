@@ -106,6 +106,7 @@ def status() -> int:
         with live.cloud() as con:
             watch = live.watch_status(con, "watch")
             recent = live.watch_status(con, "recent")
+            awake = live.watch_status(con, "keepalive")
             day = con.execute("""
                 select source, count(*) from listen.plays
                 where played_at > now() - interval '24 hours' group by 1 order by 1
@@ -125,6 +126,12 @@ def status() -> int:
               f"{st['added']:,} plays written")
         if st["last_error"]:
             print(f"            last error: {st['last_error']}")
+
+    # The daily GitHub Actions ping that keeps a free project from pausing.
+    if awake and awake["last_ok_at"]:
+        print(f"  keepalive pinged {ago(awake['last_ok_at'])}")
+    else:
+        print("  keepalive never pinged - check the GitHub workflow and its secrets")
 
     counts = ", ".join(f"{n} from {src}" for src, n in day) or "none"
     print(f"  last 24h  {counts}")
