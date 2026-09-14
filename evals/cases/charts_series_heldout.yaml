@@ -1,0 +1,89 @@
+# Held-out set for the two new chart capabilities: genre, and more than one
+# series on a chart.
+#
+# Written before either existed. Run once, at the end. See the note at the top
+# of shows_genre_heldout.yaml for why that ordering is the whole point.
+#
+# `series` is the field that says a chart has more than one line on it. The
+# interesting cases are the negatives: most requests are single-series, and a
+# model that reaches for a comparison whenever two nouns appear would be worse
+# than one that never compares at all.
+
+# ------------------------------------------------------------ genre dimension
+- input: what genres do I listen to
+  expect: {dimension: genre, metric: hours, series: none}
+  tags: [genre, dimension]
+
+- input: top genres in 2021
+  expect: {dimension: genre, year: 2021}
+  tags: [genre, dimension, year]
+
+- input: what kind of music am I into this year
+  expect: {dimension: genre, range: this_year}
+  tags: [genre, dimension, range]
+
+- input: which genres do I skip the most
+  expect: {dimension: genre, metric: skip_rate, sort: desc}
+  tags: [genre, dimension, metric]
+
+# ------------------------------------------------------------- genre as filter
+- input: how much jazz have I listened to
+  expect: {genres: [jazz], metric: hours}
+  tags: [genre, filter]
+
+- input: my emo phase, month by month
+  expect: {genres: [emo], dimension: date, grain: month}
+  tags: [genre, filter, date]
+
+- input: all my metal listening over the years
+  expect: {genres: [metal], dimension: date, grain: year}
+  tags: [genre, filter, date]
+
+# ------------------------------------------------------------ multiple series
+- input: drake vs kendrick lamar over time
+  expect: {dimension: date, series: artist, artists: [drake, kendrick lamar]}
+  tags: [series, artist, date]
+
+- input: compare radiohead and the smiths by year
+  expect: {dimension: date, grain: year, series: artist, artists: [radiohead, the smiths]}
+  tags: [series, artist, date]
+
+- input: taylor swift versus olivia rodrigo, what time of day
+  expect: {dimension: hour_of_day, series: artist}
+  tags: [series, artist, cyclical]
+
+- input: rap against rock for me over the years
+  expect: {dimension: date, grain: year, series: genre}
+  tags: [series, genre, date]
+
+- input: how my top genres have changed month to month
+  expect: {dimension: date, grain: month, series: genre}
+  tags: [series, genre, date]
+
+# --------------------------------------------------- single series on purpose
+- input: top artists
+  expect: {dimension: artist, series: none}
+  tags: [series, negative]
+
+- input: my listening over time
+  expect: {dimension: date, series: none}
+  tags: [series, negative, date]
+
+# Two artists named, but combined rather than compared - the request is for one
+# total, not for one line each.
+- input: how much have I played drake and future altogether
+  expect: {series: none, artists: [drake, future]}
+  tags: [series, negative, artist]
+
+- input: what do I listen to on weekends
+  expect: {dimension: day_of_week, series: none}
+  tags: [series, negative, cyclical]
+
+# ------------------------------------------------------------------ refusals
+- input: what genre will I be into next year
+  expect: {understood: false}
+  tags: [genre, refusal, prediction]
+
+- input: compare my genres to my girlfriend's
+  expect: {understood: false}
+  tags: [series, refusal, other-person]

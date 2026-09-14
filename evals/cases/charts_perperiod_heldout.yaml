@@ -1,0 +1,78 @@
+# Held-out set for per-period ranking: "the top N in each bucket", where each
+# bucket gets its own ranking rather than following one set of things across
+# the chart.
+#
+# Written before the field existed. Run once, at the end. The two earlier
+# held-out sets in this directory have been read and are training data now,
+# whatever their filenames say.
+#
+# The distinction this has to learn is narrow and the negatives carry it:
+#
+#   "drake vs kendrick over time"   one set of lines, followed across       -> series
+#   "top 3 artists every year"      a different ranking inside each year    -> per_period
+#   "top 3 artists"                 one ranking, no buckets at all          -> neither
+#
+# All three are natural English and only the middle one is new.
+
+# ------------------------------------------------------------- per period
+- input: top 3 artists every year
+  expect: {per_period: true, series: artist, dimension: date, grain: year, limit: 3}
+  tags: [per_period]
+
+- input: my top 3 artists each year
+  expect: {per_period: true, series: artist, dimension: date, grain: year, limit: 3}
+  tags: [per_period]
+
+- input: who was my number one artist every month
+  expect: {per_period: true, series: artist, dimension: date, grain: month, limit: 1}
+  tags: [per_period, single]
+
+- input: most played song each year
+  expect: {per_period: true, series: track, dimension: date, grain: year, limit: 1}
+  tags: [per_period, track]
+
+- input: my biggest genre every month
+  expect: {per_period: true, series: genre, dimension: date, grain: month, limit: 1}
+  tags: [per_period, genre]
+
+- input: top 5 tracks per year
+  expect: {per_period: true, series: track, dimension: date, grain: year, limit: 5}
+  tags: [per_period, track]
+
+# ------------------------------------------------- a comparison, not a ranking
+- input: drake vs kendrick lamar over time
+  expect: {per_period: false, series: artist, dimension: date}
+  tags: [per_period, negative, series]
+
+- input: rap versus rock by year
+  expect: {per_period: false, series: genre}
+  tags: [per_period, negative, series]
+
+# -------------------------------------------------- a ranking, but no buckets
+- input: top 3 artists
+  expect: {per_period: false, dimension: artist, limit: 3}
+  tags: [per_period, negative, ranked]
+
+- input: my top 10 songs of all time
+  expect: {per_period: false, dimension: track, limit: 10}
+  tags: [per_period, negative, ranked]
+
+# ------------------------------------------------------------- plain charts
+- input: my listening by year
+  expect: {per_period: false, dimension: date, grain: year, series: none}
+  tags: [per_period, negative]
+
+- input: what time of day do I listen
+  expect: {per_period: false, dimension: hour_of_day}
+  tags: [per_period, negative]
+
+# ------------------------------------------------------------------ refusals
+# Still a refusal. A data fallback exists for requests this cannot draw; it is
+# not a fallback for requests this cannot answer.
+- input: top 3 artists my girlfriend played each year
+  expect: {understood: false}
+  tags: [per_period, refusal, other-person]
+
+- input: what will my top artist be next year
+  expect: {understood: false}
+  tags: [per_period, refusal, prediction]
