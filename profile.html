@@ -198,6 +198,11 @@ body{
 .stats.four .stat + .stat{padding-left:11px}
 .stats.four .stat .n{font-size:17px}
 .stats.four .stat .l{font-size:9px;letter-spacing:.1em}
+/* "New artists" does not fit one line in a quarter of a phone column, and
+   abbreviating it to "New" left the number meaning nothing. So it wraps, and
+   every label reserves the two lines whether it needs them or not - otherwise
+   three sit high and one sits low. */
+.stats.four .stat .l{min-height:2.4em}
 .stat .n{
   font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
   font-size:19px;font-weight:500;letter-spacing:-.01em;display:block;
@@ -1434,7 +1439,7 @@ details[open] summary .chev{transform:rotate(180deg)}
           <div class="stat"><span class="n" id="wkHours">14.2</span><span class="l">Hours</span></div>
           <div class="stat"><span class="n" id="wkPlays">612</span><span class="l">Plays</span></div>
           <div class="stat"><span class="n" id="wkTracks">218</span><span class="l">Tracks</span></div>
-          <div class="stat"><span class="n" id="wkNew">11</span><span class="l">New</span></div>
+          <div class="stat"><span class="n" id="wkNew">11</span><span class="l">New artists</span></div>
         </div>
         <div class="gapnote" id="gapNote" hidden>
           <span aria-hidden="true">!</span>
