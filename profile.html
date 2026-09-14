@@ -2630,6 +2630,53 @@ catch(e){ CUSTOM = {}; }
    it; this browser has something and the server does not, so push it; both
    have something, so the newer one wins. Without the timestamp the last
    browser opened would quietly overwrite the one the work was done in. */
+/* Anything still stored as a data URI becomes an upload, once.
+
+   Profiles that predate the upload path keep the banner and the photo inline,
+   and a 1500px JPEG is several hundred kilobytes of base64 - bigger on its own
+   than the whole profile document is allowed to be. Without this the first push
+   would be refused for size and quietly do nothing, and the honest answer to
+   "do I have to upload it all again" would have been yes. */
+function upload(kind, name, dataURI){
+  return fetch(dataURI)
+    .then(function(r){ return r.blob(); })
+    .then(function(blob){
+      return fetch("/api/media/" + kind + "/" + encodeURIComponent(name),
+                   { method: "POST", body: blob });
+    })
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(d){ return d && d.url ? d.url : null; });
+}
+
+function isInline(v){ return typeof v === "string" && v.slice(0, 5) === "data:"; }
+
+function migrateInline(){
+  var jobs = [];
+  Object.keys(CUSTOM).forEach(function(pid){
+    var c = CUSTOM[pid];
+    if(!c || typeof c !== "object") return;
+
+    ["banner", "avatar"].forEach(function(k){
+      if(!isInline(c[k])) return;
+      jobs.push(upload("photos", pid + "-" + k, c[k]).then(function(url){
+        if(url) c[k] = url;          /* keep the inline copy if the upload failed */
+      }));
+    });
+
+    if(c.moods) Object.keys(c.moods).forEach(function(st){
+      if(!isInline(c.moods[st])) return;
+      jobs.push(upload("moods", st, c.moods[st]).then(function(url){
+        if(url) c.moods[st] = url;
+      }));
+    });
+  });
+  if(!jobs.length) return Promise.resolve(false);
+  return Promise.all(jobs).then(function(){
+    try { localStorage.setItem(STORE, JSON.stringify(CUSTOM)); } catch(e){}
+    return true;
+  }).catch(function(){ return false; });
+}
+
 function syncCustom(){
   return fetch("/api/profile")
     .then(function(r){ return r.ok ? r.json() : null; })
@@ -5549,7 +5596,10 @@ showScreen("home");
    right one and waiting on a request to draw anything would trade a correct
    screen now for the same screen later. When the server turns out to hold
    something newer, this repaints. */
-syncCustom().then(function(adopted){
+migrateInline().then(function(moved){
+  if(moved) render(current);
+  return syncCustom();
+}).then(function(adopted){
   if(!adopted) return;
   render(current);
   paintMood();
