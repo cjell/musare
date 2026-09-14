@@ -3768,6 +3768,14 @@ function showScreen(which){
   screenScroll[currentScreen] = window.scrollY;
   currentScreen = which;
 
+  /* Editing belongs to the profile screen, so leaving it ends the session the
+     same way Done would - the bar was staying pinned over Home and Shows,
+     offering to finish editing a screen that was no longer there. Nothing is
+     lost by it: pins, colours and text all save as they are changed. */
+  if(which !== "profile" && document.body.classList.contains("editing")){
+    setEditing(false, false);
+  }
+
   Object.keys(SCREENS).forEach(function(k){
     $(SCREENS[k]).hidden = k !== which;
     $(TABS[k]).setAttribute("aria-current", k === which ? "page" : "false");
@@ -5178,12 +5186,14 @@ function chartCard(d, opts){
 }
 
 /* ================= edit mode ================= */
-function setEditing(on){
+function setEditing(on, focusBack){
   document.body.classList.toggle("editing", on);
   $("editBar").hidden = !on;
   $("actionsSelf").hidden = on || current !== 0;
   renderPins(PROFILES[current]);
-  if(!on) $("editBtn").focus();
+  /* Not when the profile screen is being left: focusing a control on a screen
+     that is no longer shown scrolls the page back to it. */
+  if(!on && focusBack !== false) $("editBtn").focus();
 }
 
 /* ================= pin picker ================= */
