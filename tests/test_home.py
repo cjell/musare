@@ -27,12 +27,12 @@ def test_a_collaboration_with_a_known_act_is_not_a_discovery():
     found = {d["name"].lower() for d in home.discoveries(50)}
     known = {
         row[0].lower()
-        for row in home._q("""
+        for row in home._q(f"""
             with bounds as (select max(played_at) as tip from plays)
             select distinct lower(trim(unnest(string_split(artist_name, ','))))
             from plays
             where ms_played >= 30000 and artist_name is not null
-              and played_at <= (select tip from bounds) - interval 30 day
+              and played_at <= (select tip from bounds) - interval {home.DISCOVER_DAYS} day
         """)
     }
     for name in found:
@@ -43,9 +43,9 @@ def test_a_collaboration_with_a_known_act_is_not_a_discovery():
 def test_every_discovery_was_first_heard_inside_the_window():
     for d in home.discoveries(10):
         rows = home._q(
-            """
+            f"""
             with bounds as (select max(played_at) as tip from plays)
-            select min(played_at) > (select tip from bounds) - interval 30 day
+            select min(played_at) > (select tip from bounds) - interval {home.DISCOVER_DAYS} day
             from plays where artist_name = ? and ms_played >= 30000
             """,
             [d["name"]],
@@ -81,9 +81,14 @@ def test_song_discoveries_are_shaped_for_the_page():
         assert t["days"] >= home.MIN_DISCOVER_DAYS
 
 
-def test_a_song_may_be_by_an_artist_you_already_know():
+def test_a_song_may_be_by_an_artist_you_already_know(monkeypatch):
     """The artist rule must not leak into the song rule - finding a great track
-    by someone played for years is exactly what finding a song means."""
+    by someone played for years is exactly what finding a song means.
+
+    Checked over a month rather than the live week. This proves a property of the
+    rule by sampling real data, and a week can legitimately hold one song by one
+    new act - which says nothing about the rule and fails the test anyway."""
+    monkeypatch.setattr(home, "DISCOVER_DAYS", 30)
     songs = home.song_discoveries(20)
     new_artists = {d["name"].lower() for d in home.discoveries(50)}
     assert songs, "no song discoveries to check"
@@ -95,13 +100,13 @@ def test_a_rereleased_song_is_not_a_discovery():
     re-release, the same rename problem arriving through a different door."""
     for t in home.song_discoveries(20):
         rows = home._q(
-            """
+            f"""
             with bounds as (select max(played_at) as tip from plays)
             select count(*) from plays
             where lower(trim(track_name)) = lower(trim(?))
               and lower(trim(artist_name)) = lower(trim(?))
               and ms_played >= 30000
-              and played_at <= (select tip from bounds) - interval 30 day
+              and played_at <= (select tip from bounds) - interval {home.DISCOVER_DAYS} day
             """,
             [t["name"], t["artist"]],
         )
@@ -172,3 +177,44 @@ def test_a_skipped_play_does_not_move_anything():
     assert counted > 0, "no short plays in the window; the guard is untested"
     for r in home._movers("down", 4) + home._song_movers("down", 4):
         assert r["plays_prev"] >= 1
+
+
+# ------------------------------------------------------------ feed plumbing
+
+
+def test_the_discovery_window_is_a_week_like_the_rest_of_the_feed():
+    assert home.DISCOVER_DAYS == 7
+
+
+def test_a_cached_feed_is_served_only_while_the_newest_play_is_unchanged():
+    """The old rule was a 30-minute clock, which could not see plays the
+    scheduled poller wrote out of band."""
+    tip = "2026-09-14T16:47:13"
+    fresh = {"v": home.CACHE_VERSION, "through": tip}
+    assert home._cache_usable(fresh, tip)
+    assert not home._cache_usable(fresh, "2026-09-14T17:02:40"), "a newer play makes it stale"
+    assert not home._cache_usable({"v": home.CACHE_VERSION - 1, "through": tip}, tip), (
+        "an older cache version is rebuilt even with no new plays"
+    )
+    assert not home._cache_usable(None, tip)
+    assert not home._cache_usable(fresh, None)
+
+
+def test_the_picture_comes_from_the_act_credited_on_the_played_track():
+    """Searching "My Friend" ranks Mark Lee first; the played track credits My
+    Friend by id, which no name search can get wrong."""
+    track = {"artists": [{"name": "My Friend", "id": "right"},
+                         {"name": "Tommy Farrow", "id": "other"}]}
+    assert home._credited(track, "My Friend") == "right"
+    assert home._credited(track, "my friend") == "right"
+
+
+def test_a_joined_live_credit_resolves_on_its_first_act():
+    track = {"artists": [{"name": "My Friend", "id": "right"},
+                         {"name": "Tommy Farrow", "id": "other"}]}
+    assert home._credited(track, "My Friend, Tommy Farrow") == "right"
+
+
+def test_an_act_not_on_the_track_is_not_guessed():
+    track = {"artists": [{"name": "Mark Lee", "id": "wrong"}]}
+    assert home._credited(track, "My Friend") is None

@@ -1470,7 +1470,7 @@ details[open] summary .chev{transform:rotate(180deg)}
       </section>
 
       <section class="sec anim">
-        <div class="sec-label"><span>Found and kept <span class="aux">new this month</span></span>
+        <div class="sec-label"><span>Found and kept <span class="aux">new this week</span></span>
           <span class="swap" data-a="youFound" data-b="youFoundSongs">
             <button type="button" data-swap="a" aria-pressed="true">Artists</button>
             <button type="button" data-swap="b" aria-pressed="false">Songs</button>
@@ -3425,16 +3425,26 @@ function applyShowFilter(){
    Every number on this screen comes from the export plus whatever the live
    sync has added. None of it is expressible through /me/top/artists, which
    returns a ranked list over three fixed windows with no counts. */
-var homeLoaded = false;
+/* The feed used to be fetched once per page load and never again, so an app
+   left open all afternoon showed the week as it stood when it was opened. Now
+   it is re-asked whenever Home comes back into view and every few minutes
+   while it is on screen - and redrawn only when the data behind it moved. */
+var homeInflight = false, homeThrough = null;
 
 function loadHome(){
-  if(homeLoaded) return;
-  homeLoaded = true;
+  if(homeInflight) return;
+  homeInflight = true;
   fetch("/api/home").then(function(r){
     if(!r.ok) throw new Error(r.status);
     return r.json();
   }).then(function(d){
+    homeInflight = false;
     if(!d || !d.week) return;
+    /* Same newest play means the same feed; redrawing it would only restart
+       images and reset nothing useful. A gap warning is new information even
+       when the plays are not. */
+    if(d.through && d.through === homeThrough && !(d.live && d.live.missed)) return;
+    homeThrough = d.through;
     var w = d.week;
     $("wkHours").textContent = w.hours;
     $("wkPlays").textContent = w.plays;
@@ -3479,7 +3489,20 @@ function loadHome(){
     });
     renderYou();
   }).catch(function(){
+    homeInflight = false;
     /* No server: the generated figures already on the page stay as they are. */
+  });
+}
+
+/* Three minutes, because the server syncs on request when its data is five
+   minutes stale and the poller runs every thirty: faster than this asks for
+   numbers that cannot have changed. */
+function homePolling(){
+  setInterval(function(){
+    if(currentScreen === "home" && !document.hidden) loadHome();
+  }, 180000);
+  document.addEventListener("visibilitychange", function(){
+    if(!document.hidden && currentScreen === "home") loadHome();
   });
 }
 
@@ -5637,6 +5660,7 @@ render(0);
 loadMap();
 loadNow();
 nowPolling(true);
+homePolling();
 loadPlaylists();
 showScreen("home");
 

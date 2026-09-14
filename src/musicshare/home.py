@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-import time
 from typing import Any
 
 from musicshare.config import ROOT
@@ -27,7 +26,10 @@ log = logging.getLogger(__name__)
 
 CACHE = ROOT / "data" / "cache" / "home.json"
 ART_CACHE = ROOT / "data" / "cache" / "art.json"
-CACHE_TTL = 30 * 60
+# Bumped whenever what a cached feed means changes - a new field, a different
+# rule for choosing a picture - so an old file is rebuilt rather than served just
+# because no play has happened since.
+CACHE_VERSION = 3
 
 MIN_MS = 30_000
 URI_RE = re.compile(r"^spotify:track:([A-Za-z0-9]+)$")
@@ -66,12 +68,18 @@ MIN_RECENT_PLAYS_ARTIST = 2
 MIN_PRIOR_PLAYS_SONG = 3
 MIN_RECENT_PLAYS_SONG = 2
 
-# How far back an artist can have been found and still count as a discovery. A
-# week is the window the movers use, and it is the wrong one here: over seven
-# days this listener had exactly one genuine discovery, because finding someone
-# and then proving you like them are not the same event and the second one takes
-# longer than the first.
-DISCOVER_DAYS = 30
+# How far back an artist can have been found and still count as a discovery.
+# A week, the same window as every other section of the feed.
+#
+# It was 30 days, for a measured reason: finding someone and proving you like
+# them are different events and the second takes time, so over the seven days
+# before continuous polling this listener had one discovery against ten over a
+# month. That seven days was also the sparsest stretch of data the app had - an
+# export ending 09-09 followed by 15-45 captured plays a day - and with the
+# poller running every half hour a week is densely covered. The structural cost
+# is real and stays: anything first heard in the last day or two cannot have
+# been kept yet, so a weekly list runs shorter than a monthly one would.
+DISCOVER_DAYS = 7
 # Came back to them on another day. This is the whole signal - not minutes, which
 # one long playlist supplies by accident, and not the skip rate, which cannot be
 # used here at all: over the last 30 days this listener skipped 75% of everything
@@ -85,6 +93,10 @@ MIN_DISCOVER_PLAYS = 4
 # ...and still being played. Without this the section said "kept" about an
 # artist who was simultaneously in Cooling off at -55%, which is a defensible
 # pair of facts and a badly written claim. Kept means kept.
+#
+# At a seven-day discovery window this clause is implied - every play counted is
+# already inside the week - and it is kept so that widening DISCOVER_DAYS again
+# cannot quietly bring back the Cooling-off contradiction.
 STILL_PLAYING_DAYS = 7
 # How many of an artist's track titles may already appear in the history before
 # the name stops counting as new music. Artists rename themselves - Chris Stussy
@@ -244,7 +256,7 @@ def _movers(direction: str, limit: int) -> list[dict[str, Any]]:
 
 
 def discoveries(limit: int = 4) -> list[dict[str, Any]]:
-    """Artists first heard this month who are still being played.
+    """Artists first heard this week who are still being played.
 
     The hard part is not "new", it is "new act". Spotify credits a collaboration
     as one comma-joined string, so "Flume, KUCKA" is a name this history has
@@ -341,7 +353,7 @@ def discoveries(limit: int = 4) -> list[dict[str, Any]]:
 
 
 def song_discoveries(limit: int = 5) -> list[dict[str, Any]]:
-    """Songs first heard this month that are still being played.
+    """Songs first heard this week that are still being played.
 
     Deliberately not the artist rule applied to tracks. A song can be a genuine
     find by an artist played for years - Al Green and Robbie Doherty both turn up
@@ -404,19 +416,87 @@ def on_repeat(limit: int = 5) -> list[dict[str, Any]]:
     return [{"name": n, "artist": a, "uri": u, "plays": c} for n, a, u, c in rows]
 
 
-def _art(artists: list[str], tracks: list[str]) -> dict[str, str]:
-    """Name/uri -> image url, cached. Only what is missing costs a request."""
+def _played_tracks(names: list[str]) -> dict[str, str]:
+    """One track uri this listener actually played, per artist name."""
+    if not names:
+        return {}
+    marks = ", ".join("?" for _ in names)
+    rows = _q(
+        f"""
+        select artist_name, any_value(track_uri)
+        from plays
+        where artist_name in ({marks}) and track_uri is not null
+        group by 1
+        """,
+        list(names),
+    )
+    return dict(rows)
+
+
+def _credited(track: dict[str, Any], name: str) -> str | None:
+    """The id of the named act among a track's credits, or None.
+
+    Live rows join a collaboration into one string, "My Friend, Tommy Farrow", so
+    a miss on the whole name is retried on its first act.
+    """
+    credits = track.get("artists") or []
+    for candidate in (name, name.split(",")[0]):
+        want = candidate.strip().lower()
+        for a in credits:
+            if (a.get("name") or "").strip().lower() == want and a.get("id"):
+                return a["id"]
+    return None
+
+
+def _artist_image(sp: SpotifyClient, name: str, track_uri: str | None) -> str:
+    """A picture of *this* artist, resolved from a track they were played on.
+
+    Searching by name is ambiguous whenever the name is also a phrase. "My
+    Friend" searched as an artist ranks Mark Lee first, who has a song called My
+    Friend, and the old resolver took the top hit when nothing matched exactly -
+    so the discovery card showed the wrong person's face. The track that was
+    actually played credits the right act by id, which no search can get wrong.
+
+    A name search is only trusted on an exact match. Past that there is no
+    picture at all, because procedural art is a placeholder and a stranger's face
+    is a false claim.
+    """
+    m = URI_RE.match(track_uri or "")
+    if m:
+        try:
+            aid = _credited(sp._get(f"/tracks/{m.group(1)}"), name)
+        except Exception:
+            aid = None
+        if aid:
+            hit = sp.artist(aid)
+            if hit and hit.get("image"):
+                return hit["image"]
+    hit = sp.resolve_artist(name)
+    if hit and (hit.get("name") or "").strip().lower() == name.strip().lower():
+        return hit.get("image") or ""
+    return ""
+
+
+def _art(
+    artists: list[str], tracks: list[str], played: dict[str, str] | None = None
+) -> dict[str, str]:
+    """Name/uri -> image url, cached. Only what is missing costs a request.
+
+    Artist entries are keyed `ai:` rather than the old `a:`, so pictures chosen by
+    the name-search resolver are ignored rather than trusted - one of them was
+    a different person.
+    """
+    played = played or {}
     cache: dict[str, str] = {}
     if ART_CACHE.exists():
         cache = json.loads(ART_CACHE.read_text(encoding="utf-8"))
 
-    want_a = [a for a in artists if f"a:{a.lower()}" not in cache]
+    want_a = [a for a in artists if f"ai:{a.lower()}" not in cache]
     want_t = [t for t in tracks if f"t:{t}" not in cache]
     if want_a or want_t:
         with SpotifyClient() as sp:
             for name in want_a:
-                hit = sp.resolve_artist(name)
-                cache[f"a:{name.lower()}"] = (hit or {}).get("image") or ""
+                cache[f"ai:{name.lower()}"] = _artist_image(sp, name, played.get(name))
             for uri in want_t:
                 m = URI_RE.match(uri)
                 hit = sp.track(m.group(1)) if m else None
@@ -426,24 +506,55 @@ def _art(artists: list[str], tracks: list[str]) -> dict[str, str]:
     return cache
 
 
+def _tip() -> str | None:
+    tip = _q("select max(played_at) from plays")[0][0]
+    return tip.isoformat(timespec="seconds") if tip else None
+
+
+def _cache_usable(cached: dict | None, tip: str | None) -> bool:
+    """Whether a cached feed still describes the data.
+
+    Every window in the feed is anchored on the newest play, so the same newest
+    play means the same feed and a new one means a stale feed - whoever added it.
+    This used to be a 30-minute clock instead, and the clock could not see the
+    scheduled poller: it writes plays out of band, the page's own sync then found
+    nothing new, and the feed stayed up to half an hour behind rows the store
+    already held.
+    """
+    return bool(
+        cached
+        and cached.get("v") == CACHE_VERSION
+        and tip is not None
+        and cached.get("through") == tip
+    )
+
+
 def build(refresh: bool = False) -> dict[str, Any]:
-    if CACHE.exists() and not refresh and time.time() - CACHE.stat().st_mtime < CACHE_TTL:
-        return json.loads(CACHE.read_text(encoding="utf-8"))
+    tip = _tip()
+    if CACHE.exists() and not refresh:
+        try:
+            cached = json.loads(CACHE.read_text(encoding="utf-8"))
+        except ValueError:
+            cached = None
+        if _cache_usable(cached, tip):
+            return cached
 
     up, down, repeat = _movers("up", 4), _movers("down", 4), on_repeat(5)
     up_songs, down_songs = _song_movers("up", 5), _song_movers("down", 5)
     found, found_songs = discoveries(4), song_discoveries(5)
+    names = [a["name"] for a in up + down + found]
     art = _art(
-        [a["name"] for a in up + down + found],
+        names,
         [t["uri"] for t in repeat + found_songs + up_songs + down_songs],
+        played=_played_tracks(names),
     )
     for a in up + down + found:
-        a["image"] = art.get(f"a:{a['name'].lower()}") or None
+        a["image"] = art.get(f"ai:{a['name'].lower()}") or None
     for t in repeat + found_songs + up_songs + down_songs:
         t["image"] = art.get(f"t:{t['uri']}") or None
 
-    tip = _q("select max(played_at) from plays")[0][0]
     out = {
+        "v": CACHE_VERSION,
         "week": week_stats(),
         "up": up,
         "down": down,
@@ -452,7 +563,7 @@ def build(refresh: bool = False) -> dict[str, Any]:
         "found": found,
         "found_songs": found_songs,
         "on_repeat": repeat,
-        "through": tip.isoformat(timespec="minutes") if tip else None,
+        "through": tip,
     }
     CACHE.parent.mkdir(parents=True, exist_ok=True)
     CACHE.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
