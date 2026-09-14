@@ -132,7 +132,7 @@ body{
 }
 /* handle and badges share one wrapping line: the badges read as credentials
    on the name, the way a byline carries them */
-.idrow{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:8px}
+.idrow{display:flex;flex-wrap:wrap;align-items:center;gap:5px 6px;margin-top:9px}
 .handle{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--ink-3);margin-right:2px}
 
 /* ---- badge tiers ---- */
@@ -166,7 +166,11 @@ body{
    TYPE      badges are mono / uppercase / square; genres are body / sentence / pill
    COLOUR    badges use --accent (status, earned); genres use --gen (taste, chosen)
    Each hue has exactly one job, so adding a second colour costs no clarity. */
-.genres-top{display:flex;flex-wrap:wrap;gap:7px;margin-top:18px}
+/* Part of the identity block - who you are, then what you play - so it sits
+   close under the badges rather than floating between the bio and the stats.
+   The gaps below it are what separate the three groups: who you are, what you
+   are doing right now, and what you have to say about it. */
+.genres-top{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
 .gen{
   font-family:"Public Sans",sans-serif;font-size:13px;font-weight:500;
   padding:6px 13px;border-radius:999px;cursor:pointer;
@@ -177,7 +181,7 @@ body{
 .gen-1{border-color:var(--gen-line)}
 .gen:focus-visible{outline:2px solid var(--gen);outline-offset:2px}
 
-.bio{margin:16px 0 0;font-size:14.5px;line-height:1.52;color:var(--ink-2);max-width:34em}
+.bio{margin:20px 0 0;font-size:14.5px;line-height:1.52;color:var(--ink-2);max-width:34em}
 
 /* ---- stats ---- */
 .stats{display:flex;margin-top:19px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
@@ -409,7 +413,7 @@ body{
 
 /* ---- listening now ---- */
 .now{
-  display:flex;align-items:center;gap:11px;margin-top:11px;
+  display:flex;align-items:center;gap:11px;margin-top:22px;
   padding:8px 14px 8px 12px;border:1px solid var(--accent-line);
   background:var(--accent-tint);border-radius:13px;width:100%;
   text-decoration:none;color:inherit;
@@ -1613,6 +1617,7 @@ details[open] summary .chev{transform:rotate(180deg)}
         <span class="handle" id="handle">@cjellok</span>
         <span class="badges" id="badges"></span>
       </div>
+      <div class="genres-top" id="topGenres"></div>
       <a class="now" id="nowRow" hidden target="_blank" rel="noopener">
         <span class="eq" aria-hidden="true"><i></i><i></i><i></i></span>
         <img class="cov" id="nowArt" alt="">
@@ -1623,7 +1628,6 @@ details[open] summary .chev{transform:rotate(180deg)}
         <img class="moodgif" id="moodGif" alt="" hidden>
       </a>
       <p class="bio" id="bio"></p>
-      <div class="genres-top" id="topGenres"></div>
     </header>
 
     <div class="stats">
