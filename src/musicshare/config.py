@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     ticketmaster_api_key: str = ""
     openai_api_key: str = ""
     database_url: str = ""
+    supabase_url: str = ""
+    # The service role key bypasses row-level security, so it stays on the
+    # server and never reaches the page. Uploads go through this app for that
+    # reason rather than from the browser straight to Supabase.
+    supabase_service_role_key: str = ""
 
     @property
     def plays_glob(self) -> str:

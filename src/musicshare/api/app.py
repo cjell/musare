@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
 from musicshare import genres as genrelib
 from musicshare import home as home_mod
 from musicshare import live as live_mod
+from musicshare import media as media_mod
 from musicshare import playlists as pl_mod
 from musicshare import regions as regions_mod
 from musicshare import shows as shows_mod
@@ -248,6 +249,61 @@ def home(refresh: bool = False) -> dict[str, object]:
         "missed": bool(synced and synced.missed),
     }
     return data
+
+
+@app.post("/api/media/{kind}/{name}")
+async def upload_media(kind: str, name: str, request: Request) -> dict[str, object]:
+    """Store one picture and hand back the URL the page should keep.
+
+    The file arrives as the raw request body rather than as multipart form data.
+    One file needs no envelope, and a browser can post a File straight through
+    because it is already a Blob - which also avoids adding python-multipart for
+    a single endpoint.
+
+    Content-Length is checked before the body is read. Reading first and
+    measuring afterwards would mean a 2GB request is fully in memory by the time
+    it is refused.
+    """
+    if not media_mod.configured():
+        raise HTTPException(503, "storage is not configured")
+
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > media_mod.MAX_BYTES:
+        raise HTTPException(413, f"larger than {media_mod.MAX_BYTES // 1024 // 1024}MB")
+
+    data = await request.body()
+    try:
+        stored = media_mod.put(data, kind, name)
+    except media_mod.MediaError as e:
+        # The message is written to be read by the person uploading, so it is
+        # passed through rather than replaced with a status code.
+        raise HTTPException(400, str(e)) from e
+    except Exception as e:
+        log.error("media upload failed: %s", e)
+        raise HTTPException(502, f"{type(e).__name__}"[:100]) from e
+
+    return {"url": stored.url, "path": stored.path, "bytes": stored.bytes}
+
+
+@app.delete("/api/media/{kind}/{name}")
+def delete_media(kind: str, name: str) -> dict[str, object]:
+    """Remove a stored picture. Clearing a slot should not leave the file behind.
+
+    Deliberately not silent about the extension: one slot can hold a GIF today
+    and a PNG tomorrow, and only one of those paths exists, so this tries each
+    and reports what it actually removed.
+    """
+    if not media_mod.configured():
+        raise HTTPException(503, "storage is not configured")
+    if not (media_mod.SAFE_NAME.match(kind) and media_mod.SAFE_NAME.match(name)):
+        raise HTTPException(400, "invalid path")
+
+    removed = [
+        ext
+        for ext in ("gif", "png", "jpg", "webp")
+        if media_mod.delete(f"u/{media_mod.LOCAL_OWNER}/{kind}/{name}.{ext}")
+    ]
+    return {"removed": removed}
 
 
 @app.get("/api/playlists")
