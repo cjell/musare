@@ -751,13 +751,21 @@ body{
 .hot{color:#FFB454}
 
 /* ---- customize sheet ---- */
-.sheet-wrap{position:fixed;inset:0;z-index:70;display:flex;align-items:flex-end;justify-content:center}
+/* Rests on the nav rather than over it, the same way the full map does. A
+   bottom sheet wants to be anchored to an edge, and with the nav visible the
+   top of the nav is that edge. */
+.sheet-wrap{
+  position:fixed;inset:0 0 calc(var(--tab-h) + env(safe-area-inset-bottom)) 0;z-index:70;
+  display:flex;align-items:flex-end;justify-content:center;
+}
 .sheet-wrap[hidden]{display:none}
 .sheet-bg{position:absolute;inset:0;background:rgba(4,3,8,.62);backdrop-filter:blur(3px)}
 .sheet{
   position:relative;width:100%;max-width:420px;max-height:88vh;overflow-y:auto;
   background:var(--ground);border-top:1px solid var(--line-2);
-  border-radius:16px 16px 0 0;padding:0 var(--pad) calc(20px + env(safe-area-inset-bottom));
+  /* No safe-area padding any more: the nav sits below this and already carries
+     it, so adding it here again left a second inset above the home indicator. */
+  border-radius:16px 16px 0 0;padding:0 var(--pad) 20px;
 }
 .sheet-head{
   font-family:"Bricolage Grotesque",sans-serif;font-weight:600;font-size:19px;
@@ -3368,10 +3376,11 @@ $("showsFilter").addEventListener("click", function(){
   document.body.style.overflow = "hidden";
 });
 
-function closeFilter(){
+function closeFilter(focusBack){
   $("filtWrap").hidden = true;
   document.body.style.overflow = "";
-  $("showsFilter").focus();
+  /* Same rule as the map: not when a nav tab was what closed it. */
+  if(focusBack !== false) $("showsFilter").focus();
 }
 $("filtBg").addEventListener("click", closeFilter);
 $("filtDone").addEventListener("click", closeFilter);
@@ -3793,10 +3802,14 @@ function showScreen(which){
     setEditing(false, false);
   }
 
-  /* The map stops above the nav rather than covering it, so its tabs are now
-     reachable while it is open - which means they have to mean something.
-     Leaving it open would put the map over whichever screen was just chosen. */
+  /* The map and the bottom sheets stop above the nav rather than covering it,
+     so its tabs are reachable while they are open - which means they have to
+     mean something. Leaving one open would put it over whichever screen was
+     just chosen. The true modals - the pin picker, the photo crop - still cover
+     the nav, so there is no way to navigate out of those and nothing to close. */
   if(!$("mapFull").hidden) closeMap(false);
+  if(!$("filtWrap").hidden) closeFilter(false);
+  if(!$("custWrap").hidden) closeCust(false);
 
   Object.keys(SCREENS).forEach(function(k){
     $(SCREENS[k]).hidden = k !== which;
@@ -4130,9 +4143,10 @@ function syncSheet(){
 }
 
 function openCust(){ $("custWrap").hidden = false; syncSheet(); document.body.style.overflow = "hidden"; }
-function closeCust(){
+function closeCust(focusBack){
   $("custWrap").hidden = true;
   document.body.style.overflow = "";
+  if(focusBack === false) return;
   /* editBtn is hidden while editing, and focusing a hidden element drops
      focus to the body, losing the user's place. */
   var back = document.body.classList.contains("editing") ? $("editAppearance") : $("editBtn");
