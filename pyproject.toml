@@ -26,6 +26,10 @@ dependencies = [
   # data: DuckDB over Parquet locally, psycopg straight to Postgres
   "duckdb>=1.5",
   "pyarrow>=25.0",
+  # embed, modes, regions and project import it at module level. It used to
+  # arrive only as some other package's dependency, so a fresh install - CI's
+  # first run - had no numpy and could not even load the test fixtures.
+  "numpy>=2.1",
   "psycopg[binary]>=3.3",
   # tracing, cost, latency + structured logs that pair with it
   "langfuse>=4.15",
@@ -35,8 +39,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# The embedding pipeline is phase 7 and pulls ~400MB of wheels (numba, llvmlite).
-# Keeping it out of the default install means CI installs in seconds.
+# The embedding pipeline pulls ~400MB of wheels (numba, llvmlite), so it stays
+# out of the default install - serving the app needs none of it. CI installs it
+# anyway, because the modes, regions and projection tests do.
 ml = [
   "scikit-learn>=1.9",
   "umap-learn>=0.5.12",

@@ -26,16 +26,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: pyproject.toml
 
+      # The ml extra too: the modes, regions and projection tests import
+      # scikit-learn, and the map is the largest piece of work in the repo, so
+      # CI running without it would leave out the part most worth testing.
       - name: Install
-        run: python -m pip install -e ".[dev]"
+        run: python -m pip install -e ".[dev,ml]"
 
       - name: Lint
         run: python -m ruff check .
