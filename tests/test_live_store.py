@@ -189,3 +189,36 @@ def test_a_cover_with_no_dimensions_is_used_as_is():
 def test_no_images_is_none_rather_than_an_error():
     assert live.pick_image([], 240) is None
     assert live.pick_image(None, 240) is None
+
+
+def test_live_rows_estimate_what_was_heard_not_the_track_length():
+    """played_at marks the end of a play, so the time available for a track is
+    the gap since the one before it. Substituting the full duration assumed
+    every play finished, which ran about 30% high against the export."""
+    def item(when, ms):
+        return {"played_at": when, "track": {"uri": "spotify:track:a", "name": "S",
+                "duration_ms": ms, "artists": [{"name": "A"}], "album": {"name": "Al"}}}
+
+    rows = live._rows([
+        item("2026-09-14T12:00:00Z", 200_000),   # earliest: nothing before it
+        item("2026-09-14T12:00:45Z", 200_000),   # only 45s of a 200s track
+        item("2026-09-14T12:04:05Z", 200_000),   # a full play
+    ])
+    heard = [r["ms_played"] for r in rows]
+    assert heard[0] == 200_000, "the earliest row has no predecessor to measure against"
+    assert heard[1] == 45_000, "a track cut short should record what was heard"
+    assert heard[2] == 200_000, "a complete play records the whole track"
+
+
+def test_a_skipped_live_play_now_fails_the_30s_filter():
+    """Before this, every live row carried a full duration and so cleared MIN_MS
+    - the skip filter was a no-op on exactly the source that is growing."""
+    def item(when, ms):
+        return {"played_at": when, "track": {"uri": "spotify:track:a", "name": "S",
+                "duration_ms": ms, "artists": [{"name": "A"}], "album": {"name": "Al"}}}
+
+    rows = live._rows([
+        item("2026-09-14T12:00:00Z", 240_000),
+        item("2026-09-14T12:00:08Z", 240_000),   # eight seconds in, skipped
+    ])
+    assert rows[1]["ms_played"] == 8_000

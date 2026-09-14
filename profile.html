@@ -191,6 +191,13 @@ body{
 .stats{display:flex;margin-top:19px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 .stat{flex:1;padding:14px 0}
 .stat + .stat{border-left:1px solid var(--line);padding-left:16px}
+/* Four across a phone column is tight: the dividers and their padding eat 48px
+   of it, so the gutters narrow and the numbers step down a size. Only the week
+   strip carries four; the profile's three keep the roomier setting. */
+.stats.four .stat{padding-left:0}
+.stats.four .stat + .stat{padding-left:11px}
+.stats.four .stat .n{font-size:17px}
+.stats.four .stat .l{font-size:9px;letter-spacing:.1em}
 .stat .n{
   font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
   font-size:19px;font-weight:500;letter-spacing:-.01em;display:block;
@@ -1423,10 +1430,11 @@ details[open] summary .chev{transform:rotate(180deg)}
 
       <section class="sec anim">
         <div class="sec-label"><span>This week</span><span class="aux" id="weekAux">vs last</span></div>
-        <div class="stats">
+        <div class="stats four">
+          <div class="stat"><span class="n" id="wkHours">14.2</span><span class="l">Hours</span></div>
           <div class="stat"><span class="n" id="wkPlays">612</span><span class="l">Plays</span></div>
           <div class="stat"><span class="n" id="wkTracks">218</span><span class="l">Tracks</span></div>
-          <div class="stat"><span class="n" id="wkNew">11</span><span class="l">New artists</span></div>
+          <div class="stat"><span class="n" id="wkNew">11</span><span class="l">New</span></div>
         </div>
         <div class="gapnote" id="gapNote" hidden>
           <span aria-hidden="true">!</span>
@@ -3423,15 +3431,18 @@ function loadHome(){
   }).then(function(d){
     if(!d || !d.week) return;
     var w = d.week;
+    $("wkHours").textContent = w.hours;
     $("wkPlays").textContent = w.plays;
     $("wkTracks").textContent = w.tracks;
     $("wkNew").textContent = w.new_artists;
 
     /* The comparison is the point of the section, so say which way it went
        rather than leaving a bare "vs last". */
-    var delta = w.plays - w.plays_prev;
-    $("weekAux").textContent = w.plays_prev
-      ? (delta >= 0 ? "up " : "down ") + Math.abs(delta) + " vs last"
+    /* The comparison reads in hours, because that is the number a person has a
+       feel for - "down 22h" lands where "down 567" needs arithmetic. */
+    var delta = Math.round((w.hours - w.hours_prev) * 10) / 10;
+    $("weekAux").textContent = w.hours_prev
+      ? (delta >= 0 ? "up " : "down ") + Math.abs(delta) + "h vs last"
       : "vs last";
 
     /* The window is fifty plays wide, so going long enough between visits loses

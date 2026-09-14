@@ -114,13 +114,17 @@ def week_stats() -> dict[str, Any]:
     Anchoring on today would report zeros whenever a sync has not run, which
     reads as "you stopped listening" rather than "the data stops here".
 
-    Counted in plays rather than hours, and this is the one place that change is
-    visible rather than internal - the headline number used to be "21.7 hours".
-    Live rows report a track's duration in place of how long it actually played,
-    which runs about 30% high, and that share grows with live coverage: polling
-    every half hour would make most of a recent week's hours an upper bound
-    rather than a measurement. Hours stay in the charts, where the export is the
-    source and they are honest.
+Plays and hours both. Plays are the unit the movers compare on, because a count
+    means the same thing in both sources; hours are what a person actually wants
+    to know about a week, so the strip carries them too.
+
+    Hours were briefly removed and are back on firmer ground. The live endpoint
+    carries no ms_played and this used to substitute the track's full duration,
+    which assumes every play finished and ran about 30% high against the export.
+    `live.py` now estimates from the gap between consecutive plays instead -
+    played_at marks the end of a play, so what was heard is the smaller of the
+    track's length and the time available before the next one. Rows written
+    before that change keep the old estimate until an export covers them.
     """
     rows = _q(f"""
         with bounds as (select max(played_at) as tip from plays),
@@ -135,12 +139,13 @@ def week_stats() -> dict[str, Any]:
         select bucket,
                count(*),
                count(distinct track_uri),
-               count(distinct artist_name)
+               count(distinct artist_name),
+               sum(ms_played) / 3600000.0
         from w where bucket is not null and ms_played >= {MIN_MS}
         group by 1 order by 1
     """)
     by = {b: r for b, *r in rows}
-    this_, last = by.get(0, (0, 0, 0)), by.get(1, (0, 0, 0))
+    this_, last = by.get(0, (0, 0, 0, 0)), by.get(1, (0, 0, 0, 0))
 
     first_time = _q(f"""
         with bounds as (select max(played_at) as tip from plays)
@@ -155,6 +160,8 @@ def week_stats() -> dict[str, Any]:
     return {
         "plays": this_[0] or 0,
         "plays_prev": last[0] or 0,
+        "hours": round(this_[3] or 0, 1),
+        "hours_prev": round(last[3] or 0, 1),
         "tracks": this_[1] or 0,
         "tracks_prev": last[1] or 0,
         "new_artists": first_time,

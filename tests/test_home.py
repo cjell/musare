@@ -147,9 +147,17 @@ def test_movers_are_counted_in_plays_not_milliseconds():
         for r in rows:
             assert "plays" in r and "plays_prev" in r
             assert "minutes" not in r and "minutes_prev" not in r
-    # And nothing in the weekly feed reports time any more.
-    assert "hours" not in home.week_stats()
     assert all("minutes" not in d for d in home.discoveries(4))
+
+
+def test_the_week_strip_reports_both_units():
+    """Plays are what the movers compare on, because a count means the same in
+    both sources. Hours are what a person has a feel for, so the strip carries
+    them too - on the estimate live.py derives, not on full track durations."""
+    w = home.week_stats()
+    for k in ("plays", "plays_prev", "hours", "hours_prev", "tracks", "new_artists"):
+        assert k in w, f"week strip lost {k}"
+    assert w["hours"] >= 0 and w["plays"] >= 0
 
 
 def test_a_skipped_play_does_not_move_anything():
