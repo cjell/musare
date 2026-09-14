@@ -148,24 +148,43 @@ end $$;
 
 -- ------------------------------------------------------------------- writes
 
+-- Whether two rows are the same recording. The id alone is not enough: Spotify
+-- files one song under several ids - the album cut and the single - and the two
+-- endpoints do not agree on which to report. Power Trip came back as 7FOJvA3P...
+-- from currently-playing and 2uwnP6tZ... from recently-played, 0.2 seconds
+-- apart, and was stored twice.
+create or replace function listen._same_track(
+  a_uri text, a_name text, a_artist text, b_uri text, b_name text, b_artist text
+) returns boolean
+language sql immutable set search_path = '' as $$
+  select a_uri = b_uri
+      or (lower(btrim(a_name)) = lower(btrim(b_name))
+          and lower(btrim(a_artist)) = lower(btrim(b_artist)))
+$$;
+
+
 -- How close a recently-played row and a watcher row for the same track must be
--- to count as one play. The watcher dates the end of a play from the moment the
--- next track started, to within a poll's rounding, and recently-played marks
--- the end too. Unmeasured until both have run side by side; a back-to-back
--- repeat is at least 30 seconds apart only when the first play was, which is
--- also the shortest play the feed counts.
+-- to count as one play. Measured on the first afternoon both ran: the watcher's
+-- end time landed within 0.03-0.21 seconds of Spotify's on every play both saw,
+-- because it dates the end from the moment the next track started. Thirty
+-- seconds is wide of that and still safe for repeats - recently-played never
+-- lists a play under about 30 seconds, so two real plays of one song cannot
+-- both appear in it this close together.
 create or replace function listen.add_play(p jsonb, src text) returns integer
 language plpgsql security definer set search_path = '' as $$
 declare
-  at  timestamptz := (p->>'played_at')::timestamptz;
-  uri text        := p->>'track_uri';
-  n   integer;
+  at     timestamptz := (p->>'played_at')::timestamptz;
+  uri    text        := p->>'track_uri';
+  name   text        := p->>'track_name';
+  artist text        := p->>'artist_name';
+  n      integer;
 begin
   -- The watcher measured this play; the backup only estimated it.
   if src = 'recent' and exists (
-    select 1 from listen.plays
-     where source = 'watch' and track_uri = uri
-       and played_at between at - interval '45 seconds' and at + interval '45 seconds'
+    select 1 from listen.plays w
+     where w.source = 'watch'
+       and w.played_at between at - interval '30 seconds' and at + interval '30 seconds'
+       and listen._same_track(w.track_uri, w.track_name, w.artist_name, uri, name, artist)
   ) then
     return 0;
   end if;
@@ -179,9 +198,10 @@ begin
   get diagnostics n = row_count;
 
   if n > 0 and src = 'watch' then
-    delete from listen.plays
-     where source = 'recent' and track_uri = uri
-       and played_at between at - interval '45 seconds' and at + interval '45 seconds';
+    delete from listen.plays r
+     where r.source = 'recent'
+       and r.played_at between at - interval '30 seconds' and at + interval '30 seconds'
+       and listen._same_track(r.track_uri, r.track_name, r.artist_name, uri, name, artist);
   end if;
   return n;
 end $$;

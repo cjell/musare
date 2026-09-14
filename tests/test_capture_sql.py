@@ -184,10 +184,11 @@ def test_recently_played_rows_estimate_listening_from_the_gap(db):
 # -------------------------------------------------------------------- dedupe
 
 
-def add(db, uri, at, src, ms=100_000):
+def add(db, uri, at, src, ms=100_000, name="A Song", artist="An Artist"):
     return db.execute(
         "select listen.add_play(%s::jsonb, %s)",
-        [json.dumps({"played_at": at.isoformat(), "track_uri": uri, "ms_played": ms}), src],
+        [json.dumps({"played_at": at.isoformat(), "track_uri": uri, "ms_played": ms,
+                     "track_name": name, "artist_name": artist}), src],
     ).fetchone()[0]
 
 
@@ -217,3 +218,29 @@ def test_the_same_backup_row_arriving_every_half_hour_is_kept_once(db):
 def test_a_backup_play_the_watcher_missed_is_kept(db):
     add(db, A, T0, "watch")
     assert add(db, A, T0 + timedelta(minutes=10), "recent") == 1
+
+
+def test_one_song_under_two_ids_is_one_play(db):
+    """Power Trip came back under a different id from each endpoint, 0.2s apart,
+    and was stored twice."""
+    add(db, A, T0, "watch", name="Power Trip", artist="J. Cole, Miguel")
+    assert add(db, B, T0 + timedelta(milliseconds=200), "recent",
+               name="power trip ", artist="J. Cole, Miguel") == 0
+    assert rows_for(db, B) == []
+
+
+def test_the_watcher_replaces_a_backup_row_filed_under_another_id(db):
+    add(db, B, T0, "recent", name="Hello Juliet", artist="Clarion")
+    add(db, A, T0 + timedelta(milliseconds=120), "watch", name="Hello Juliet", artist="Clarion")
+    assert rows_for(db, B) == []
+    assert rows_for(db, A) == [("watch",)]
+
+
+def test_different_songs_ending_together_are_both_kept(db):
+    add(db, A, T0, "watch", name="One", artist="X")
+    assert add(db, B, T0, "recent", name="Two", artist="X") == 1
+
+
+def test_a_repeat_past_the_tolerance_is_its_own_play(db):
+    add(db, A, T0, "watch")
+    assert add(db, A, T0 + timedelta(seconds=40), "recent") == 1
