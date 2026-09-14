@@ -14,6 +14,9 @@
   --ink-2:#A9A2BE;
   --ink-3:#635C7A;
   --pad:22px;
+  /* The nav bar's height, shared so anything that has to sit above it cannot
+     drift out of step with it. */
+  --tab-h:64px;
   /* per-profile, set inline on .phone */
   --accent:#E74094;
   --accent-tint:rgba(231,64,148,.13);
@@ -963,8 +966,12 @@ body{
 .map-zoom button:active{background:var(--accent-tint);color:var(--accent)}
 
 /* ---- full taste map ---- */
+/* Stops above the nav rather than covering it. The map is a screen you look
+   around in, not a mode you have to dismiss before you can go anywhere - and
+   raising the nav's z-index instead would leave it floating over the canvas
+   with the map still scrolling underneath it. */
 .mapfull{
-  position:fixed;top:0;bottom:0;left:50%;
+  position:fixed;top:0;bottom:calc(var(--tab-h) + env(safe-area-inset-bottom));left:50%;
   transform:translateX(-50%) translateY(var(--drag,0px));
   width:100%;max-width:420px;z-index:60;background:var(--ground);
   display:flex;flex-direction:column;touch-action:none;
@@ -1100,7 +1107,7 @@ details[open] summary .chev{transform:rotate(180deg)}
   position:fixed;bottom:0;left:50%;transform:translateX(-50%);
   width:100%;max-width:420px;z-index:20;
   display:flex;justify-content:space-around;align-items:center;
-  height:64px;padding-bottom:env(safe-area-inset-bottom);
+  height:var(--tab-h);padding-bottom:env(safe-area-inset-bottom);
   background:rgba(11,10,15,.88);backdrop-filter:blur(14px);border-top:1px solid var(--line);
 }
 .tab{background:none;border:0;padding:10px;color:var(--ink-3);cursor:pointer;line-height:0;border-radius:9px}
@@ -2936,13 +2943,15 @@ function openMap(){
   $("mfClose").focus();
 }
 
-function closeMap(){
+function closeMap(focusBack){
   var mf = $("mapFull");
   mf.hidden = true;
   mf.classList.remove("snap");
   mf.style.setProperty("--drag", "0px");
   document.body.style.overflow = "";
-  $("tasteMapBtn").focus();
+  /* Not when a nav tab was what closed it: the button belongs to a screen the
+     user has just left, and focusing it scrolls them back to it. */
+  if(focusBack !== false) $("tasteMapBtn").focus();
 }
 
 /* drag the sheet down to dismiss -- the reach-free way out on a phone */
@@ -3775,6 +3784,11 @@ function showScreen(which){
   if(which !== "profile" && document.body.classList.contains("editing")){
     setEditing(false, false);
   }
+
+  /* The map stops above the nav rather than covering it, so its tabs are now
+     reachable while it is open - which means they have to mean something.
+     Leaving it open would put the map over whichever screen was just chosen. */
+  if(!$("mapFull").hidden) closeMap(false);
 
   Object.keys(SCREENS).forEach(function(k){
     $(SCREENS[k]).hidden = k !== which;
