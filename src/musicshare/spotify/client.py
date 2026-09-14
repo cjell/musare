@@ -194,6 +194,36 @@ class SpotifyClient:
             log.warning("artist %s: %s", artist_id, e)
             return None
 
+    def album_tracks(self, album_id: str, limit: int = 50) -> list[dict[str, Any]]:
+        """An album's running order.
+
+        These come back as simplified track objects, which carry no album and so
+        no image - correct rather than missing, since every track on an album
+        shares the cover already shown above them. The track number is the
+        useful thing in its place.
+        """
+        try:
+            payload = self._get(f"/albums/{album_id}/tracks", {"limit": min(limit, 50)})
+        except SpotifyError as e:
+            log.warning("album tracks %s: %s", album_id, e)
+            return []
+        out = []
+        for t in payload.get("items") or []:
+            if not t.get("id"):
+                continue
+            out.append(
+                {
+                    "id": t["id"],
+                    "uri": t.get("uri"),
+                    "name": t.get("name"),
+                    "artist": _artist_names(t),
+                    "number": t.get("track_number"),
+                    "duration_ms": t.get("duration_ms"),
+                    "url": (t.get("external_urls") or {}).get("spotify"),
+                }
+            )
+        return out
+
     def resolve_album(self, name: str, artist: str = "") -> dict[str, Any] | None:
         """Best-effort (album, artist) -> album.
 

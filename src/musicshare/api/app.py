@@ -331,6 +331,21 @@ def playlist_tracks(playlist_id: str, limit: int = Query(60, ge=1, le=200)) -> d
         raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
 
 
+@app.get("/api/albums/{album_id}/tracks")
+def album_tracks(album_id: str, limit: int = Query(50, ge=1, le=50)) -> dict[str, object]:
+    """An album's running order.
+
+    Unlike playlists this needs no user scope - an album is catalogue, not
+    library - so it works for a pinned album on anyone's profile.
+    """
+    try:
+        with SpotifyClient() as sp:
+            return {"tracks": sp.album_tracks(album_id, limit=limit)}
+    except SpotifyError as e:
+        log.error("album tracks failed: %s", e)
+        raise HTTPException(502, str(e)[:200]) from e
+
+
 @app.get("/api/now")
 def now() -> dict[str, object]:
     """What the profile owner is playing this second, if anything.

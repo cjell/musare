@@ -386,6 +386,16 @@ body{
   background:linear-gradient(transparent,rgba(13,11,20,.85));
 }
 .moodslot input{display:none}
+/* An album's tracks carry a number where a playlist's carry a cover: they all
+   share one, and it is already at the top of the sheet. */
+.pl-no{
+  flex:0 0 22px;text-align:right;font-family:"IBM Plex Mono",monospace;
+  font-size:11px;color:var(--ink-3);font-variant-numeric:tabular-nums;
+}
+.pl-dur{
+  margin-left:auto;flex:0 0 auto;font-family:"IBM Plex Mono",monospace;
+  font-size:10.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;
+}
 .moodslot.busy{opacity:.5}
 .moodslot.busy::after{
   content:"";position:absolute;inset:auto 0 0 0;height:2px;
@@ -4497,37 +4507,72 @@ function loadPlaylists(){
     }).catch(function(){});
 }
 
-function openPlaylist(i){
-  /* The shelf, not the profile's full list - what is on screen is whatever the
-     pins chose, so an index into the other one opens the wrong playlist. */
-  var x = (PL_SHELF && PL_SHELF[i]) || PROFILES[current].playlists[i];
-  if(!x || !x[3]) return;            /* a demo card has no id and nothing behind it */
-  $("plName").textContent = x[0];
-  $("plMeta").textContent = x[1];
+/* The sheet, opened by anything that has a cover, a name and a list of tracks
+   behind it. Playlists got here first and the markup is theirs; an album is the
+   same object with a different fetch and no per-track art, because every track
+   on it shares the cover already sitting above them. */
+function openSheet(title, meta, cover, load){
+  $("plName").textContent = title;
+  $("plMeta").textContent = meta || "";
   var cov = $("plCover");
-  if(x[2]){ cov.src = x[2]; cov.hidden = false; } else { cov.hidden = true; }
+  if(cover){ cov.src = cover; cov.hidden = false; } else { cov.hidden = true; }
   $("plList").innerHTML = '<div class="pl-tr"><span class="ta2">Loading...</span></div>';
   $("plOpen").hidden = false;
   document.body.style.overflow = "hidden";
   $("plClose").focus();
 
-  fetch("/api/playlists/" + encodeURIComponent(x[3]) + "/tracks?limit=60")
-    .then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(d){
-      var ts = (d && d.tracks) || [];
-      if(!ts.length){
-        $("plList").innerHTML = '<div class="pl-tr"><span class="ta2">Nothing to show.</span></div>';
-        return;
-      }
-      $("plList").innerHTML = ts.map(function(t){
-        return '<div class="pl-tr">' +
-          (t.image ? '<img src="' + t.image + '" alt="">' : '<img alt="">') +
-          '<span class="mx"><span class="tn">' + esc(t.name) + "</span><br>" +
-          '<span class="ta2">' + esc(t.artist || "") + "</span></span></div>";
-      }).join("");
-    }).catch(function(){
-      $("plList").innerHTML = '<div class="pl-tr"><span class="ta2">Could not load.</span></div>';
+  load().then(function(html){
+    $("plList").innerHTML = html || '<div class="pl-tr"><span class="ta2">Nothing to show.</span></div>';
+  }).catch(function(){
+    $("plList").innerHTML = '<div class="pl-tr"><span class="ta2">Could not load.</span></div>';
+  });
+}
+
+function mmss(ms){
+  var s = Math.round((ms || 0) / 1000);
+  return Math.floor(s / 60) + ":" + ("0" + (s % 60)).slice(-2);
+}
+
+function openAlbum(i){
+  var bp = pinList("albums")[i];
+  if(!bp || !bp.id) return;          /* a demo card has nothing behind it */
+  openSheet(bp.name, bp.artist_name || (bp.release_date || "").slice(0, 4), bp.image,
+    function(){
+      return fetch("/api/albums/" + encodeURIComponent(bp.id) + "/tracks")
+        .then(function(r){ return r.ok ? r.json() : null; })
+        .then(function(d){
+          var ts = (d && d.tracks) || [];
+          return ts.map(function(t){
+            /* The album artist is already in the header, so a per-track artist
+               is only worth the room when it differs - which is exactly when it
+               is a feature and worth seeing. */
+            var feat = t.artist && t.artist !== bp.artist_name ? t.artist : "";
+            return '<div class="pl-tr"><span class="pl-no">' + (t.number || "") + "</span>" +
+              '<span class="mx"><span class="tn">' + esc(t.name) + "</span>" +
+              (feat ? '<br><span class="ta2">' + esc(feat) + "</span>" : "") + "</span>" +
+              '<span class="pl-dur">' + mmss(t.duration_ms) + "</span></div>";
+          }).join("");
+        });
     });
+}
+
+function openPlaylist(i){
+  /* The shelf, not the profile's full list - what is on screen is whatever the
+     pins chose, so an index into the other one opens the wrong playlist. */
+  var x = (PL_SHELF && PL_SHELF[i]) || PROFILES[current].playlists[i];
+  if(!x || !x[3]) return;            /* a demo card has no id and nothing behind it */
+  openSheet(x[0], x[1], x[2], function(){
+    return fetch("/api/playlists/" + encodeURIComponent(x[3]) + "/tracks?limit=60")
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){
+        return ((d && d.tracks) || []).map(function(t){
+          return '<div class="pl-tr">' +
+            (t.image ? '<img src="' + t.image + '" alt="">' : '<img alt="">') +
+            '<span class="mx"><span class="tn">' + esc(t.name) + "</span><br>" +
+            '<span class="ta2">' + esc(t.artist || "") + "</span></span></div>";
+        }).join("");
+      });
+  });
 }
 
 function closePlaylist(){
@@ -4538,6 +4583,17 @@ function closePlaylist(){
 $("playlists").addEventListener("click", function(e){
   var card = e.target.closest("[data-pl]");
   if(card) openPlaylist(parseInt(card.dataset.pl, 10));
+});
+$("albums").addEventListener("click", function(e){
+  /* Not while the unpin button is the thing being clicked. */
+  if(e.target.closest("[data-unpin]")) return;
+  var card = e.target.closest("[data-album]");
+  if(card) openAlbum(parseInt(card.dataset.album, 10));
+});
+$("albums").addEventListener("keydown", function(e){
+  if(e.key !== "Enter" && e.key !== " ") return;
+  var card = e.target.closest("[data-album]");
+  if(card){ e.preventDefault(); openAlbum(parseInt(card.dataset.album, 10)); }
 });
 $("playlists").addEventListener("keydown", function(e){
   if(e.key !== "Enter" && e.key !== " ") return;
@@ -4789,7 +4845,7 @@ function renderPins(p){
   for(var k = 0; k < PIN_SLOTS.albums; k++){
     var bpin = self ? bp[k] : null;
     if(bpin){
-      bh += '<div class="pl pinbox" tabindex="0" role="button">' +
+      bh += '<div class="pl pinbox" tabindex="0" role="button" data-album="' + k + '">' +
         "<div " + artAttr(bpin, bpin.name, hue) + "></div>" +
         '<div class="pn">' + esc(bpin.name) + '</div><div class="pm">' +
         esc((bpin.release_date || "").slice(0, 4)) + "</div>" +
