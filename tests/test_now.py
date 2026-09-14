@@ -44,6 +44,9 @@ def test_paused_is_sleeping(monkeypatch):
     assert body["now"]["artist"] == "Metallica"
 
 
+@pytest.mark.skipif(
+    not app_mod.genrelib.TABLE.exists(), reason="no genre serving table built"
+)
 def test_a_known_artist_resolves_on_a_cold_process(monkeypatch):
     """No map request has been made, so the fitted artefacts are not loaded."""
     monkeypatch.setattr(app_mod.live_mod, "now_playing", lambda: playing("Metallica"))

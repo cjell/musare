@@ -10,11 +10,10 @@ One source of truth: edit profile.html, re-run this, redeploy dist/.
     python build-standalone.py
 """
 
-import os
-import shutil
+from pathlib import Path
 
-SRC = "profile.html"
-OUT_DIR = "dist"
+SRC = Path("profile.html")
+OUT_DIR = Path("dist")
 
 HEAD = """<!doctype html>
 <html lang="en">
@@ -46,30 +45,26 @@ MANIFEST = """{
 
 
 def main():
-    with open(SRC, encoding="utf-8") as f:
-        src = f.read()
+    src = SRC.read_text(encoding="utf-8")
 
     # everything up to the end of the first <style> block belongs in <head>;
     # the markup and scripts after it belong in <body>
     marker = "</style>"
     cut = src.find(marker)
     if cut == -1:
-        raise SystemExit("no </style> found in %s - has the file structure changed?" % SRC)
+        raise SystemExit(f"no </style> found in {SRC} - has the file structure changed?")
     cut += len(marker)
     head_part, body_part = src[:cut], src[cut:]
 
     doc = HEAD + head_part + "\n</head>\n<body>\n" + body_part.strip() + "\n</body>\n</html>\n"
 
-    if not os.path.isdir(OUT_DIR):
-        os.mkdir(OUT_DIR)
-    with open(os.path.join(OUT_DIR, "index.html"), "w", encoding="utf-8", newline="") as f:
-        f.write(doc)
-    with open(os.path.join(OUT_DIR, "manifest.webmanifest"), "w", encoding="utf-8", newline="") as f:
-        f.write(MANIFEST)
+    OUT_DIR.mkdir(exist_ok=True)
+    index = OUT_DIR / "index.html"
+    index.write_text(doc, encoding="utf-8", newline="")
+    (OUT_DIR / "manifest.webmanifest").write_text(MANIFEST, encoding="utf-8", newline="")
 
-    size = os.path.getsize(os.path.join(OUT_DIR, "index.html"))
-    print("wrote %s/index.html (%.1f KB) and manifest.webmanifest" % (OUT_DIR, size / 1024.0))
-    shutil.rmtree.__doc__  # noqa - keep shutil imported for future asset copying
+    size = index.stat().st_size
+    print(f"wrote {OUT_DIR}/index.html ({size / 1024.0:.1f} KB) and manifest.webmanifest")
 
 
 if __name__ == "__main__":

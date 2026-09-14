@@ -240,6 +240,10 @@ party are marked and deselected:
     ./mscs/python.exe -m pytest                  # 244 tests, no network, ~20s
     ./mscs/python.exe -m pytest -m eval          # spends real requests
 
+CI runs lint and that same default suite on every push. The listening history
+and corpus are gitignored, so the 93 tests that read them skip there and 151
+run - the local run with data is the full one.
+
 ### The Spotify constraint
 
 Spotify closed extended API quota to individuals in May 2025 - it now requires a
