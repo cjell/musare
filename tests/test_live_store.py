@@ -1,12 +1,13 @@
-"""How live rows are written down and when they are allowed to be deleted.
+"""How captured plays are stored locally, and when they are allowed to be deleted.
 
-No network: these drive `_write` and `prune` directly, which is where the two
-bugs that mattered lived.
+No network: these drive `_store`, `prune` and the pull bookkeeping directly. The
+capture decisions themselves live in SQL and are tested against the database in
+test_capture_sql.py.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, date, datetime, timedelta
 
 import duckdb
 import pytest
@@ -39,37 +40,63 @@ def rows_in(path) -> int:
     ).fetchone()[0]
 
 
+def names(store) -> list[str]:
+    return sorted(f.name for f in store.glob("*.parquet"))
+
+
 def test_a_days_plays_land_in_one_file(store):
-    live._write([row(datetime(2026, 9, 14, 1, 0)), row(datetime(2026, 9, 14, 9, 0), "b")])
-    files = list(store.glob("*.parquet"))
-    assert [f.name for f in files] == ["live-20260914.parquet"]
-    assert rows_in(files[0]) == 2
-
-
-def test_a_second_sync_folds_in_rather_than_adding_a_file(store):
-    """A file per sync is 48 a day once polling is on; this is the fix."""
-    live._write([row(datetime(2026, 9, 14, 1, 0))])
-    live._write([row(datetime(2026, 9, 14, 2, 0), "b")])
-    files = list(store.glob("*.parquet"))
-    assert len(files) == 1
-    assert rows_in(files[0]) == 2
-
-
-def test_the_same_play_arriving_twice_is_stored_once(store):
-    """The fifty-play window overlaps itself on every sync by design, so the
-    same rows arrive again and again."""
-    again = row(datetime(2026, 9, 14, 1, 0))
-    live._write([again])
-    live._write([again])
-    assert rows_in(next(store.glob("*.parquet"))) == 1
+    live._store([row(datetime(2026, 9, 14, 1, 0)), row(datetime(2026, 9, 14, 9, 0), "b")], None)
+    assert names(store) == ["live-20260914.parquet"]
+    assert rows_in(store / "live-20260914.parquet") == 2
 
 
 def test_plays_spanning_midnight_split_by_the_day_they_happened(store):
-    live._write([row(datetime(2026, 9, 14, 23, 50)), row(datetime(2026, 9, 15, 0, 10), "b")])
-    assert sorted(f.name for f in store.glob("*.parquet")) == [
-        "live-20260914.parquet",
-        "live-20260915.parquet",
-    ]
+    live._store([row(datetime(2026, 9, 14, 23, 50)), row(datetime(2026, 9, 15, 0, 10), "b")], None)
+    assert names(store) == ["live-20260914.parquet", "live-20260915.parquet"]
+
+
+def test_a_pull_replaces_a_day_rather_than_merging_into_it(store):
+    """The database drops a backup estimate when the watcher's measurement of the
+    same play arrives. Merging would keep the old copy and count the play twice."""
+    estimate = row(datetime(2026, 9, 14, 1, 0, 0))
+    measured = row(datetime(2026, 9, 14, 1, 0, 4))
+    live._store([estimate], date(2026, 9, 14))
+    live._store([measured], date(2026, 9, 14))
+    got = duckdb.connect().execute(
+        f"select played_at from read_parquet('{(store / 'live-20260914.parquet').as_posix()}')"
+    ).fetchall()
+    assert got == [(measured["played_at"],)]
+
+
+def test_a_day_the_database_no_longer_holds_is_removed(store):
+    live._store([row(datetime(2026, 9, 14, 1, 0))], None)
+    assert live._store([], date(2026, 9, 14)) is True
+    assert names(store) == []
+
+
+def test_days_before_the_reread_window_are_left_alone(store):
+    live._store([row(datetime(2026, 9, 10, 12, 0))], None)
+    live._store([row(datetime(2026, 9, 14, 12, 0), "b")], date(2026, 9, 13))
+    assert names(store) == ["live-20260910.parquet", "live-20260914.parquet"]
+
+
+def test_an_identical_pull_changes_nothing(store):
+    """Every page load pulls; rewriting unchanged files each time would also
+    throw away the feed cache for no reason."""
+    rows = [row(datetime(2026, 9, 14, 1, 0))]
+    assert live._store(rows, None) is True
+    assert live._store(rows, None) is False
+
+
+def test_a_day_with_no_album_names_still_reads_beside_the_others(store):
+    """Inferred types made an all-null column type null in one file and string
+    in the next, and a glob over both refuses to read."""
+    bare = {**row(datetime(2026, 9, 14, 1, 0)), "album_name": None}
+    live._store([bare, row(datetime(2026, 9, 15, 1, 0), "b")], None)
+    n = duckdb.connect().execute(
+        f"select count(*) from read_parquet('{(store / '*.parquet').as_posix()}')"
+    ).fetchone()[0]
+    assert n == 2
 
 
 def _export_ending(tmp_path, when: datetime) -> str:
@@ -83,67 +110,86 @@ def _export_ending(tmp_path, when: datetime) -> str:
 
 
 def test_prune_deletes_only_what_the_export_covers(store, tmp_path, monkeypatch):
-    live._write([row(datetime(2026, 9, 10, 12, 0))])  # covered
-    live._write([row(datetime(2026, 9, 20, 12, 0), "b")])  # not covered
+    live._store([row(datetime(2026, 9, 10, 12, 0)), row(datetime(2026, 9, 20, 12, 0), "b")], None)
     monkeypatch.setattr(live, "EXPORT_GLOB", _export_ending(tmp_path, datetime(2026, 9, 15)))
     monkeypatch.setattr(live, "has_export", lambda: True)
 
     assert live.prune() == 1
-    assert [f.name for f in store.glob("*.parquet")] == ["live-20260920.parquet"]
+    assert names(store) == ["live-20260920.parquet"]
 
 
 def test_prune_keeps_everything_when_there_is_no_export(store, monkeypatch):
-    """Nothing else holds these rows, so a missing export means keep them all."""
-    live._write([row(datetime(2020, 1, 1, 12, 0))])
+    """Nothing else local holds these rows, so a missing export means keep them all."""
+    live._store([row(datetime(2020, 1, 1, 12, 0))], None)
     monkeypatch.setattr(live, "has_export", lambda: False)
     assert live.prune() == 0
-    assert len(list(store.glob("*.parquet"))) == 1
+    assert len(names(store)) == 1
 
 
 def test_prune_does_not_delete_by_file_count(store, tmp_path, monkeypatch):
-    """The bug this replaces: a flat keep-the-newest-twelve rule would have
-    thrown away a day's polling every time the app was opened."""
-    for day in range(1, 21):
-        live._write([row(datetime(2026, 9, day, 12, 0), f"t{day}")])
-    assert len(list(store.glob("*.parquet"))) == 20
+    """The bug this replaced: a flat keep-the-newest-twelve rule would have
+    thrown away a day's plays every time the app was opened."""
+    live._store([row(datetime(2026, 9, day, 12, 0), f"t{day}") for day in range(1, 21)], None)
+    assert len(names(store)) == 20
     monkeypatch.setattr(live, "EXPORT_GLOB", _export_ending(tmp_path, datetime(2026, 8, 1)))
     monkeypatch.setattr(live, "has_export", lambda: True)
     assert live.prune() == 0
-    assert len(list(store.glob("*.parquet"))) == 20
+    assert len(names(store)) == 20
 
 
-# ------------------------------------------------------------- sync marker
+# ---------------------------------------------------------------- pulling
 
 
-def test_the_marker_records_a_check_that_found_nothing(tmp_path, monkeypatch):
-    """A quiet afternoon and a stopped poller look identical in the live files,
-    because a sync that adds no rows writes no file. This is what tells them
-    apart."""
-    monkeypatch.setattr(live, "LAST_SYNC", tmp_path / "last_sync.json")
-    live._mark_sync(live.SyncResult(fetched=50, added=0, oldest=None, newest=None, watermark=None))
-    mark = live.last_sync()
-    assert mark and mark["fetched"] == 50 and mark["added"] == 0
+def result(ok_ago: timedelta | None) -> live.PullResult:
+    watch = None if ok_ago is None else {"last_ok_at": datetime.now(UTC) - ok_ago}
+    return live.PullResult(pulled=0, changed=False, newest=None, watch=watch)
 
 
-def test_no_marker_reads_as_none_rather_than_raising(tmp_path, monkeypatch):
-    monkeypatch.setattr(live, "LAST_SYNC", tmp_path / "absent.json")
-    assert live.last_sync() is None
+def test_a_watcher_that_checked_in_recently_is_not_stalled():
+    assert not result(timedelta(seconds=40)).stalled
 
 
-def test_a_corrupt_marker_does_not_take_the_status_down(tmp_path, monkeypatch):
-    bad = tmp_path / "last_sync.json"
-    bad.write_text("{not json", encoding="utf-8")
-    monkeypatch.setattr(live, "LAST_SYNC", bad)
-    assert live.last_sync() is None
+def test_a_watcher_silent_past_the_limit_is_stalled():
+    """No plays and a stopped job look identical in the plays table. Only the
+    job's own check-ins tell them apart."""
+    assert result(live.STALE_AFTER + timedelta(seconds=1)).stalled
+
+
+def test_a_watcher_that_never_ran_is_stalled():
+    assert result(None).stalled
+
+
+def test_an_unreachable_database_degrades_to_no_pull(monkeypatch):
+    def boom():
+        raise OSError("no route to host")
+
+    monkeypatch.setattr(live, "_last_pull", None)
+    monkeypatch.setattr(live, "pull", boom)
+    assert live.pull_if_stale() is None
+
+
+def test_pulls_are_spaced_and_the_repeat_reports_no_change(monkeypatch):
+    calls = []
+
+    def fake():
+        calls.append(1)
+        return live.PullResult(3, True, None, {"last_ok_at": datetime.now(UTC)})
+
+    monkeypatch.setattr(live, "_last_pull", None)
+    monkeypatch.setattr(live, "pull", fake)
+    monkeypatch.setattr(live, "prune", lambda: 0)
+    first = live.pull_if_stale()
+    second = live.pull_if_stale()
+    assert len(calls) == 1
+    assert first.changed and not second.changed, "the page must not rebuild on a cached answer"
 
 
 def test_ago_reads_naive_timestamps_as_utc():
     """The store holds naive UTC; mixing that with an aware now() is a
     TypeError, which is how this was found."""
     import importlib.util
-    from datetime import UTC, datetime, timedelta
 
-    spec = importlib.util.spec_from_file_location("sync_recent", "scripts/sync_recent.py")
+    spec = importlib.util.spec_from_file_location("capture", "scripts/capture.py")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
 
@@ -189,36 +235,3 @@ def test_a_cover_with_no_dimensions_is_used_as_is():
 def test_no_images_is_none_rather_than_an_error():
     assert live.pick_image([], 240) is None
     assert live.pick_image(None, 240) is None
-
-
-def test_live_rows_estimate_what_was_heard_not_the_track_length():
-    """played_at marks the end of a play, so the time available for a track is
-    the gap since the one before it. Substituting the full duration assumed
-    every play finished, which ran about 30% high against the export."""
-    def item(when, ms):
-        return {"played_at": when, "track": {"uri": "spotify:track:a", "name": "S",
-                "duration_ms": ms, "artists": [{"name": "A"}], "album": {"name": "Al"}}}
-
-    rows = live._rows([
-        item("2026-09-14T12:00:00Z", 200_000),   # earliest: nothing before it
-        item("2026-09-14T12:00:45Z", 200_000),   # only 45s of a 200s track
-        item("2026-09-14T12:04:05Z", 200_000),   # a full play
-    ])
-    heard = [r["ms_played"] for r in rows]
-    assert heard[0] == 200_000, "the earliest row has no predecessor to measure against"
-    assert heard[1] == 45_000, "a track cut short should record what was heard"
-    assert heard[2] == 200_000, "a complete play records the whole track"
-
-
-def test_a_skipped_live_play_now_fails_the_30s_filter():
-    """Before this, every live row carried a full duration and so cleared MIN_MS
-    - the skip filter was a no-op on exactly the source that is growing."""
-    def item(when, ms):
-        return {"played_at": when, "track": {"uri": "spotify:track:a", "name": "S",
-                "duration_ms": ms, "artists": [{"name": "A"}], "album": {"name": "Al"}}}
-
-    rows = live._rows([
-        item("2026-09-14T12:00:00Z", 240_000),
-        item("2026-09-14T12:00:08Z", 240_000),   # eight seconds in, skipped
-    ])
-    assert rows[1]["ms_played"] == 8_000

@@ -42,20 +42,16 @@ URI_RE = re.compile(r"^spotify:track:([A-Za-z0-9]+)$")
 # that true - at roughly 250 plays a day, noise would otherwise dominate a
 # week-over-week percentage.
 #
-# And milliseconds are not comparable across this app's two sources. The export
-# records how long a track actually played; the live endpoint has no such field,
-# so `live.py` substitutes the track's duration as a documented upper bound.
-# Measured like for like - the export's plays that cleared MIN_MS against the
-# live rows - that is 165 seconds against 217, so summing milliseconds across
-# both inflates recent weeks by about 30%, and the share grows with every live
-# row. Exactly backwards for a feature about what is happening now.
+# And milliseconds were not comparable across this app's two sources when this
+# was decided. The export records how long a track actually played; live rows
+# then came from recently-played, which has no such field, and substituted the
+# track's duration - 217 seconds a play against the export's 165. Counts had no
+# such problem, so the movers compare counts.
 #
-# Counts do not have that problem. Spotify's recently-played only reports tracks
-# played past roughly half a minute, which is why 100% of live rows clear MIN_MS
-# against 60% of export rows: the endpoint has already applied the same filter
-# this code applies. So a play means the same thing on both sides, and the
-# MIN_MS test below is a real filter on export rows and a harmless no-op on live
-# ones rather than a hole.
+# Live rows now come from the Supabase watcher, which measures listening time
+# from playback progress and records skips as skips, so MIN_MS is a real filter
+# on both sources rather than a no-op on one. Counts stay the unit: a play is
+# still the more legible thing to rank a week by.
 #
 # A week of one listener is a small sample, so both sides still need a floor.
 # The old floors were 10 and 5 minutes; over well-covered weeks the 10-minute

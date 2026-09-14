@@ -100,7 +100,7 @@ addopts = "-q --strict-markers --strict-config -m 'not eval and not llm and not 
 asyncio_mode = "auto"
 markers = [
   "llm: hits a real model endpoint - costs money, excluded from default runs",
-  "integration: hits a real third-party API (Ticketmaster, Spotify)",
+  "integration: needs a real third-party service (Ticketmaster, Spotify, Supabase)",
   "eval: golden-set eval case, run by the eval harness rather than unit CI",
 ]
 

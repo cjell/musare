@@ -227,11 +227,10 @@ def home(refresh: bool = False) -> dict[str, object]:
     All of it from the local history - /me/top/artists has no counts and three
     fixed windows, so none of these numbers are expressible through the API.
     """
-    # Opening the page is what pulls. Nothing else ever called sync, so the feed
-    # sat as far behind as the last time someone ran the script by hand - a day,
-    # when this was wired - while looking perfectly current.
-    synced = live_mod.sync_if_stale()
-    if synced and synced.added:
+    # Plays are captured in Supabase whether or not this is open; opening the
+    # page is what copies them down.
+    pulled = live_mod.pull_if_stale()
+    if pulled and pulled.changed:
         # The cached feed was computed before those plays existed.
         refresh = True
 
@@ -241,13 +240,12 @@ def home(refresh: bool = False) -> dict[str, object]:
         log.error("home build failed: %s", e)
         raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
 
-    # Recently-played is a rolling window of fifty, so plays fall out of it. When
-    # they do, say so: a feed that quietly drops a day is worse than one that
-    # admits to it, and this is the only moment the loss is detectable.
+    # A capture job that stops writes nothing, which on this screen looks exactly
+    # like not listening. Say so instead: a feed that quietly falls behind is
+    # worse than one that admits to it.
     data["live"] = {
-        "synced": bool(synced),
-        "added": synced.added if synced else 0,
-        "missed": bool(synced and synced.missed),
+        "pulled": bool(pulled),
+        "stalled": bool(pulled and pulled.stalled),
     }
     return data
 

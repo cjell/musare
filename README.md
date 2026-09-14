@@ -37,24 +37,37 @@ not paywall seeing people, messaging, or participating.
 ## Architecture
 
 ```
-Spotify export  ->  Parquet (raw)  ->  DuckDB (transform)  ->  the app
-   509k plays        8.6 MB            ~0.1s queries
-recently-played ->  Parquet (live)  ^
+Spotify export     ->  Parquet (raw)   ->  DuckDB (transform)  ->  the app
+   509k plays           8.6 MB              ~0.1s queries
+Supabase capture   ->  Parquet (live)  ^
 ```
 
 Two sources, one view. The export is complete and exact up to the day it was
-generated; the API's recently-played endpoint holds fifty rows - about a day -
-and carries no `skipped` and no real `ms_played`. They live in separate files
-and union at read time under a single rule: **the export wins for every period
-it covers**, so live rows only survive past its high-water mark and a future
-export silently upgrades approximate rows to exact ones.
+generated. Everything since is captured inside Supabase, and the two union at
+read time under a single rule: **the export wins for every period it covers**,
+so live rows only survive past its high-water mark and a future export silently
+upgrades them to exact ones.
 
-    ./mscs/python.exe scripts/sync_recent.py            # pull the last window
-    ./mscs/python.exe scripts/sync_recent.py --status   # coverage, and whether it is keeping up
+Capture started as a poller on recently-played and was rebuilt after measuring
+it. The endpoint omitted most plays - fifteen on a day with hours of listening,
+one song played ten times reported twice - while currently-playing was right
+every time it was asked. So `supabase/capture.sql` asks what is playing every 30
+seconds and writes a play when the track changes, restarts, or stops, with
+listening time measured from playback progress rather than assumed from the
+track's length. Recently-played stays on every 30 minutes as a backup, and a
+watcher row for the same play replaces its estimate.
 
-Fifty plays is about an hour on a heavy day, so this wants a schedule rather
-than a hand - every 30 minutes leaves headroom. Rows fold into one file per day
-and deduplicate on `played_at`; nothing is deleted until an export covers it.
+It runs in the database - pg_cron, the `http` extension, secrets in Vault -
+because a laptop is not online when its owner is walking around with headphones
+in. The decision logic is one pure function, so every transition (a skip, a
+repeat, a pause, a one-poll dropout) is tested by handing it two snapshots.
+
+    ./mscs/python.exe scripts/capture.py install   # secrets, schema and jobs into Supabase
+    ./mscs/python.exe scripts/capture.py status    # is it checking in, what has it recorded
+    ./mscs/python.exe scripts/capture.py pull      # copy plays into the local store now
+
+Opening the app pulls too. Local day files are replaced from the database rather
+than merged, so a superseded estimate cannot survive as a second copy.
 
 Personalization - pins, bio, colours, photos, avatar art - is stored server-side
 as one document plus uploaded images. It used to live in `localStorage`, which
@@ -196,11 +209,12 @@ honest version of the feature.
       modes.py           one listener as weighted clusters
       genres.py          artist -> region -> state, the 1.5MB serving table
       home.py            the weekly feed: movers, discoveries, on repeat
-      live.py            recently-played, now-playing, the live store
+      live.py            pulls captured plays down; now-playing; the live store
       history.py         one view over the export and the live rows
       media.py           uploads and the profile document
       shows.py           Ticketmaster events joined to local play history
       api/app.py         the server
+    supabase/capture.sql listening capture: the 30-second watcher, the backup, dedupe
     evals/cases/         golden sets and held-out sets
     profile.html         the interaction design, single file, no build step
 
@@ -223,7 +237,7 @@ Serve it:
 Tests are free and offline by default; the ones that cost money or reach a third
 party are marked and deselected:
 
-    ./mscs/python.exe -m pytest                  # 228 tests, no network, ~20s
+    ./mscs/python.exe -m pytest                  # 244 tests, no network, ~20s
     ./mscs/python.exe -m pytest -m eval          # spends real requests
 
 ### The Spotify constraint

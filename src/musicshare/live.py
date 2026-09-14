@@ -1,15 +1,19 @@
-"""Pull recently-played from Spotify and keep it beside the export.
+"""The live side of listening history: what Supabase captured, and what is on now.
 
-The endpoint returns the last fifty plays and nothing else - roughly a day for
-a heavy listener - so this is a rolling window, not a history. Whatever falls
-out of it before a sync runs is gone unless a later export covers it. Polling
-is a commitment rather than a convenience, and the export stays the safety net.
+Plays since the export are recorded inside Supabase by `supabase/capture.sql`,
+which asks Spotify what is playing every 30 seconds and writes a play when the
+track changes. This module copies those rows into local Parquet beside the
+export, so every query in the app stays a DuckDB read over files.
 
-What comes back is also thinner than the export: a timestamp, a track, and its
-duration. There is no ms_played, no skipped, no platform. Duration stands in
-for ms_played as a documented upper bound - it assumes every play finished,
-which is wrong for the roughly 30% that are skips - and everything else is
-null, so metrics can tell "unknown" from "zero".
+It used to poll recently-played from this machine instead. That had two faults,
+and the second was fatal: it only ran while the laptop was awake and online,
+and the endpoint itself omitted most plays - fifteen captured on a day with
+hours of listening, one song played ten times reported twice.
+
+Rows from the watcher carry real listening time, measured from playback
+progress. Rows from the recently-played backup still carry an estimate.
+Everything the export has and neither source does - skipped, platform - is null,
+so metrics can tell "unknown" from "zero".
 """
 
 from __future__ import annotations
@@ -17,29 +21,34 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import duckdb
 import httpx
 
 from musicshare.config import ROOT, settings
-from musicshare.history import EXPORT_GLOB, LIVE_DIR, connect, has_export
+from musicshare.history import EXPORT_GLOB, LIVE_DIR, connect, has_export, has_live
 
 log = logging.getLogger(__name__)
 
 TOKENS = ROOT / "data" / "cache" / "spotify_user_token.json"
-# Written on every sync, whether or not it found anything. The live files
-# cannot answer "when did this last check" - a sync that adds nothing writes
-# nothing, so their timestamps go stale during a quiet afternoon and look
-# identical to a poller that has stopped.
-LAST_SYNC = ROOT / "data" / "cache" / "last_sync.json"
-# What the scheduled task is set to. Only used to judge whether a gap between
-# checks is ordinary or a sign the schedule is not firing.
-EXPECTED_EVERY = timedelta(minutes=30)
 TOKEN_URL = "https://accounts.spotify.com/api/token"
-RECENT = "https://api.spotify.com/v1/me/player/recently-played"
+
+# A page may cost a database round trip this often. The watcher writes at most
+# every 30 seconds, so pulling more often only reads the same rows again.
+PULL_EVERY = timedelta(seconds=60)
+# The watcher polls every 30 seconds; not succeeding for this long is ten
+# missed polls, which is a stopped job rather than a slow one.
+STALE_AFTER = timedelta(minutes=5)
+# How far behind the newest local play a pull re-reads. Rows can change after
+# they are first pulled - a backup row is deleted when the watcher's exact row
+# for the same play lands - and that happens within minutes. Two days is far
+# past it, and still only a few hundred rows.
+REREAD = timedelta(days=2)
+
+COLUMNS = ["played_at", "track_uri", "track_name", "artist_name", "album_name", "ms_played"]
 
 
 def pick_image(images: list[dict[str, Any]] | None, want: int) -> str | None:
@@ -79,27 +88,16 @@ class NoToken(RuntimeError):
     pass
 
 
-@dataclass
-class SyncResult:
-    fetched: int
-    added: int
-    oldest: datetime | None
-    newest: datetime | None
-    watermark: datetime | None
-
-    @property
-    def missed(self) -> bool:
-        """True when the window itself starts after our last known play.
-
-        Only meaningful because sync() fetches the whole window rather than
-        asking for rows after a cursor: if the oldest play Spotify still holds
-        is newer than the newest play we have, everything between them is gone.
-        """
-        return bool(self.watermark and self.oldest and self.oldest > self.watermark)
+class NoCapture(RuntimeError):
+    pass
 
 
 def access_token() -> str:
-    """Refresh the stored token. Spotify's access tokens last an hour."""
+    """Refresh the stored token. Spotify's access tokens last an hour.
+
+    Only the now-playing status row uses this now. Capture has its own copy of
+    the refresh token in Supabase Vault.
+    """
     if not TOKENS.exists():
         raise NoToken(f"no token at {TOKENS} - run scripts/oauth_probe.py --login")
     tok = json.loads(TOKENS.read_text(encoding="utf-8"))
@@ -123,183 +121,199 @@ def access_token() -> str:
     return tok["access_token"]
 
 
-def fetch(after: datetime | None = None, limit: int = 50) -> list[dict]:
-    params: dict[str, object] = {"limit": min(limit, 50)}
+# ------------------------------------------------------------------ capture
+
+
+def cloud():
+    """A connection to the database the watcher writes into."""
+    import psycopg
+
+    url = settings().database_url
+    if not url:
+        raise NoCapture("DATABASE_URL is not set")
+    # The session pooler does not keep prepared statements across clients.
+    return psycopg.connect(url, connect_timeout=10, prepare_threshold=None)
+
+
+@dataclass(frozen=True)
+class PullResult:
+    pulled: int
+    changed: bool
+    newest: datetime | None
+    watch: dict[str, Any] | None
+
+    @property
+    def stalled(self) -> bool:
+        """The watcher has not succeeded recently - or ever.
+
+        This is about the checking, not the listening. A quiet afternoon writes
+        no plays and is not a fault; a job that stopped also writes no plays,
+        and only its own check-ins tell the two apart.
+        """
+        ok = (self.watch or {}).get("last_ok_at")
+        return ok is None or datetime.now(UTC) - ok > STALE_AFTER
+
+
+def watch_status(con, job: str = "watch") -> dict[str, Any] | None:
+    row = con.execute(
+        "select last_run_at, last_ok_at, last_error, runs, added from listen.status where job = %s",
+        [job],
+    ).fetchone()
+    if not row:
+        return None
+    return dict(zip(["last_run_at", "last_ok_at", "last_error", "runs", "added"], row, strict=True))
+
+
+def _naive_utc(ts: datetime) -> datetime:
+    return ts.astimezone(UTC).replace(tzinfo=None) if ts.tzinfo else ts
+
+
+def local_rows(after: datetime | None = None) -> list[dict[str, Any]]:
+    """Live rows held locally, past the export and past `after` if given."""
+    if not has_live():
+        return []
+    where = []
+    if has_export():
+        where.append(f"played_at > (select max(played_at) from read_parquet('{EXPORT_GLOB}'))")
     if after:
-        # `after` is a unix millisecond cursor; asking for only what is new keeps
-        # the response small, but the fifty-row cap still applies.
-        params["after"] = int(after.timestamp() * 1000)
-    r = httpx.get(
-        RECENT, params=params, headers={"Authorization": f"Bearer {access_token()}"}, timeout=25
+        where.append(f"played_at > timestamp '{after:%Y-%m-%d %H:%M:%S}'")
+    sql = (
+        f"select {', '.join(COLUMNS)} from read_parquet('{(LIVE_DIR / '*.parquet').as_posix()}')"
+        + (f" where {' and '.join(where)}" if where else "")
+        + " order by played_at"
     )
-    if r.status_code != 200:
-        raise RuntimeError(f"recently-played: HTTP {r.status_code} {r.text[:160]}")
-    return r.json().get("items", [])
+    cur = duckdb.connect().execute(sql)
+    return [dict(zip(COLUMNS, r, strict=True)) for r in cur.fetchall()]
 
 
-def _rows(items: list[dict]) -> list[dict]:
-    """Rows in the export's shape, with ms_played estimated rather than assumed.
-
-    `played_at` is when a play *ended* - measured, not guessed: the gap between
-    consecutive plays matches the later track's own duration 79% of the time on
-    this account. So the time available for a track is the gap since the play
-    before it, and what was actually heard is whichever is smaller, that or the
-    track's length.
-
-    That matters because the endpoint carries no ms_played and the fallback was
-    the full duration, which assumes every play finished. Against the export's
-    real average for plays past MIN_MS, that ran about 30% high - enough to make
-    any figure in hours an upper bound rather than a measurement.
-
-    The earliest row in a window has nothing before it, so it keeps the duration.
-    One row in fifty, and only on the first sync that sees it.
-    """
-    # Spotify returns newest first; the gap only means anything in play order.
-    items = sorted(items, key=lambda it: it.get("played_at") or "")
-    out = []
-    prev_at: datetime | None = None
-    for it in items:
-        t = it.get("track") or {}
-        if not t.get("uri"):
-            continue  # local files and podcasts have no track uri
-        album = t.get("album") or {}
-        at = (
-            datetime.fromisoformat(it["played_at"].replace("Z", "+00:00"))
-            .astimezone(UTC)
-            .replace(tzinfo=None)
-        )
-        duration = t.get("duration_ms")
-        if prev_at is None or duration is None:
-            heard = duration
-        else:
-            available = int((at - prev_at).total_seconds() * 1000)
-            heard = max(0, min(duration, available))
-
-        out.append(
-            {
-                "played_at": at,
-                "track_uri": t["uri"],
-                "track_name": t.get("name"),
-                "artist_name": ", ".join(a["name"] for a in t.get("artists", []) if a.get("name")),
-                "album_name": album.get("name"),
-                "ms_played": heard,
-            }
-        )
-        prev_at = at
-    return out
+def _first_day() -> date | None:
+    """The earliest day a pull re-reads - see REREAD. None means all of it."""
+    con = duckdb.connect()
+    marks = []
+    if has_live():
+        newest = con.execute(
+            f"select max(played_at) from read_parquet('{(LIVE_DIR / '*.parquet').as_posix()}')"
+        ).fetchone()[0]
+        if newest:
+            marks.append(newest - REREAD)
+    if has_export():
+        tip = con.execute(f"select max(played_at) from read_parquet('{EXPORT_GLOB}')").fetchone()[0]
+        if tip:
+            marks.append(tip)
+    return max(marks).date() if marks else None
 
 
-def watermark() -> datetime | None:
-    """The latest play we already know about, from either source."""
-    con = connect()
-    return con.execute("select max(played_at) from plays").fetchone()[0]
+def _store(rows: list[dict[str, Any]], first_day: date | None) -> bool:
+    """Make every local day from `first_day` on hold exactly these rows.
 
+    Replaced, never merged. The database is the record and a local day file is
+    a copy of it, so a row the database dropped - a backup estimate superseded
+    by the watcher's measurement - has to disappear here too. Merging would keep
+    both and count that play twice.
 
-def sync() -> SyncResult:
-    mark = watermark()
-    # Deliberately no `after` cursor. With one, the oldest row returned is just
-    # the first play past the cursor, which says nothing about whether anything
-    # fell out of the window - it cannot tell "plays were lost" from "you were
-    # asleep". Fetching the whole window makes its start meaningful, and costs
-    # the same single request.
-    items = fetch()
-    rows = _rows(items)
-
-    oldest = min((r["played_at"] for r in rows), default=None)
-    newest = max((r["played_at"] for r in rows), default=None)
-    new = [r for r in rows if mark is None or r["played_at"] > mark]
-
-    if new:
-        _write(new)
-
-    result = SyncResult(len(rows), len(new), oldest, newest, mark)
-    _mark_sync(result)
-    return result
-
-
-def _mark_sync(r: SyncResult) -> None:
-    """Record that a check happened. Never fatal - this is a status file."""
-    try:
-        LAST_SYNC.parent.mkdir(parents=True, exist_ok=True)
-        LAST_SYNC.write_text(
-            json.dumps(
-                {
-                    "at": datetime.now(UTC).isoformat(timespec="seconds"),
-                    "fetched": r.fetched,
-                    "added": r.added,
-                    "missed": r.missed,
-                    "newest": r.newest.isoformat() if r.newest else None,
-                },
-                indent=1,
-            ),
-            encoding="utf-8",
-        )
-    except OSError as e:  # pragma: no cover - a status file is not worth failing over
-        log.warning("could not record sync time: %s", e)
-
-
-def last_sync() -> dict[str, Any] | None:
-    """The last check, or None if this has never run since the marker existed."""
-    if not LAST_SYNC.exists():
-        return None
-    try:
-        return json.loads(LAST_SYNC.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-
-
-def _write(rows: list[dict]) -> None:
-    """Fold new rows into one file per day of listening.
-
-    A file per sync is fine at one sync a day and untenable at one every half
-    hour: 48 a day is about 17,500 files a year, each holding a handful of rows,
-    all of which DuckDB opens on every query. Grouping by the day a play
-    happened caps it at 365 and keeps each file worth reading.
-
-    Parquet cannot be appended to, so a day's file is rewritten with the union
-    of what it held and what arrived. Rows are deduplicated on played_at because
-    the fifty-play window overlaps itself on every sync - that is the point of
-    fetching the whole thing - so the same play arrives repeatedly.
+    Days before `first_day` are not touched. Returns whether anything changed.
     """
     LIVE_DIR.mkdir(parents=True, exist_ok=True)
-    con = duckdb.connect()
-    by_day: dict[str, list[dict]] = {}
+    by_day: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
         by_day.setdefault(r["played_at"].strftime("%Y%m%d"), []).append(r)
 
-    for day, batch in by_day.items():
+    floor = first_day.strftime("%Y%m%d") if first_day else ""
+    held = {
+        p.stem.removeprefix("live-"): p
+        for p in LIVE_DIR.glob("live-*.parquet")
+        if p.stem.removeprefix("live-") >= floor
+    }
+
+    con = duckdb.connect()
+    changed = False
+    for day in sorted(set(by_day) | set(held)):
         path = LIVE_DIR / f"live-{day}.parquet"
-        con.register("incoming", _as_arrow(batch))
+        want = sorted(
+            (tuple(r[c] for c in COLUMNS) for r in by_day.get(day, [])), key=lambda t: t[0]
+        )
         if path.exists():
-            # Materialised into a temp table, not streamed. `.arrow()` hands back
-            # a RecordBatchReader, which is lazy over the very file COPY is about
-            # to truncate - so the rows already on disk read back as nothing and
-            # the merge silently loses them. The first sync of a day looks fine
-            # either way, which is how this would have shipped.
-            con.execute(
-                f"create or replace temp table existing as "
-                f"select * from read_parquet('{path.as_posix()}')"
-            )
-            source = """
-                select * from existing
-                union all
-                select * from incoming
-                where played_at not in (select played_at from existing)
-            """
-        else:
-            source = "select * from incoming"
+            have = con.execute(
+                f"select {', '.join(COLUMNS)} from read_parquet('{path.as_posix()}') order by played_at"
+            ).fetchall()
+            if have == want:
+                continue
+        changed = True
+        if not want:
+            path.unlink()
+            continue
+        con.register("incoming", _as_arrow([dict(zip(COLUMNS, t, strict=True)) for t in want]))
         con.execute(
-            f"copy ({source} order by played_at) to '{path.as_posix()}' "
+            f"copy (select * from incoming order by played_at) to '{path.as_posix()}' "
             "(format parquet, compression zstd)"
         )
         con.unregister("incoming")
-        log.info("folded %d row(s) into %s", len(batch), path.name)
+        log.info("wrote %d play(s) to %s", len(want), path.name)
+    return changed
 
 
 def _as_arrow(rows: list[dict]):
+    """Rows with the types written out. Inferred types break on a day whose
+    album names are all null: that column becomes type null in one file and
+    string in the next, and the glob over all of them stops reading."""
     import pyarrow as pa
 
-    return pa.Table.from_pylist(rows)
+    schema = pa.schema([
+        ("played_at", pa.timestamp("us")),
+        ("track_uri", pa.string()),
+        ("track_name", pa.string()),
+        ("artist_name", pa.string()),
+        ("album_name", pa.string()),
+        ("ms_played", pa.int64()),
+    ])
+    return pa.Table.from_pylist(rows, schema=schema)
+
+
+def pull() -> PullResult:
+    """Copy what the watcher has recorded into the local store."""
+    first = _first_day()
+    with cloud() as con:
+        cur = con.execute(
+            f"""
+            select {", ".join(COLUMNS)} from listen.plays
+            where %s::date is null or played_at >= %s::date
+            order by played_at
+            """,
+            [first, first],
+        )
+        rows = [dict(zip(COLUMNS, r, strict=True)) for r in cur.fetchall()]
+        watch = watch_status(con)
+    for r in rows:
+        r["played_at"] = _naive_utc(r["played_at"])
+    changed = _store(rows, first)
+    newest = rows[-1]["played_at"] if rows else None
+    return PullResult(len(rows), changed, newest, watch)
+
+
+_last_pull: tuple[float, PullResult] | None = None
+
+
+def pull_if_stale(every: timedelta = PULL_EVERY) -> PullResult | None:
+    """Pull at most once per `every`; in between, the last result unchanged.
+
+    None only when capture cannot be reached at all. A feed that cannot refresh
+    is a feed showing older numbers, not a page that fails - the export and the
+    rows already pulled are still underneath it.
+    """
+    global _last_pull
+    if _last_pull and time.monotonic() - _last_pull[0] < every.total_seconds():
+        return replace(_last_pull[1], changed=False)
+    try:
+        result = pull()
+    except Exception as e:  # no database is a degraded feed, not an error page
+        log.warning("capture pull skipped: %s", e)
+        return None
+    _last_pull = (time.monotonic(), result)
+    if result.changed:
+        prune()
+    if result.stalled:
+        log.warning("capture watcher has not succeeded since %s", (result.watch or {}).get("last_ok_at"))
+    return result
 
 
 def coverage() -> dict[str, object]:
@@ -314,15 +328,12 @@ def prune() -> int:
 
     This used to keep a flat twelve files and delete the rest, on the assumption
     that anything older was already covered by an export. That assumption is
-    only true if exports arrive faster than syncs do. At one sync a day it was
-    harmless; at one every half hour, twelve files is six hours, so polling
-    would have collected data all day and then destroyed it the next time the
-    app was opened - `sync_if_stale` calls this after every sync that adds rows.
+    only true if exports arrive faster than plays do, and they do not.
 
     Coverage is the real test, and `history.py` already defines it: live rows
     only survive past the export's high-water mark, so a live file whose newest
     play is at or before that mark contributes nothing and can go. Everything
-    else stays however old it is, because nothing else holds it.
+    else stays however old it is. The database keeps its copy either way.
     """
     files = sorted(LIVE_DIR.glob("live-*.parquet"))
     if not files or not has_export():
@@ -407,50 +418,11 @@ def now_playing(ttl: float = NOW_TTL) -> dict[str, Any] | None:
     return out
 
 
-# How stale the store may be before opening the app is allowed to cost a request
-# to Spotify. Loading a page should pull; refreshing it ten times should not.
-FRESH_FOR = timedelta(minutes=5)
-
-
-def sync_if_stale(max_age: timedelta = FRESH_FOR) -> SyncResult | None:
-    """Pull only when what we hold has gone stale. None means it had not.
-
-    The freshness test is on the newest play we hold, not on when the last sync
-    ran. Those differ in the case that matters: someone who has not listened all
-    afternoon has a store that is hours old and perfectly current, and asking
-    Spotify again would tell us nothing. Either way this costs one request at
-    most, and the window it reads is fifty plays wide regardless.
-    """
-    mark = watermark()
-    if mark is not None:
-        age = datetime.now(UTC) - (mark if mark.tzinfo else mark.replace(tzinfo=UTC))
-        if age < max_age:
-            return None
-    try:
-        result = sync()
-    except (NoToken, httpx.HTTPError) as e:
-        # A feed that cannot refresh is a feed showing older numbers, not a page
-        # that fails. The export is still underneath it.
-        log.warning("live sync skipped: %s", e)
-        return None
-    if result.added:
-        # Each sync writes a file; nothing else ever removed them.
-        prune()
-    if result.missed:
-        log.warning(
-            "gap: Spotify's window starts at %s but our newest play is %s - "
-            "the plays between are gone unless a later export covers them",
-            result.oldest,
-            result.watermark,
-        )
-    return result
-
-
 def last_played() -> dict[str, Any] | None:
     """The most recent play on record, for when nothing is playing now.
 
     Read from the local history rather than from Spotify: the export and the
-    synced window are already there, it costs no request, and "what they last
+    pulled rows are already there, it costs no request, and "what they last
     played" does not need to be fresher than the feed itself.
     """
     try:

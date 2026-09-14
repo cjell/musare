@@ -1443,9 +1443,9 @@ details[open] summary .chev{transform:rotate(180deg)}
         </div>
         <div class="gapnote" id="gapNote" hidden>
           <span aria-hidden="true">!</span>
-          <span><b>Some plays were missed.</b> Spotify only keeps the last fifty,
-          and more than that happened since this was last open. The numbers below
-          are short by whatever fell out.</span>
+          <span><b>Listening capture is behind.</b> The job that records plays
+          has not checked in for a few minutes, so the numbers below may be
+          missing what you played since.</span>
         </div>
       </section>
 
@@ -3443,7 +3443,7 @@ function loadHome(){
     /* Same newest play means the same feed; redrawing it would only restart
        images and reset nothing useful. A gap warning is new information even
        when the plays are not. */
-    if(d.through && d.through === homeThrough && !(d.live && d.live.missed)) return;
+    if(d.through && d.through === homeThrough && !(d.live && d.live.stalled)) return;
     homeThrough = d.through;
     var w = d.week;
     $("wkHours").textContent = w.hours;
@@ -3460,11 +3460,10 @@ function loadHome(){
       ? (delta >= 0 ? "up " : "down ") + Math.abs(delta) + "h vs last"
       : "vs last";
 
-    /* The window is fifty plays wide, so going long enough between visits loses
-       some for good. It is only detectable at the moment of syncing - the server
-       compares where Spotify's window starts against the newest play we hold -
-       so if it is not said here it is never said at all. */
-    $("gapNote").hidden = !(d.live && d.live.missed);
+    /* Capture runs in Supabase and a stopped job writes nothing, which on this
+       screen reads exactly like not listening. The server knows the difference
+       from the job's own check-ins, so it is said here or nowhere. */
+    $("gapNote").hidden = !(d.live && d.live.stalled);
 
     HOME.you.up = d.up.map(function(a){ return [a.name, "+" + a.pct + "%", a.image]; });
     HOME.you.down = d.down.map(function(a){ return [a.name, a.pct + "%", a.image]; });
