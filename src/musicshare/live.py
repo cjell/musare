@@ -53,12 +53,20 @@ def pick_image(images: list[dict[str, Any]] | None, want: int) -> str | None:
 
     Some playlist covers come back as a single entry with null dimensions. There
     is nothing to choose between, so it is used as-is.
+
+    A playlist with no uploaded cover gets a mosaic of four album covers, and
+    those need twice the resolution for the same sharpness: the useful size is
+    the tile rather than the image, so a 300px mosaic is four 150px covers. Drawn
+    in the same 118px cell as a single cover it is the only one that upscales,
+    which is exactly the "why are only some of them blurry" case.
     """
     if not images:
         return None
     sized = [i for i in images if i.get("width")]
     if not sized:
         return images[0].get("url")
+    if "mosaic" in (images[0].get("url") or ""):
+        want *= 2
     big_enough = [i for i in sized if i["width"] >= want]
     return (
         min(big_enough, key=lambda i: i["width"])

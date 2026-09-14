@@ -150,3 +150,42 @@ def test_ago_reads_naive_timestamps_as_utc():
     naive = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=5)
     assert mod.ago(naive).endswith("m ago")
     assert mod.ago(datetime.now(UTC)) == "0s ago"
+
+
+# ------------------------------------------------------------ cover picking
+
+
+def _sizes(host):
+    return [
+        {"url": f"https://{host}/640/x", "width": 640, "height": 640},
+        {"url": f"https://{host}/300/x", "width": 300, "height": 300},
+        {"url": f"https://{host}/60/x", "width": 60, "height": 60},
+    ]
+
+
+def test_a_mosaic_is_asked_for_at_twice_the_size():
+    """Four covers in one image means the useful resolution is the tile: a 300px
+    mosaic is four 150px covers, and it is the only cover that upscales in a
+    cell a single 300px cover fills comfortably."""
+    assert "/640/" in live.pick_image(_sizes("mosaic.scdn.co"), 240)
+
+
+def test_an_ordinary_cover_is_not_upsized():
+    """The doubling is for tiling, not for everything - a single cover at 300
+    already clears a 118px cell at 2x."""
+    assert "/300/" in live.pick_image(_sizes("i.scdn.co"), 240)
+
+
+def test_small_rows_still_get_small_images():
+    assert "/60/" in live.pick_image(_sizes("i.scdn.co"), 60)
+
+
+def test_a_cover_with_no_dimensions_is_used_as_is():
+    """Uploaded playlist covers come back as one entry with null width."""
+    only = [{"url": "https://i.scdn.co/image/only", "width": None, "height": None}]
+    assert live.pick_image(only, 240) == "https://i.scdn.co/image/only"
+
+
+def test_no_images_is_none_rather_than_an_error():
+    assert live.pick_image([], 240) is None
+    assert live.pick_image(None, 240) is None
