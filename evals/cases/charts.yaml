@@ -226,3 +226,116 @@
 - input: hgfd qwe zzz
   expect: {understood: false}
   tags: [refusal, edge, gibberish]
+
+# ---------------------------------------------------------------- genre
+- input: what genres do I play most
+  expect: {dimension: genre, metric: hours, series: none}
+  tags: [genre, dimension]
+
+- input: break my listening down by genre
+  expect: {dimension: genre}
+  tags: [genre, dimension]
+
+- input: what kind of music did I listen to in 2020
+  expect: {dimension: genre, year: 2020}
+  tags: [genre, dimension, year]
+
+- input: how much house have I listened to
+  expect: {genres: [house]}
+  tags: [genre, filter]
+
+- input: my punk listening by month
+  expect: {genres: [punk], dimension: date, grain: month}
+  tags: [genre, filter, date]
+
+- input: top artists
+  expect: {genres: [], dimension: artist}
+  tags: [genre, negative]
+
+- input: my listening in the mornings
+  expect: {genres: [], dimension: hour_of_day}
+  tags: [genre, negative]
+
+# ---------------------------------------------------------------- series
+- input: drake vs future over time
+  expect: {dimension: date, series: artist, artists: [drake, future]}
+  tags: [series, artist]
+
+- input: compare nirvana and pearl jam by year
+  expect: {dimension: date, grain: year, series: artist, artists: [nirvana, pearl jam]}
+  tags: [series, artist]
+
+- input: rap versus rock over the years
+  expect: {dimension: date, grain: year, series: genre}
+  tags: [series, genre]
+
+- input: how my genres have shifted month to month
+  expect: {dimension: date, grain: month, series: genre}
+  tags: [series, genre]
+
+- input: kanye and tyler, the creator by hour of day
+  expect: {dimension: hour_of_day, series: artist}
+  tags: [series, artist, cyclical]
+
+- input: my listening over time
+  expect: {series: none, dimension: date}
+  tags: [series, negative]
+
+- input: how many hours of drake and j cole combined
+  expect: {series: none, artists: [drake, j cole]}
+  tags: [series, negative]
+
+- input: my top albums
+  expect: {series: none, dimension: album}
+  tags: [series, negative]
+
+# A named comparison fills both fields: series says how to split, genres says
+# which lines. With genres empty this drew the top six genres over time - a
+# reasonable chart, and not the one that was asked for.
+- input: rap vs rock over the years
+  expect: {dimension: date, grain: year, series: genre, genres: [rap, rock]}
+  tags: [series, genre, named]
+
+# My own case, corrected rather than forced. It asserted series 'genre', which
+# cannot be right: a comparison needs an ordered axis and this question has no
+# time in it. Two bars is the answer, and naming the genres is what makes them
+# two bars rather than the nine regions underneath.
+- input: is it jazz or soul I actually listen to
+  expect: {dimension: genre, genres: [jazz, soul], series: none}
+  tags: [series, genre, named]
+
+- input: how my genres have changed
+  expect: {series: genre, genres: []}
+  tags: [series, genre, negative]
+
+# ---------------------------------------------------------------- per period
+# The top few inside every bucket, ranked separately in each - as opposed to a
+# comparison, which follows one fixed set across the whole chart. Both are
+# ordinary English and the negatives below are the ones that matter.
+- input: top 3 artists every year
+  expect: {per_period: true, series: artist, dimension: date, grain: year, limit: 3}
+  tags: [per_period]
+
+- input: my number one artist each month
+  expect: {per_period: true, series: artist, dimension: date, grain: month, limit: 1}
+  tags: [per_period]
+
+- input: best song of each year
+  expect: {per_period: true, series: track, dimension: date, grain: year, limit: 1}
+  tags: [per_period, track]
+
+- input: top genre per month
+  expect: {per_period: true, series: genre, dimension: date, grain: month, limit: 1}
+  tags: [per_period, genre]
+
+- input: drake vs future over time
+  expect: {per_period: false}
+  tags: [per_period, negative, series]
+
+- input: top 5 artists
+  expect: {per_period: false, dimension: artist, limit: 5}
+  tags: [per_period, negative, ranked]
+
+- input: my listening by month this year
+  expect: {per_period: false, dimension: date, grain: month}
+  tags: [per_period, negative]

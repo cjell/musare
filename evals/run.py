@@ -51,6 +51,13 @@ SUITES: dict[str, Suite] = {
     # stops being true the moment a case is edited to let an answer through.
     "shows-heldout": Suite(SHOWS, "shows_heldout.yaml", validate),
     "charts-heldout": Suite(CHARTS, "charts_heldout.yaml", validate_chart),
+    # Held out for the genre and comparison work, and written before any of it
+    # existed - see the headers of those two files. The pair above covers the
+    # schemas as they were before and has already been read, which is what makes
+    # it training data now however it is labelled.
+    "shows-genre-heldout": Suite(SHOWS, "shows_genre_heldout.yaml", validate),
+    "charts-series-heldout": Suite(CHARTS, "charts_series_heldout.yaml", validate_chart),
+    "charts-perperiod-heldout": Suite(CHARTS, "charts_perperiod_heldout.yaml", validate_chart),
 }
 
 

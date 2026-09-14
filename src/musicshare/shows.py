@@ -24,6 +24,7 @@ from typing import Any
 
 import httpx
 
+from musicshare import genres
 from musicshare.config import ROOT, settings
 from musicshare.history import connect
 
@@ -244,6 +245,20 @@ def _month(date_str: str) -> str:
     return datetime.strptime(date_str, "%Y-%m-%d").strftime("%b")
 
 
+def genre_of(artist: str) -> str | None:
+    """One act's genre, or None if the atlas cannot place them.
+
+    Wrapped rather than called directly so a missing build artifact degrades to
+    "no genre known" instead of taking the whole shows page down with it. A show
+    with no genre still lists; it just cannot answer a genre filter.
+    """
+    try:
+        return genres.of(artist)
+    except Exception as e:
+        log.warning("no genre lookup available: %s", e)
+        return None
+
+
 def build(refresh: bool = False, **kw) -> list[dict[str, Any]]:
     """Normalised upcoming shows, each carrying how much you play that artist."""
     if CACHE.exists() and not refresh and time.time() - CACHE.stat().st_mtime < CACHE_TTL:
@@ -267,6 +282,10 @@ def build(refresh: bool = False, **kw) -> list[dict[str, Any]]:
         s["your_hours"] = round(hours, 1)
         s["your_plays"] = plays
         s["yours"] = plays > 0
+        # The corpus's genre for this act, or None when it has never heard of
+        # them. Resolved here rather than in the filter so it is cached with the
+        # show and a filtered request costs no lookups at all.
+        s["genre"] = genre_of(s["artist"])
         s["dow"] = _dow(s["date"])
         s["month"] = _month(s["date"])
         s["day"] = s["date"][8:10]

@@ -254,3 +254,61 @@
 - input: asdkjfh qwe
   expect: {understood: false}
   tags: [edge, gibberish]
+
+# ---------------------------------------------------------------- genre
+# Added with the genre field. The negatives matter more than the positives
+# here: the failure that would hurt is a model that finds a genre in every
+# request, which turns "what's on" into "what house shows are on".
+- input: any metal shows around
+  expect: {genres: [metal], only_mine: false}
+  tags: [genre]
+
+- input: looking for jazz
+  expect: {genres: [jazz]}
+  tags: [genre, terse]
+
+- input: drum and bass nights this week
+  expect: {genres: [drum and bass], within_days: {between: [5, 9]}}
+  tags: [genre, timeframe]
+
+- input: any hardcore or punk gigs nearby
+  expect: {genres: [hardcore, punk], radius_mi: {between: [5, 25]}}
+  tags: [genre, multiple, distance]
+
+- input: underground techno within 20 miles
+  expect: {genres: [techno], max_fans: {between: [5000, 50000]}, radius_mi: {between: [15, 25]}}
+  tags: [genre, fanbase, distance]
+
+- input: big country acts
+  expect: {genres: [country], min_fans: {between: [250000, 1000000]}}
+  tags: [genre, fanbase]
+
+# The broad word, not its subgenres. Picking "death metal" and "thrash metal"
+# for someone who said "metal" is narrower than they asked for.
+- input: metal
+  expect: {genres: [metal]}
+  tags: [genre, breadth, terse]
+
+- input: shows near me
+  expect: {genres: []}
+  tags: [genre, negative]
+
+- input: who is playing this weekend
+  expect: {genres: [], within_days: {between: [2, 4]}}
+  tags: [genre, negative, timeframe]
+
+- input: bands I actually listen to
+  expect: {genres: [], only_mine: true}
+  tags: [genre, negative]
+
+- input: something upbeat for a night out
+  expect: {genres: []}
+  tags: [genre, negative, mood]
+
+- input: 90s bands on tour
+  expect: {genres: []}
+  tags: [genre, negative, era]
+
+- input: is Radiohead playing
+  expect: {genres: [], artists: [Radiohead]}
+  tags: [genre, negative, artist]

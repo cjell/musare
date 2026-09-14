@@ -14,6 +14,7 @@ import logging
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 
+from musicshare import genres as genrelib
 from musicshare import home as home_mod
 from musicshare import live as live_mod
 from musicshare import playlists as pl_mod
@@ -21,7 +22,7 @@ from musicshare import regions as regions_mod
 from musicshare import shows as shows_mod
 from musicshare import taste
 from musicshare.spec import ChartSpec, run_chart, validate, validate_chart
-from musicshare.spec.generate import CHARTS, DEFAULT_MODEL, generate
+from musicshare.spec.generate import CHART_MODEL, CHARTS, SHOW_MODEL, generate
 from musicshare.spotify import SpotifyClient, SpotifyError
 from musicshare.spotify.client import ALL_KINDS, SEARCH_MAX
 from musicshare.web.render import render
@@ -125,7 +126,7 @@ def shows(
 @app.get("/api/spec/shows")
 def shows_spec(
     q: str = Query(..., min_length=1, max_length=400, description="request in plain language"),
-    model: str = DEFAULT_MODEL,
+    model: str = SHOW_MODEL,
 ) -> dict[str, object]:
     """Turn a request into a ShowFilter. Returns the spec, not the results.
 
@@ -143,10 +144,20 @@ def shows_spec(
     problems = validate(g.spec)
     if problems:
         log.warning("spec rejected: %s", problems)
+    # "metal" covers eight regions, and which eight is a fact about the atlas -
+    # which lives here, not in the page. The page holds the shows and does the
+    # filtering; this is the one part of it that it cannot work out alone.
+    covered: list[str] = []
+    if g.spec.genres and g.spec.understood and not problems:
+        try:
+            covered = genrelib.expand(g.spec.genres)
+        except Exception as e:
+            log.warning("genre widening unavailable: %s", e)
     return {
         "spec": g.spec.model_dump(),
         "understood": g.spec.understood and not problems,
         "problems": [{"field": p.field, "message": p.message} for p in problems],
+        "genres_covered": covered,
         "model": g.model,
         "latency_ms": g.latency_ms,
     }
@@ -155,7 +166,7 @@ def shows_spec(
 @app.get("/api/chart")
 def chart(
     q: str = Query(..., min_length=1, max_length=400, description="a question about listening"),
-    model: str = DEFAULT_MODEL,
+    model: str = CHART_MODEL,
 ) -> dict[str, object]:
     """Turn a question into a chart: spec, then the rows to draw.
 
@@ -194,6 +205,15 @@ def chart(
             "y_label": d.y_label,
             "chart": d.chart,
             "note": d.note,
+            # Empty for an ordinary chart; when present it is the data and
+            # `values` is empty. The page branches on which one has content.
+            "series": [{"name": ln.name, "values": ln.values} for ln in d.series],
+            # Present when the answer exists but is not drawable - the page
+            # renders rows instead of a canvas. Never both.
+            "table": [
+                {"bucket": c.bucket, "rank": c.rank, "name": c.name, "value": c.value}
+                for c in d.table
+            ],
         },
     }
 

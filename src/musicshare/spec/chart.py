@@ -9,6 +9,14 @@ cannot be drawn, and none that asks for data this app does not have.
 The one free-text field is the title, because a title is cosmetic. A bad title
 is a bad title; a bad metric is a lie with axes on it.
 
+`series` is the one field here that can ask for a chart that cannot be drawn,
+and it is constrained rather than described out of trouble: more than one line
+needs a shared axis to run along, so the validator refuses a series on a
+dimension that has no order. Ranked bars have no shared axis - the third bar of
+one artist and the third bar of another are different artists - so "top tracks,
+drake vs kendrick" is not a chart, and saying so beats drawing something that
+looks like one.
+
 Same rule as ShowFilter: nothing here names a table, a column, a file or a
 user. The model chooses from a menu; it never writes a query.
 
@@ -24,14 +32,36 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-MAX_SERIES = 40
+from musicshare.spec.vocab import MAX_GENRES, Genre  # noqa: F401  (re-exported)
+
+# Bars on a ranked chart. Named for what it limits - it used to be MAX_SERIES,
+# which stopped being a sensible name the moment a chart could have real series
+# on it.
+MAX_BARS = 40
+
+# Lines on a compared chart. Far smaller than MAX_BARS because these overlap:
+# six is about where a legend stops being readable on a phone, and past that a
+# comparison hides the thing it was drawn to show.
+MAX_LINES = 6
+
 DATA_FIRST_YEAR = 2018
+
+# Dimensions whose buckets have an order of their own: a month follows a month,
+# 3am follows 2am, Tuesday follows Monday. Two things can be compared along one
+# of these because bucket n means the same for both. They are also the ones that
+# refuse to be sorted by size - a day-of-week chart in volume order is unreadable
+# - so the same set answers both questions, which is why it lives here rather
+# than being written out twice.
+ORDERED = frozenset({"date", "hour_of_day", "day_of_week"})
 
 
 class ChartSpec(BaseModel):
-    """A single-series chart over one person's listening history."""
+    """A chart over one person's listening history."""
+
+    # Genres come back as words, not enum members - see the note on ShowFilter.
+    model_config = ConfigDict(use_enum_values=True)
 
     title: str = Field(
         default="",
@@ -56,7 +86,7 @@ class ChartSpec(BaseModel):
         ),
     )
     dimension: Literal[
-        "artist", "album", "track", "platform", "hour_of_day", "day_of_week", "date"
+        "artist", "album", "track", "genre", "platform", "hour_of_day", "day_of_week", "date"
     ] = Field(
         default="artist",
         description=(
@@ -67,7 +97,12 @@ class ChartSpec(BaseModel):
             "artist is named too - 'everything by X, month by month' is a date chart "
             "restricted to X, not a chart of artists. A named "
             "artist belongs in the artists field, not here; 'artist' as a dimension "
-            "means one bar per artist. 'hour_of_day' for questions about times of day ('2am', 'mornings'), "
+            "means one bar per artist. "
+            "'genre' means one bar per kind of music, and is the answer to 'what genres "
+            "do I listen to', 'what am I into', 'what kind of music do I play most' - "
+            "anything asking what the listening is made of rather than which acts are "
+            "in it. "
+            "'hour_of_day' for questions about times of day ('2am', 'mornings'), "
             "'day_of_week' for weekdays and weekends, 'platform' for phone versus "
             "desktop. Otherwise the thing being ranked."
         ),
@@ -105,6 +140,69 @@ class ChartSpec(BaseModel):
             "never expand a genre or mood into a list."
         ),
     )
+    genres: list[Genre] = Field(
+        default_factory=list,
+        description=(
+            "Restrict the chart to these kinds of music, chosen from the list. Empty "
+            "unless the request names one: 'how much metal do I listen to', 'my emo "
+            "phase month by month'. "
+            "This narrows what is counted; it does not decide what goes along the "
+            "bottom. 'how much jazz have I played' is a jazz-only chart, and 'what "
+            "genres do I listen to' is a chart whose dimension is genre with this left "
+            "empty. A request can do both - 'my metal listening over the years' is "
+            "genres ['metal'] with dimension date. "
+            "When series is 'genre' these are also the lines on the chart: naming "
+            "rap and rock here draws exactly two lines, called rap and rock. "
+            "As elsewhere, a mood, a place, a decade or an activity is not a kind of "
+            "music, and an artist is not one either."
+        ),
+    )
+    series: Literal["none", "artist", "track", "album", "genre"] = Field(
+        default="none",
+        description=(
+            "What splits the chart into more than one line. 'none' - a single line, or "
+            "a single set of bars - is the right answer for nearly every request, and "
+            "leaving it alone is how you say the request was not a comparison. "
+            "'artist' when the user sets named artists against each other along a shared "
+            "axis: 'drake vs kendrick over time', 'compare radiohead and the smiths by "
+            "year', 'taylor swift versus olivia rodrigo, what time of day'. "
+            "'genre' when they set kinds of music against each other: 'rap vs rock over "
+            "the years', 'how my top genres have changed'. "
+            "When the request names which kinds of music to compare, put those words "
+            "in the genres field too - 'rap versus rock' is series 'genre' with genres "
+            "['rap', 'rock'], and the chart is then those two lines. Leave genres empty "
+            "only when no particular ones were named, as in 'how my genres have "
+            "changed', which means the biggest ones. "
+            "Naming two things is not by itself a comparison. 'how much have I played "
+            "drake and future altogether' asks for one total and is 'none'; the giveaway "
+            "is a word like versus, vs, against, compare, or 'each', not the mere "
+            "presence of two names. "
+            "'track' and 'album' work the same way for songs and records. "
+            "A comparison needs a shared axis to run along, so this is only available "
+            "when dimension is 'date', 'hour_of_day' or 'day_of_week'. If what is being "
+            "compared has no such axis - 'my top artists vs my top albums' - the request "
+            "is not a chart this can draw. "
+            "This field also says what gets ranked when per_period is true."
+        ),
+    )
+    per_period: bool = Field(
+        default=False,
+        description=(
+            "True when the request asks for the best few inside every period, ranked "
+            "separately in each one: 'top 3 artists every year', 'my number one song "
+            "each month', 'biggest genre per year'. The giveaway is a word like every, "
+            "each or per attached to the period. Set series to say what is being ranked "
+            "and limit to say how many. "
+            "This is not the same as a comparison, and the difference is what the answer "
+            "is allowed to contain. A comparison follows one fixed set of things across "
+            "the whole chart, so the same names appear in every period; this recomputes "
+            "the ranking inside each period, so 2018 and 2024 may have nobody in common. "
+            "'drake vs kendrick over time' is a comparison and this is false. 'top 3 "
+            "artists every year' is this. "
+            "False as well when there are no periods at all - 'top 3 artists' is one "
+            "ranking over everything, which is an ordinary ranked chart."
+        ),
+    )
     sort: Literal["desc", "asc"] = Field(
         default="desc",
         description=(
@@ -117,11 +215,19 @@ class ChartSpec(BaseModel):
     limit: int = Field(
         default=10,
         ge=1,
-        le=MAX_SERIES,
+        le=MAX_BARS,
         description=(
-            "How many bars to show, for ranked dimensions like artist or track. "
+            "How many bars to show, for ranked dimensions like artist or track, how "
+            "many lines to draw when series is set, and how many to list in each "
+            "period when per_period is true. "
+            "In that last case the wording usually says it outright and often says one: "
+            "'top genre per month', 'my number one artist each year' and 'best song of "
+            "each year' are all 1, because they name a single winner. Read the number "
+            "off the request rather than leaving the default, which would answer with "
+            "ten. "
             "10 unless the user asks for a different number. Ignored for dates, hours "
-            "of the day and days of the week, which have their own natural length."
+            "of the day and days of the week when there is no series, because those "
+            "have their own natural length."
         ),
     )
     understood: bool = Field(

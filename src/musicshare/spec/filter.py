@@ -20,15 +20,24 @@ Two rules hold this schema together:
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from musicshare.spec.vocab import MAX_GENRES, Genre  # noqa: F401  (re-exported)
 
 # Applied when the model says the user never mentioned these.
 DEFAULT_RADIUS_MI = 50
 DEFAULT_DAYS = 90
 
 
+
 class ShowFilter(BaseModel):
     """A filter over upcoming shows, derived from a request in plain language."""
+
+    # Genre comes back as its string value rather than an enum member. Everything
+    # downstream - the executor, the scorer, the JSON on the wire - wants the
+    # word, and an enum member that stringifies to "Genre.METAL" is a bug waiting
+    # in whichever of those forgets to ask for `.value`.
+    model_config = ConfigDict(use_enum_values=True)
 
     only_mine: bool = Field(
         default=False,
@@ -107,6 +116,28 @@ class ShowFilter(BaseModel):
             "Specific artists named in the request, exactly as the user wrote them. "
             "Empty unless they named someone. Never invent names, never expand a genre "
             "or a mood into a list of artists."
+        ),
+    )
+    genres: list[Genre] = Field(
+        default_factory=list,
+        description=(
+            "Kinds of music the request asks for, chosen from the list. Empty - which "
+            "is the usual answer - when the request does not name a kind of music at "
+            "all: 'shows near me', 'what's on', 'artists I listen to' all get an empty "
+            "list. "
+            "Take the broad label when the user used a broad word. 'metal' means metal, "
+            "not death metal and thrash metal and doom metal; the search widens from a "
+            "broad label to its subgenres on its own, so picking narrow ones the user "
+            "did not say makes the results narrower than they asked for. Pick a narrow "
+            "label only when they named it. "
+            "Several are fine when several were asked for - 'house or techno', 'punk and "
+            "hardcore'. "
+            "A kind of music is not a mood, a place, a decade or an activity. 'something "
+            "chill', 'shows in brooklyn', '90s stuff', 'music to study to' name none, so "
+            "the list stays empty rather than taking the nearest-sounding word - the "
+            "list holds sounds, and nothing else. "
+            "An artist is not a genre either: a named band goes in artists, and naming "
+            "one says nothing about which genres to fill in here."
         ),
     )
     understood: bool = Field(

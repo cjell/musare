@@ -13,11 +13,18 @@ from __future__ import annotations
 import pytest
 
 from evals.run import load_cases, run_case, summarise
-from musicshare.spec.generate import DEFAULT_MODEL
+from musicshare.spec.generate import SHOW_MODEL
 
-# The suite reads 100% on gpt-5.4-nano as of 2026-09-10. These floors sit well
-# under that on purpose: a gate that trips on ordinary model variance is a gate
-# people learn to ignore, and the point is to catch a real regression.
+# Measured against the model the app actually serves, which is the only version
+# of this number that describes anyone's experience. It used to read
+# DEFAULT_MODEL and quote "100% on gpt-5.4-nano as of 2026-09-10"; by
+# 2026-09-13 nano scored 62% on the cases that predate that note and 54% with
+# the genre cases included, so the claim had gone stale without anything
+# failing. The endpoints now pin gpt-5.4, which reads 99%.
+#
+# The floors sit well under that on purpose: a gate that trips on ordinary model
+# variance is a gate people learn to ignore, and the point is to catch a real
+# regression.
 MIN_EXACT_MATCH = 0.92
 MIN_FIELD_ACCURACY = 0.94
 
@@ -25,7 +32,7 @@ MIN_FIELD_ACCURACY = 0.94
 @pytest.fixture(scope="module")
 def results():
     cases = load_cases()
-    return [run_case(c, DEFAULT_MODEL) for c in cases]
+    return [run_case(c, SHOW_MODEL) for c in cases]
 
 
 @pytest.mark.eval

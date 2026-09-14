@@ -92,7 +92,11 @@ known-first-party = ["musicshare"]
 testpaths = ["tests"]
 # --strict-markers turns a typo'd marker into an error instead of a silent
 # no-op, which is the whole reason markers are worth having here.
-addopts = "-q --strict-markers --strict-config"
+# The three markers below describe themselves as excluded from default runs and
+# nothing was excluding them, so `pytest` spent real requests on the golden set
+# every time anyone ran the unit tests. Deselect them here; the eval harness and
+# `pytest -m eval` still run them on purpose.
+addopts = "-q --strict-markers --strict-config -m 'not eval and not llm and not integration'"
 asyncio_mode = "auto"
 markers = [
   "llm: hits a real model endpoint - costs money, excluded from default runs",

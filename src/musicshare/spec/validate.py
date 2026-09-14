@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from musicshare.spec.chart import DATA_FIRST_YEAR, ChartSpec
+from musicshare.spec.chart import DATA_FIRST_YEAR, ORDERED, ChartSpec
 from musicshare.spec.filter import ShowFilter
 from musicshare.spec.mood import Moods
 from musicshare.spec.name import Naming
+from musicshare.spec.vocab import MAX_GENRES
 
 MAX_ARTISTS = 12
 
@@ -53,6 +54,12 @@ def validate(spec: ShowFilter) -> list[SpecProblem]:
     if any(len(a) > 120 for a in spec.artists):
         problems.append(SpecProblem("artists", "an artist name is implausibly long"))
 
+    # The schema guarantees every genre is one of the 385 words. It says nothing
+    # about how many, and a model that has read a sentence as a genre list is
+    # asking for something the user did not.
+    if len(spec.genres) > MAX_GENRES:
+        problems.append(SpecProblem("genres", f"{len(spec.genres)} named, limit {MAX_GENRES}"))
+
     return problems
 
 
@@ -68,6 +75,33 @@ def validate_chart(spec: ChartSpec) -> list[SpecProblem]:
         problems.append(SpecProblem("year", f"history starts in {DATA_FIRST_YEAR}"))
     if len(spec.artists) > MAX_ARTISTS:
         problems.append(SpecProblem("artists", f"{len(spec.artists)} named, limit {MAX_ARTISTS}"))
+    if len(spec.genres) > MAX_GENRES:
+        problems.append(SpecProblem("genres", f"{len(spec.genres)} named, limit {MAX_GENRES}"))
+
+    # Two lines need a shared axis to run along. On a ranked dimension there is
+    # none - the third bar of one artist and the third bar of another are
+    # different tracks - so this is not a chart that can be drawn wrong, it is a
+    # chart that cannot be drawn. Failing closed says so; drawing it would hand
+    # back something that looks like an answer.
+    if spec.series != "none" and spec.dimension not in ORDERED:
+        problems.append(
+            SpecProblem("series", f"cannot compare along '{spec.dimension}', which has no order")
+        )
+    # Ranking inside a period needs a period to rank inside, and something to
+    # rank. Both come from fields the model fills in separately, so this is the
+    # one combination it can get half-right.
+    if spec.per_period:
+        if spec.series == "none":
+            problems.append(SpecProblem("per_period", "nothing named to rank in each period"))
+        if spec.dimension not in ORDERED:
+            problems.append(
+                SpecProblem("per_period", f"'{spec.dimension}' is not a period to rank inside")
+            )
+
+    # There is deliberately no "genre cannot be both the axis and the split"
+    # check. It reads like a real rule and is unreachable: 'genre' is not an
+    # ordered dimension, so the clause above has already rejected any spec it
+    # would have caught.
 
     return problems
 

@@ -28,6 +28,8 @@ words. Adding is safe; removing or renaming is not.
 
 from __future__ import annotations
 
+from enum import Enum
+
 # 385 labels. Under 500 because that is the ceiling on enum values in a
 # structured-output schema, and this is used as one.
 GENRES: tuple[str, ...] = (
@@ -417,3 +419,37 @@ GENRES: tuple[str, ...] = (
     "world music",
     "worship",
 )
+
+
+def _members() -> dict[str, str]:
+    """Enum member names from the vocabulary, kept unique.
+
+    "drum n bass" and "drum'n'bass" both normalise to the same identifier, so a
+    collision is not hypothetical - and a silently dropped member would remove a
+    genre from the vocabulary without anything failing.
+    """
+    out: dict[str, str] = {}
+    for g in GENRES:
+        key = "".join(c if c.isalnum() else "_" for c in g).strip("_").upper()
+        base, n = key, 2
+        while key in out:
+            key, n = f"{base}_{n}", n + 1
+        out[key] = g
+    return out
+
+
+# The labels, as a closed set. Naming used to be free text and was the only part
+# of this project that drifted between runs; a schema enum cannot return a word
+# that is not here.
+#
+# It lives beside the word list rather than in name.py because three schemas now
+# use it for two different jobs. Naming asks "which of these is this region?";
+# the filter and the chart ask "which of these did the user mean?". Those have
+# nothing to do with each other, and a filter importing the naming schema to
+# borrow an enum would imply they did.
+Genre = Enum("Genre", _members(), type=str)
+
+# More than this many kinds of music in one request is not a request, it is a
+# mis-parse: the model has read a list of artists, or a sentence, as a list of
+# genres. Six is comfortably above the most anyone asks for in one breath.
+MAX_GENRES = 6

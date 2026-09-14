@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Any
 
+from musicshare import genres
 from musicshare.spec.filter import DEFAULT_DAYS, DEFAULT_RADIUS_MI, ShowFilter
 
 
@@ -22,6 +23,9 @@ def apply(spec: ShowFilter, shows: list[dict[str, Any]], today: date | None = No
     # Null means the user never raised it, so the app decides, not the model.
     cutoff = today + timedelta(days=spec.within_days or DEFAULT_DAYS)
     wanted = {a.strip().lower() for a in spec.artists if a.strip()}
+    # Widened once, outside the loop: a request for "metal" covers eight regions
+    # and recomputing that per show would run the regex 152 times a row.
+    covered = set(genres.expand(spec.genres)) if spec.genres else set()
 
     out = []
     for s in shows:
@@ -55,6 +59,13 @@ def apply(spec: ShowFilter, shows: list[dict[str, Any]], today: date | None = No
             continue
 
         if wanted and (s.get("artist") or "").strip().lower() not in wanted:
+            continue
+
+        # Same rule as the fan bounds above, for the same reason: a genre was
+        # asked for, and an act the corpus cannot place is an act we cannot
+        # confirm plays it. Listing them anyway would quietly turn "metal shows"
+        # back into "shows".
+        if spec.genres and s.get("genre") not in covered:
             continue
 
         out.append(s)

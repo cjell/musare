@@ -24,36 +24,15 @@ a name, and `understood` is how the model reports that it was got at.
 
 from __future__ import annotations
 
-from enum import Enum
-
 from pydantic import BaseModel, Field
 
-from musicshare.spec.vocab import GENRES
+# The closed label set, defined next to the word list it is built from. Imported
+# rather than built here because the show filter and the chart spec need the same
+# enum for a different job, and none of them should have to import this schema to
+# get it. Re-exported so existing callers keep working.
+from musicshare.spec.vocab import Genre
 
-
-def _members() -> dict[str, str]:
-    """Enum member names from the vocabulary, kept unique.
-
-    "drum n bass" and "drum'n'bass" both normalise to the same identifier, so a
-    collision is not hypothetical - and a silently dropped member would remove a
-    genre from the vocabulary without anything failing.
-    """
-    out: dict[str, str] = {}
-    for g in GENRES:
-        key = "".join(c if c.isalnum() else "_" for c in g).strip("_").upper()
-        base, n = key, 2
-        while key in out:
-            key, n = f"{base}_{n}", n + 1
-        out[key] = g
-    return out
-
-
-# The labels, as a closed set. This is the whole point of the change: naming used
-# to be free text and was the only part of this project that drifted between
-# runs. A schema enum cannot return a word that is not here, so "mainstream rap"
-# cannot replace "hip hop" on a rebuild and a French bias in the fan counts
-# cannot invent a French name for a region of American rappers.
-Genre = Enum("Genre", _members(), type=str)
+__all__ = ["MAX_NAMED", "Genre", "ModeName", "Naming"]
 
 # This schema names two different things: a listener's six-ish modes, and the
 # corpus's eighty-ish regions. The bound covers the larger, and is belt and

@@ -100,3 +100,37 @@ def test_schema_exposes_no_identity_or_destination_fields():
     """The capability ceiling: an injection can only ask for what this can say."""
     forbidden = {"user", "user_id", "account", "url", "path", "table", "query", "sql", "email"}
     assert not (set(ShowFilter.model_json_schema()["properties"]) & forbidden)
+
+
+# ----------------------------------------------------- genre and comparison rules
+
+
+def test_too_many_genres_is_a_misparse():
+    from musicshare.spec.vocab import GENRES, MAX_GENRES
+
+    spec = ShowFilter(genres=list(GENRES[: MAX_GENRES + 1]))
+    assert [p.field for p in validate(spec)] == ["genres"]
+
+
+def test_a_genre_outside_the_vocabulary_cannot_be_built():
+    """The capability ceiling: an injection cannot ask for a word that is not here."""
+    import pydantic
+
+    with pytest.raises(pydantic.ValidationError):
+        ShowFilter(genres=["drop table shows"])
+
+
+def test_a_comparison_needs_an_ordered_axis():
+    from musicshare.spec import ChartSpec, validate_chart
+
+    assert [p.field for p in validate_chart(ChartSpec(dimension="artist", series="artist"))] == [
+        "series"
+    ]
+    assert validate_chart(ChartSpec(dimension="date", grain="year", series="artist")) == []
+
+
+def test_a_refusal_is_not_judged_on_its_leftovers():
+    from musicshare.spec import ChartSpec, validate_chart
+
+    spec = ChartSpec(understood=False, dimension="artist", series="genre")
+    assert validate_chart(spec) == []
