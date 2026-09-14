@@ -2625,13 +2625,78 @@ var CUSTOM = {};
 try { CUSTOM = JSON.parse(localStorage.getItem(STORE) || "{}") || {}; }
 catch(e){ CUSTOM = {}; }
 
+/* Reconcile with the server once, at startup. Three cases and only the third
+   needs a rule: the server has something and this browser does not, so adopt
+   it; this browser has something and the server does not, so push it; both
+   have something, so the newer one wins. Without the timestamp the last
+   browser opened would quietly overwrite the one the work was done in. */
+function syncCustom(){
+  return fetch("/api/profile")
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(d){
+      var remote = d && d.profile;
+      var mine = Object.keys(CUSTOM).filter(function(k){ return k !== "savedAt"; }).length;
+
+      if(!remote){
+        if(mine) pushCustom();
+        return false;
+      }
+      if(!mine){                       /* nothing here to lose - take theirs */
+        CUSTOM = remote;
+        try { localStorage.setItem(STORE, JSON.stringify(CUSTOM)); } catch(e){}
+        return true;
+      }
+      /* Content saved before this browser started stamping has no savedAt, and
+         treating that as zero makes it lose to anything on the server - which
+         is precisely the profile someone spent an evening building. Unstamped
+         local content wins and gets stamped on its way up. */
+      if(!CUSTOM.savedAt){ pushCustom(); return false; }
+
+      if((remote.savedAt || 0) > CUSTOM.savedAt){
+        CUSTOM = remote;
+        try { localStorage.setItem(STORE, JSON.stringify(CUSTOM)); } catch(e){}
+        return true;
+      }
+      if(CUSTOM.savedAt > (remote.savedAt || 0)) pushCustom();
+      return false;
+    })
+    .catch(function(){ return false; });
+}
+
+/* localStorage is per browser and per origin, which made it the wrong system of
+   record: a profile built in one browser did not exist in another, and
+   127.0.0.1 and localhost are two different stores of the same app. So the
+   server holds it and this is the local copy - still authoritative when there
+   is no server, which is how the published page works at all.
+
+   `savedAt` is what decides between them on load. Newest wins, which is the
+   only rule that does not silently overwrite whichever side the user last
+   typed into. */
+var pushTimer = null;
+
+function pushCustom(){
+  clearTimeout(pushTimer);
+  /* Pins fire this on every click, so it waits for the clicking to stop. */
+  pushTimer = setTimeout(function(){
+    fetch("/api/profile", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(CUSTOM)
+    }).catch(function(){ /* no server: the local copy is still the truth */ });
+  }, 600);
+}
+
 function saveCustom(){
-  /* Returns whether it stuck. For a colour or a bio, failing quietly is right -
-     the session still works and the stake is low. For an uploaded image it is
-     not: the user watches it appear, believes it is saved, and finds it gone.
-     Callers that can lose real work check the answer. */
-  try { localStorage.setItem(STORE, JSON.stringify(CUSTOM)); return true; }
-  catch(e){ return false; }
+  /* Returns whether it stuck locally. For a colour or a bio, failing quietly is
+     right - the session still works and the stake is low. For an uploaded image
+     it is not: the user watches it appear, believes it is saved, and finds it
+     gone. Callers that can lose real work check the answer. */
+  CUSTOM.savedAt = Date.now();
+  var ok;
+  try { localStorage.setItem(STORE, JSON.stringify(CUSTOM)); ok = true; }
+  catch(e){ ok = false; }
+  pushCustom();
+  return ok;
 }
 function cust(){ return CUSTOM[current] || (CUSTOM[current] = {}); }
 
@@ -4269,10 +4334,27 @@ function saveCrop(){
   ctx.imageSmoothingQuality = "high";
   var s = crop.base * crop.zoom * k;
   ctx.drawImage(crop.img, crop.x * k, crop.y * k, crop.img.width * s, crop.img.height * s);
-  cust()[crop.key] = cv.toDataURL("image/jpeg", 0.9);
-  saveCustom();
+
+  var key = crop.key;
   closeCrop();
-  render(current);
+  /* Uploaded rather than kept as a data URI. Two reasons and the second is the
+     one that matters: a few megabytes of base64 was the largest thing in a 5MB
+     quota shared with everything else, and a picture that lives in one browser
+     is a picture the same person does not have in another. Falls back to the
+     data URI when there is no server, which is how the published page works. */
+  cv.toBlob(function(blob){
+    var done = function(value){
+      cust()[key] = value;
+      saveCustom();
+      render(current);
+      if(!$("custWrap").hidden) syncSheet();
+    };
+    if(!blob){ done(cv.toDataURL("image/jpeg", 0.9)); return; }
+    fetch("/api/media/photos/" + encodeURIComponent(key), { method: "POST", body: blob })
+      .then(function(r){ return r.ok ? r.json() : null; })
+      .then(function(d){ done(d && d.url ? d.url : cv.toDataURL("image/jpeg", 0.9)); })
+      .catch(function(){ done(cv.toDataURL("image/jpeg", 0.9)); });
+  }, "image/jpeg", 0.9);
 }
 
 function wirePhoto(inputId, key){
@@ -5462,6 +5544,17 @@ loadNow();
 nowPolling(true);
 loadPlaylists();
 showScreen("home");
+
+/* After the first paint, not before it: the local copy is almost always the
+   right one and waiting on a request to draw anything would trade a correct
+   screen now for the same screen later. When the server turns out to hold
+   something newer, this repaints. */
+syncCustom().then(function(adopted){
+  if(!adopted) return;
+  render(current);
+  paintMood();
+  if(!$("custWrap").hidden) syncSheet();
+});
 
 
 var t;

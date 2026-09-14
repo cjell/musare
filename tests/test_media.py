@@ -100,3 +100,31 @@ def test_replacing_a_slot_changes_the_url():
         assert a.url != b.url
     finally:
         media.delete(a.path)
+
+
+# ------------------------------------------------------ the profile document
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not media.configured(), reason="no Supabase credentials")
+def test_document_round_trip():
+    doc = {"savedAt": 123, "0": {"bio": "hello", "pins": {"albums": [{"id": "x"}]}}}
+    media.put_doc("pytestdoc", doc)
+    try:
+        assert media.get_doc("pytestdoc") == doc
+    finally:
+        media.delete_doc("pytestdoc")
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(not media.configured(), reason="no Supabase credentials")
+def test_a_document_that_was_never_written_reads_as_none():
+    """Supabase answers a missing object with HTTP 400 and the real status in the
+    body, so checking the status alone turns "new user" into a failure."""
+    assert media.get_doc("pytest-never-written") is None
+
+
+@pytest.mark.parametrize("bad", ["../escape", "a/b", "", "UPPER", "x" * 65])
+def test_document_names_are_constrained(bad):
+    with pytest.raises(media.MediaError):
+        media.put_doc(bad, {})

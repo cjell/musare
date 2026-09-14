@@ -22,6 +22,7 @@ exist, which is a variable swap rather than a migration of every stored URL.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -33,6 +34,10 @@ from musicshare.config import settings
 log = logging.getLogger(__name__)
 
 BUCKET = "media"
+# Pictures are public because the page renders them by URL; the profile document
+# is not, because it is the user's own record rather than something a page has to
+# fetch. Only this app reads it, with the service key.
+DATA_BUCKET = "data"
 
 # Until there are accounts. See the note above about the path shape.
 LOCAL_OWNER = "me"
@@ -132,10 +137,68 @@ def put(data: bytes, kind: str, name: str, owner: str = LOCAL_OWNER) -> Stored:
     return Stored(url=url, path=path, content_type=ctype, bytes=len(data))
 
 
+def put_doc(name: str, doc: dict, owner: str = LOCAL_OWNER) -> str:
+    """Store one JSON document. Overwrites; there is one per owner per name."""
+    for part in (name, owner):
+        if not SAFE_NAME.match(part):
+            raise MediaError(f"invalid path segment: {part!r}")
+    base, headers = _base()
+    path = f"u/{owner}/{name}.json"
+    r = httpx.post(
+        f"{base}/storage/v1/object/{DATA_BUCKET}/{path}",
+        headers={**headers, "Content-Type": "application/json", "x-upsert": "true"},
+        content=json.dumps(doc, separators=(",", ":")).encode(),
+        timeout=30,
+    )
+    if r.status_code >= 300:
+        raise MediaError(f"save failed: HTTP {r.status_code} {r.text[:160]}")
+    return path
+
+
+def get_doc(name: str, owner: str = LOCAL_OWNER) -> dict | None:
+    """Read one JSON document back. None when it has never been written.
+
+    A 404 is an ordinary answer here - a profile that has not been saved yet is
+    not an error - so it is the one status that does not raise.
+    """
+    for part in (name, owner):
+        if not SAFE_NAME.match(part):
+            raise MediaError(f"invalid path segment: {part!r}")
+    base, headers = _base()
+    r = httpx.get(
+        f"{base}/storage/v1/object/{DATA_BUCKET}/u/{owner}/{name}.json",
+        headers=headers,
+        timeout=30,
+    )
+    # A profile that has never been saved is an ordinary answer, not an error.
+    # Supabase reports it as HTTP 400 with the real status buried in the body,
+    # so checking the status code alone turns "new user" into a failure.
+    if r.status_code == 404 or (r.status_code == 400 and "not_found" in r.text):
+        return None
+    if r.status_code >= 300:
+        raise MediaError(f"read failed: HTTP {r.status_code} {r.text[:160]}")
+    try:
+        return r.json()
+    except ValueError as e:
+        raise MediaError("stored profile is not valid JSON") from e
+
+
 def delete(path: str) -> bool:
-    """Remove one object. False when it was not there to begin with."""
+    """Remove one picture. False when it was not there to begin with."""
     base, headers = _base()
     r = httpx.request(
         "DELETE", f"{base}/storage/v1/object/{BUCKET}/{path}", headers=headers, timeout=30
+    )
+    return r.status_code < 300
+
+
+def delete_doc(name: str, owner: str = LOCAL_OWNER) -> bool:
+    """Remove one JSON document."""
+    base, headers = _base()
+    r = httpx.request(
+        "DELETE",
+        f"{base}/storage/v1/object/{DATA_BUCKET}/u/{owner}/{name}.json",
+        headers=headers,
+        timeout=30,
     )
     return r.status_code < 300

@@ -9,6 +9,7 @@ a name, a subtitle, an id and a picture.
 
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import FastAPI, HTTPException, Query, Request
@@ -344,6 +345,60 @@ def album_tracks(album_id: str, limit: int = Query(50, ge=1, le=50)) -> dict[str
     except SpotifyError as e:
         log.error("album tracks failed: %s", e)
         raise HTTPException(502, str(e)[:200]) from e
+
+
+# Enough for pins, text, colours and eight slot URLs, and small enough that a
+# runaway client cannot fill a bucket. The pictures are not in here - they are
+# uploads, and this holds their URLs.
+MAX_PROFILE_BYTES = 256 * 1024
+
+
+@app.get("/api/profile")
+def get_profile() -> dict[str, object]:
+    """The stored personalization, or an empty document if none was ever saved.
+
+    Never an error: a page that cannot reach this falls back to what the browser
+    holds, which is where all of this used to live.
+    """
+    if not media_mod.configured():
+        return {"profile": None, "stored": False}
+    try:
+        return {"profile": media_mod.get_doc("profile"), "stored": True}
+    except Exception as e:
+        log.warning("profile read failed: %s", e)
+        return {"profile": None, "stored": False}
+
+
+@app.put("/api/profile")
+async def put_profile(request: Request) -> dict[str, object]:
+    """Replace the stored personalization.
+
+    Whole-document rather than per-field on purpose. The page already keeps this
+    as one object, one writer owns it, and a merge protocol would be inventing a
+    problem that arrives with the second device rather than the second browser.
+    """
+    if not media_mod.configured():
+        raise HTTPException(503, "storage is not configured")
+
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > MAX_PROFILE_BYTES:
+        raise HTTPException(413, "profile is too large")
+
+    raw = await request.body()
+    if len(raw) > MAX_PROFILE_BYTES:
+        raise HTTPException(413, "profile is too large")
+    try:
+        doc = json.loads(raw or b"{}")
+    except ValueError as e:
+        raise HTTPException(400, "not valid JSON") from e
+    if not isinstance(doc, dict):
+        raise HTTPException(400, "expected an object")
+
+    try:
+        media_mod.put_doc("profile", doc)
+    except media_mod.MediaError as e:
+        raise HTTPException(502, str(e)[:200]) from e
+    return {"saved": True, "bytes": len(raw)}
 
 
 @app.get("/api/now")

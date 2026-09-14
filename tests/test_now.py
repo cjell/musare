@@ -65,3 +65,36 @@ def test_a_lookup_failure_does_not_break_the_status(monkeypatch):
     monkeypatch.setattr(app_mod.live_mod, "now_playing", lambda: playing("Metallica"))
     monkeypatch.setattr(app_mod.genrelib, "state_of", boom)
     assert client.get("/api/now").json()["state"] == "unknown"
+
+
+# ------------------------------------------------------- the profile document
+
+
+def test_profile_rejects_things_that_are_not_objects(monkeypatch):
+    """The page stores one object; an array or a bare string would round-trip
+    and then fail to merge on the way back out."""
+    monkeypatch.setattr(app_mod.media_mod, "configured", lambda: True)
+    monkeypatch.setattr(app_mod.media_mod, "put_doc", lambda *a, **k: "x")
+    assert client.put("/api/profile", content=b"[1,2]").status_code == 400
+    assert client.put("/api/profile", content=b'"hello"').status_code == 400
+    assert client.put("/api/profile", content=b"not json at all").status_code == 400
+    assert client.put("/api/profile", json={"ok": True}).status_code == 200
+
+
+def test_an_oversized_profile_is_refused(monkeypatch):
+    monkeypatch.setattr(app_mod.media_mod, "configured", lambda: True)
+    big = b'{"x":"' + b"a" * (app_mod.MAX_PROFILE_BYTES + 10) + b'"}'
+    assert client.put("/api/profile", content=big).status_code == 413
+
+
+def test_a_profile_that_cannot_be_read_is_not_an_error(monkeypatch):
+    """A page that cannot reach storage falls back to what the browser holds,
+    which is where all of this used to live - so this must not 500."""
+    def boom(*a, **k):
+        raise RuntimeError("storage gone")
+
+    monkeypatch.setattr(app_mod.media_mod, "configured", lambda: True)
+    monkeypatch.setattr(app_mod.media_mod, "get_doc", boom)
+    r = client.get("/api/profile")
+    assert r.status_code == 200
+    assert r.json() == {"profile": None, "stored": False}
