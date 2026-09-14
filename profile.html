@@ -209,7 +209,9 @@ body{
   letter-spacing:.15em;text-transform:uppercase;color:var(--ink-3);
   display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:13px;
 }
-.sec-label .aux{opacity:.72;letter-spacing:.08em}
+/* Nested inside the title now that the toggle owns the right-hand slot, so it
+   reads as a qualifier on the name rather than a separate column. */
+.sec-label .aux{opacity:.6;letter-spacing:.08em;font-weight:400;margin-left:2px}
 
 .art{
   position:relative;border-radius:10px;overflow:hidden;
@@ -531,6 +533,40 @@ body{
   font-size:8.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--ink-3);margin-top:4px;
 }
 .up{color:#5FD08A}
+.emptynote{font-size:11.5px;color:var(--ink-3);padding:2px 0 6px}
+/* The mover panes are grids, so an empty note lands in the first cell and wraps
+   to the width of one avatar. It is a sentence, not a column. */
+.risegrid .emptynote{grid-column:1/-1}
+/* The answer to a question that has one but cannot be drawn. Deliberately not
+   styled as a chart - no canvas, no axes - because it is not making a visual
+   claim, it is showing the numbers. */
+.ctab{display:flex;flex-direction:column;gap:9px;margin-top:2px}
+.ctab-g{display:flex;gap:10px;align-items:baseline}
+.ctab-b{
+  flex:0 0 54px;font-family:"IBM Plex Mono",monospace;font-size:10.5px;
+  letter-spacing:.06em;color:var(--ink-3);padding-top:1px;
+}
+.ctab-l{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.ctab-r{display:flex;gap:7px;align-items:baseline;font-size:12.5px;min-width:0}
+.ctab-n{
+  flex:0 0 auto;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);
+}
+.ctab-t{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ctab-v{
+  margin-left:auto;flex:0 0 auto;font-family:"IBM Plex Mono",monospace;
+  font-size:10.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;
+}
+/* Two readings of one section, not two sections. Artists and songs answer the
+   same question about the same month and stacking them twice would say so
+   twice. */
+.swap{display:flex;gap:2px}
+.swap button{
+  background:none;border:0;cursor:pointer;padding:1px 5px;border-radius:3px;
+  font-family:"IBM Plex Mono",monospace;font-size:10px;font-weight:500;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);
+}
+.swap button[aria-pressed="true"]{color:var(--ink);background:var(--line-2)}
+.swap button:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
 
 .plist{display:flex;flex-direction:column;gap:2px}
 
@@ -1345,7 +1381,7 @@ details[open] summary .chev{transform:rotate(180deg)}
       <section class="sec anim">
         <div class="sec-label"><span>This week</span><span class="aux" id="weekAux">vs last</span></div>
         <div class="stats">
-          <div class="stat"><span class="n" id="wkHours">14.2</span><span class="l">Hours</span></div>
+          <div class="stat"><span class="n" id="wkPlays">612</span><span class="l">Plays</span></div>
           <div class="stat"><span class="n" id="wkTracks">218</span><span class="l">Tracks</span></div>
           <div class="stat"><span class="n" id="wkNew">11</span><span class="l">New artists</span></div>
         </div>
@@ -1358,13 +1394,33 @@ details[open] summary .chev{transform:rotate(180deg)}
       </section>
 
       <section class="sec anim">
-        <div class="sec-label"><span>Climbing your rotation</span><span class="aux">vs last week</span></div>
+        <div class="sec-label"><span>Climbing <span class="aux">vs last week</span></span>
+          <span class="swap" data-a="youUp" data-b="youUpSongs">
+            <button type="button" data-swap="a" aria-pressed="true">Artists</button>
+            <button type="button" data-swap="b" aria-pressed="false">Songs</button>
+          </span></div>
         <div class="risegrid" id="youUp"></div>
+        <div class="rows" id="youUpSongs" hidden></div>
       </section>
 
       <section class="sec anim">
-        <div class="sec-label"><span>Cooling off</span><span class="aux">vs last week</span></div>
+        <div class="sec-label"><span>Cooling off <span class="aux">vs last week</span></span>
+          <span class="swap" data-a="youDown" data-b="youDownSongs">
+            <button type="button" data-swap="a" aria-pressed="true">Artists</button>
+            <button type="button" data-swap="b" aria-pressed="false">Songs</button>
+          </span></div>
         <div class="risegrid" id="youDown"></div>
+        <div class="rows" id="youDownSongs" hidden></div>
+      </section>
+
+      <section class="sec anim">
+        <div class="sec-label"><span>Found and kept <span class="aux">new this month</span></span>
+          <span class="swap" data-a="youFound" data-b="youFoundSongs">
+            <button type="button" data-swap="a" aria-pressed="true">Artists</button>
+            <button type="button" data-swap="b" aria-pressed="false">Songs</button>
+          </span></div>
+        <div class="risegrid" id="youFound"></div>
+        <div class="rows" id="youFoundSongs" hidden></div>
       </section>
 
       <section class="sec anim">
@@ -2087,6 +2143,11 @@ var HOME = {
          you:[.60,.44], viewer:[.50,.51]},
     up:[["Overmono","+41%"],["Nala Sinephro","+28%"],["Priori","+22%"],["Loraine James","+16%"]],
     down:[["Skee Mask","-19%"],["Yaeji","-12%"],["Kelly Lee Owens","-8%"],["Four Tet","-4%"]],
+    found:[["Priori","41 plays"],["DJ Python","28 plays"],["Nala Sinephro","12 plays"]],
+    foundSongs:[["Rhythm Bandit","Priori","14"],["Angel","DJ Python","11"],
+                ["Waiting Game","Nala Sinephro","8"]],
+    upSongs:[["Is U","Overmono","+44%"],["Del Oro","DJ Python","+31%"]],
+    downSongs:[["So Vain","Yaeji","-22%"],["Two Thousand and Seventeen","Four Tet","-11%"]],
     tracks:[["Is U","Overmono","31"],["Del Oro","DJ Python","27"],["Space 1.8","Nala Sinephro","24"],
             ["So Vain","Yaeji","19"],["Two Thousand and Seventeen","Four Tet","17"]]
   },
@@ -3079,6 +3140,7 @@ function apiShow(x){
     mi: x.distance_mi,
     iso: x.date,
     fans: x.fans,
+    genre: x.genre || null,
     dist: x.distance_mi != null ? x.distance_mi + " mi" : "",
     price: x.price_min ? "$" + x.price_min + (x.price_max && x.price_max !== x.price_min ? "-" + x.price_max : "") : "",
     doors: x.time ? fmtDoors(x.time) : "",
@@ -3097,7 +3159,7 @@ function apiShow(x){
    a wide radius so dragging the slider costs nothing - a cache keyed by radius
    would refetch on every position, for a spinner and no benefit. */
 var ALL_SHOWS = null;
-var SHOW_FILTER_DEFAULT = { maxMi: 50, onlyMine: false, days: null, maxFans: null, minFans: null, artists: [] };
+var SHOW_FILTER_DEFAULT = { maxMi: 50, onlyMine: false, days: null, maxFans: null, minFans: null, artists: [], genres: [] };
 var showFilter = Object.assign({}, SHOW_FILTER_DEFAULT);
 
 /* Mirrors musicshare/spec/apply.py, which is the tested reference. It is
@@ -3129,6 +3191,11 @@ function filterShows(){
       if(showFilter.minFans != null && s.fans < showFilter.minFans) return false;
     }
     if(want.length && want.indexOf((s.a || "").toLowerCase()) < 0) return false;
+    /* Already widened by the server, which is the only place that knows a
+       request for metal covers eight regions. An act the corpus cannot place
+       has no genre and cannot answer a genre filter - same rule as the fan
+       bounds above. */
+    if(showFilter.genres.length && showFilter.genres.indexOf(s.genre) < 0) return false;
     return true;
   });
 }
@@ -3193,15 +3260,15 @@ function loadHome(){
   }).then(function(d){
     if(!d || !d.week) return;
     var w = d.week;
-    $("wkHours").textContent = w.hours;
+    $("wkPlays").textContent = w.plays;
     $("wkTracks").textContent = w.tracks;
     $("wkNew").textContent = w.new_artists;
 
     /* The comparison is the point of the section, so say which way it went
        rather than leaving a bare "vs last". */
-    var delta = w.hours - w.hours_prev;
-    $("weekAux").textContent = w.hours_prev
-      ? (delta >= 0 ? "up " : "down ") + Math.abs(Math.round(delta * 10) / 10) + "h vs last"
+    var delta = w.plays - w.plays_prev;
+    $("weekAux").textContent = w.plays_prev
+      ? (delta >= 0 ? "up " : "down ") + Math.abs(delta) + " vs last"
       : "vs last";
 
     /* The window is fifty plays wide, so going long enough between visits loses
@@ -3212,6 +3279,22 @@ function loadHome(){
 
     HOME.you.up = d.up.map(function(a){ return [a.name, "+" + a.pct + "%", a.image]; });
     HOME.you.down = d.down.map(function(a){ return [a.name, a.pct + "%", a.image]; });
+    /* Time listened rather than days returned, because "20 days" beside a face
+       reads as "20 days ago". Coming back is what got them into this list at
+       all - the server will not return an artist played on only one day - so
+       the label is free to show the size of it instead. */
+    HOME.you.found = (d.found || []).map(function(a){
+      return [a.name, a.plays + " plays", a.image];
+    });
+    HOME.you.upSongs = (d.up_songs || []).map(function(t){
+      return [t.name, t.artist, "+" + t.pct + "%", t.image];
+    });
+    HOME.you.downSongs = (d.down_songs || []).map(function(t){
+      return [t.name, t.artist, t.pct + "%", t.image];
+    });
+    HOME.you.foundSongs = (d.found_songs || []).map(function(t){
+      return [t.name, t.artist, String(t.plays), t.image];
+    });
     HOME.you.tracks = d.on_repeat.map(function(t){
       return [t.name, t.artist, String(t.plays), t.image];
     });
@@ -3325,13 +3408,20 @@ function askShows(){
     showFilter.maxFans = sp.max_fans;
     showFilter.minFans = sp.min_fans;
     showFilter.artists = sp.artists || [];
+    showFilter.genres = d.genres_covered || [];
 
     /* The visible controls are the interpretation - moving them is how the
        user finds out what it decided. */
     $("filtMi").value = showFilter.maxMi;
     $("filtMiLabel").textContent = showFilter.maxMi + " miles";
     $("filtMine").setAttribute("aria-checked", showFilter.onlyMine ? "true" : "false");
-    note.textContent = "Adjust anything it got wrong.";
+    /* Naming the genres back is the only way the user can tell a wrong reading
+       from an empty night - "no metal shows" and "it did not hear metal" look
+       identical otherwise. */
+    var gs = (sp.genres || []);
+    note.textContent = gs.length
+      ? "Showing " + gs.join(" and ") + ". Adjust anything it got wrong."
+      : "Adjust anything it got wrong.";
     applyShowFilter();
   }).catch(function(){
     go.disabled = false;
@@ -3344,6 +3434,21 @@ $("askGo").addEventListener("click", askShows);
 $("askInput").addEventListener("keydown", function(e){
   if(e.key === "Enter"){ e.preventDefault(); askShows(); }
 });
+
+/* [title, artist, count, image] -> the numbered row On repeat already used.
+   Extracted rather than copied when Found and kept needed the same shape. */
+function trackRows(list){
+  return list.map(function(t, n){
+    var art = t[3]
+      ? 'class="art photo" style="background-image:url(' + t[3] + ')"'
+      : 'class="art" style="' + artStyle(t[0], 200) + '"';
+    return '<div class="row" tabindex="0" role="button">' +
+      '<span class="idx">' + (n + 1) + "</span>" +
+      "<div " + art + "></div>" +
+      '<div class="meta"><div class="tt">' + esc(t[0]) + '</div><div class="ta">' + esc(t[1]) + "</div></div>" +
+      '<span class="plays">' + esc(t[2]) + "</span></div>";
+  }).join("");
+}
 
 function artistCircles(list, down){
   return list.map(function(a){
@@ -3363,18 +3468,31 @@ function renderYou(){
      as well meant the feed arriving a second after load put the generated
      "Moved 0.12 toward club" back over the real one. */
   paintYou();
-  $("youUp").innerHTML = artistCircles(y.up);
-  $("youDown").innerHTML = artistCircles(y.down, true);
-  $("youTracks").innerHTML = y.tracks.map(function(t, n){
-    var art = t[3]
-      ? 'class="art photo" style="background-image:url(' + t[3] + ')"'
-      : 'class="art" style="' + artStyle(t[0], 200) + '"';
-    return '<div class="row" tabindex="0" role="button">' +
-      '<span class="idx">' + (n + 1) + "</span>" +
-      "<div " + art + "></div>" +
-      '<div class="meta"><div class="tt">' + esc(t[0]) + '</div><div class="ta">' + esc(t[1]) + "</div></div>" +
-      '<span class="plays">' + esc(t[2]) + "</span></div>";
-  }).join("");
+  /* A section header over nothing reads as broken rather than as an answer, and
+     "nobody climbed" is a real week. Every pane in this feed states its own
+     empty case; these two were the ones still rendering a silent blank. */
+  $("youUp").innerHTML = (y.up || []).length
+    ? artistCircles(y.up)
+    : '<div class="emptynote">No artist climbed this week.</div>';
+  $("youDown").innerHTML = (y.down || []).length
+    ? artistCircles(y.down, true)
+    : '<div class="emptynote">No artist cooled this week.</div>';
+  /* A month with nothing that stuck is a real answer, not a broken section. */
+  var found = y.found || [];
+  $("youFound").innerHTML = found.length
+    ? artistCircles(found)
+    : '<div class="emptynote">No new artist stuck this month.</div>';
+  $("youUpSongs").innerHTML = (y.upSongs || []).length
+    ? trackRows(y.upSongs)
+    : '<div class="emptynote">No song climbed this week.</div>';
+  $("youDownSongs").innerHTML = (y.downSongs || []).length
+    ? trackRows(y.downSongs)
+    : '<div class="emptynote">No song cooled this week.</div>';
+  var fs = y.foundSongs || [];
+  $("youFoundSongs").innerHTML = fs.length
+    ? trackRows(fs)
+    : '<div class="emptynote">No new song stuck this month.</div>';
+  $("youTracks").innerHTML = trackRows(y.tracks);
 }
 
 var actFilter = "all";
@@ -4412,6 +4530,19 @@ $("moodGrid").addEventListener("contextmenu", function(e){
   paintMood();
 });
 
+/* Every swap declares the two panes it owns, so one listener covers all three
+   and a fourth section needs no new code. */
+document.addEventListener("click", function(e){
+  var b = e.target.closest(".swap [data-swap]");
+  if(!b) return;
+  var swap = b.parentNode, wantB = b.dataset.swap === "b";
+  Array.prototype.forEach.call(swap.children, function(x){
+    x.setAttribute("aria-pressed", (x.dataset.swap === "b") === wantB ? "true" : "false");
+  });
+  $(swap.dataset.a).hidden = wantB;
+  $(swap.dataset.b).hidden = !wantB;
+});
+
 $("plClose").addEventListener("click", closePlaylist);
 $("plOpen").addEventListener("click", function(e){
   if(e.target === $("plOpen")) closePlaylist();
@@ -4697,8 +4828,152 @@ function fmtVal(v){
   return v >= 100 ? Math.round(v) : Math.round(v * 10) / 10;
 }
 
+/* A scale a reader can put a number on.
+
+   The line and the bars used to be drawn with no vertical scale at all, which
+   makes the shape readable and the size unknowable - a peak could be ten hours
+   or two hundred and the picture is identical. `fmtVal` was already being used
+   on the horizontal bars, where the number sits beside each bar; these are the
+   two paths that had nowhere to put it.
+
+   Ticks land on round numbers rather than on the data's own maximum: a top
+   gridline reading 63.5 is a number nobody chose, and rounding it up to 70
+   costs a little headroom and buys labels that can be read at a glance. */
+function niceTop(max){
+  if(!(max > 0)) return 1;
+  var mag = Math.pow(10, Math.floor(Math.log(max) / Math.LN10));
+  var n = max / mag;
+  var step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
+  return step * mag;
+}
+
+/* Left gutter, gridlines and their labels. Returns where the plot may start. */
+function drawScale(x, w, h, top, plotH, max, ink3){
+  var gut = 0;
+  x.font = '9px "IBM Plex Mono", monospace';
+  for(var i = 0; i <= 2; i++){
+    gut = Math.max(gut, x.measureText(String(fmtVal(max * i / 2))).width);
+  }
+  gut = Math.ceil(gut) + 6;
+  x.textAlign = "right";
+  x.textBaseline = "middle";
+  for(var k = 0; k <= 2; k++){
+    var v = max * k / 2, y = top + plotH - (k / 2) * plotH;
+    x.strokeStyle = "rgba(244,241,250,.06)";
+    x.lineWidth = 1;
+    x.beginPath();
+    /* Half-pixel so a 1px line lands on a pixel instead of across two. */
+    x.moveTo(gut, Math.round(y) + 0.5);
+    x.lineTo(w, Math.round(y) + 0.5);
+    x.stroke();
+    x.fillStyle = ink3;
+    x.fillText(String(fmtVal(v)), gut - 6, y);
+  }
+  return gut;
+}
+
+/* A comparison, drawn as one line per thing compared.
+
+   Kept apart from drawChart rather than branched into it: nothing below the
+   split applies here. There are no horizontal bars, no fill under the line -
+   six translucent fills over each other is mud - and the whole point is a
+   legend, which a single-series chart has no use for. */
+function drawLines(cv, d){
+  var css = getComputedStyle(document.querySelector(".phone"));
+  var ink3 = css.getPropertyValue("--ink-3").trim() || "#635C7A";
+  var ink2 = css.getPropertyValue("--ink-2").trim() || "#A9A2BE";
+  var lines = d.series, n = d.labels.length;
+
+  var legendH = 17, padB = 16, top = 8;
+  var w = cv.clientWidth || 320, h = 150 + legendH;
+  var dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.round(w * dpr);
+  cv.height = Math.round(h * dpr);
+  cv.style.height = h + "px";
+
+  var x = cv.getContext("2d");
+  x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  x.clearRect(0, 0, w, h);
+  x.font = '9px "IBM Plex Mono", monospace';
+  x.textBaseline = "middle";
+
+  /* One scale for every line, or the comparison is a lie. */
+  var max = 0;
+  lines.forEach(function(ln){
+    ln.values.forEach(function(v){ if(v != null && v > max) max = v; });
+  });
+  max = niceTop(max);
+
+  /* Legend first, so the plot knows what room it has left. */
+  var lx = 0;
+  x.textAlign = "left";
+  for(var i = 0; i < lines.length; i++){
+    var col = SWATCHES[i % SWATCHES.length];
+    var label = lines[i].name;
+    var tw = x.measureText(label).width;
+    if(lx + tw + 14 > w) break;
+    x.fillStyle = col;
+    x.beginPath();
+    x.roundRect(lx, legendH / 2 - 3, 6, 6, 2);
+    x.fill();
+    x.fillStyle = ink2;
+    x.fillText(label, lx + 9, legendH / 2);
+    lx += tw + 20;
+  }
+
+  var plotTop = legendH + top, plotH = h - padB - plotTop;
+  var gut = drawScale(x, w, h, plotTop, plotH, max, ink3);
+  var step = (w - gut) / n;
+
+  for(var j = 0; j < lines.length; j++){
+    var vals = lines[j].values, open = false;
+    x.strokeStyle = SWATCHES[j % SWATCHES.length];
+    x.lineWidth = 1.8;
+    x.lineJoin = "round";
+    x.beginPath();
+    for(var k = 0; k < n; k++){
+      var v = vals[k];
+      /* Null is "no reading", not zero - a rate over no plays is unknown, so
+         the line breaks rather than dropping to the floor and inventing a dip. */
+      if(v == null){ open = false; continue; }
+      var px = gut + step * k + step / 2;
+      var py = plotTop + plotH - (v / max) * plotH;
+      open ? x.lineTo(px, py) : x.moveTo(px, py);
+      open = true;
+    }
+    x.stroke();
+  }
+
+  x.fillStyle = ink3;
+  x.textAlign = "center";
+  var every = Math.max(1, Math.ceil(n / Math.floor(w / 34)));
+  for(var t = 0; t < n; t += every){
+    x.fillText(fmtLabel(d.labels[t], d.x_label), step * t + step / 2, h - padB / 2 + 1);
+  }
+}
+
+/* Rows grouped by period. The server decides this shape, not the page and not
+   the model - see chart_for(). */
+function chartTable(d){
+  var out = [], cur = null, open = false;
+  (d.table || []).forEach(function(c){
+    if(c.bucket !== cur){
+      if(open) out.push("</div></div>");
+      out.push('<div class="ctab-g"><div class="ctab-b">' + esc(c.bucket) + '</div><div class="ctab-l">');
+      cur = c.bucket; open = true;
+    }
+    out.push('<div class="ctab-r"><span class="ctab-n">' + c.rank + '</span>' +
+      '<span class="ctab-t">' + esc(c.name) + '</span>' +
+      '<span class="ctab-v">' + esc(fmtVal(c.value)) + " " + esc(d.y_label) + "</span></div>");
+  });
+  if(open) out.push("</div></div>");
+  return '<div class="ctab">' + out.join("") + "</div>";
+}
+
 function drawChart(cv, d){
-  if(!cv || !d || !d.values || !d.values.length) return;
+  if(!cv || !d) return;
+  if(d.series && d.series.length && d.labels && d.labels.length) return drawLines(cv, d);
+  if(!d.values || !d.values.length) return;
   var css = getComputedStyle(document.querySelector(".phone"));
   var accent = css.getPropertyValue("--accent").trim() || "#E74094";
   var ink3 = css.getPropertyValue("--ink-3").trim() || "#635C7A";
@@ -4755,12 +5030,16 @@ function drawChart(cv, d){
   }
 
   var padB = 16, top = 8, plotH = h - padB - top;
-  var step = w / n;
+  /* Bars and the line share this scale; the horizontal-bar path above prints a
+     number beside every bar and needs none. */
+  max = niceTop(max);
+  var gut = drawScale(x, w, h, top, plotH, max, ink3);
+  var step = (w - gut) / n;
 
   if(d.chart === "line"){
     x.beginPath();
     for(var p = 0; p < n; p++){
-      var px = step * p + step / 2;
+      var px = gut + step * p + step / 2;
       var py = top + plotH - (d.values[p] / max) * plotH;
       p ? x.lineTo(px, py) : x.moveTo(px, py);
     }
@@ -4769,8 +5048,8 @@ function drawChart(cv, d){
     x.lineJoin = "round";
     x.stroke();
     /* fill under the line so a sparse series still reads as a quantity */
-    x.lineTo(step * (n - 1) + step / 2, top + plotH);
-    x.lineTo(step / 2, top + plotH);
+    x.lineTo(gut + step * (n - 1) + step / 2, top + plotH);
+    x.lineTo(gut + step / 2, top + plotH);
     x.closePath();
     var g = x.createLinearGradient(0, top, 0, top + plotH);
     g.addColorStop(0, css.getPropertyValue("--accent-tint").trim() || "rgba(231,64,148,.13)");
@@ -4782,7 +5061,7 @@ function drawChart(cv, d){
       var bh = Math.max(2, (d.values[b] / max) * plotH);
       x.fillStyle = accent;
       x.beginPath();
-      x.roundRect(step * b + step * 0.18, top + plotH - bh, step * 0.64, bh, 2);
+      x.roundRect(gut + step * b + step * 0.18, top + plotH - bh, step * 0.64, bh, 2);
       x.fill();
     }
   }
@@ -4790,9 +5069,9 @@ function drawChart(cv, d){
   /* Only as many x labels as will fit without colliding. */
   x.fillStyle = ink3;
   x.textAlign = "center";
-  var every = Math.max(1, Math.ceil(n / Math.floor(w / 34)));
+  var every = Math.max(1, Math.ceil(n / Math.floor((w - gut) / 34)));
   for(var t = 0; t < n; t += every){
-    x.fillText(fmtLabel(d.labels[t], d.x_label), step * t + step / 2, h - padB / 2 + 1);
+    x.fillText(fmtLabel(d.labels[t], d.x_label), gut + step * t + step / 2, h - padB / 2 + 1);
   }
 }
 
@@ -4801,8 +5080,11 @@ function chartCard(d, opts){
   return '<div class="chartcard">' +
     (opts.unpin || "") +
     '<div class="chart-t">' + esc(d.title) + "</div>" +
-    '<div class="chart-sub">' + esc(d.y_label) + " by " + esc(d.x_label) + "</div>" +
-    '<canvas class="chart-canvas" data-chart="' + esc(opts.key || "") + '"></canvas>' +
+    '<div class="chart-sub">' + esc(d.y_label) + " by " + esc(d.x_label) +
+      (d.series && d.series.length ? " \u00B7 " + d.series.length + " compared" : "") + "</div>" +
+    (d.table && d.table.length
+      ? chartTable(d)
+      : '<canvas class="chart-canvas" data-chart="' + esc(opts.key || "") + '"></canvas>') +
     (d.note ? '<div class="chart-note">' + esc(d.note) + "</div>" : "") +
     (opts.actions || "") +
     "</div>";
