@@ -4678,6 +4678,31 @@ document.addEventListener("visibilitychange", function(){
    playlists and refuses everyone else's - /playlists/{someone else}/items is
    403 even with the right scope - so the three demo profiles keep their
    generated ones rather than showing an empty shelf. */
+/* A pin is a reference with a picture cached on it, and the cache goes stale:
+   renaming a playlist, or changing how big a cover this app asks for, leaves
+   every pinned copy holding what was true the day it was pinned. The id is the
+   part that identifies it, so everything else is refreshed from the live list
+   whenever one arrives. */
+function refreshPlaylistPins(live){
+  var byId = {};
+  live.forEach(function(p){ byId[p.id] = p; });
+  var pins = (CUSTOM[0] && CUSTOM[0].pins && CUSTOM[0].pins.playlists) || [];
+  var changed = false;
+  pins.forEach(function(q){
+    var now = q && q.id && byId[q.id];
+    if(!now) return;
+    var meta = now.tracks + (now.tracks === 1 ? " track" : " tracks");
+    if(q.image !== now.image || q.name !== now.name || q.meta !== meta){
+      q.image = now.image;
+      q.name = now.name;
+      q.meta = meta;
+      changed = true;
+    }
+  });
+  if(changed) saveCustom();
+  return changed;
+}
+
 function loadPlaylists(){
   fetch("/api/playlists").then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
@@ -4686,6 +4711,7 @@ function loadPlaylists(){
       PROFILES[0].playlists = d.playlists.map(function(p){
         return [p.name, p.tracks + (p.tracks === 1 ? " track" : " tracks"), p.image, p.id];
       });
+      refreshPlaylistPins(d.playlists);
       if(current === 0) render(0);
     }).catch(function(){});
 }
