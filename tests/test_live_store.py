@@ -110,3 +110,43 @@ def test_prune_does_not_delete_by_file_count(store, tmp_path, monkeypatch):
     monkeypatch.setattr(live, "has_export", lambda: True)
     assert live.prune() == 0
     assert len(list(store.glob("*.parquet"))) == 20
+
+
+# ------------------------------------------------------------- sync marker
+
+
+def test_the_marker_records_a_check_that_found_nothing(tmp_path, monkeypatch):
+    """A quiet afternoon and a stopped poller look identical in the live files,
+    because a sync that adds no rows writes no file. This is what tells them
+    apart."""
+    monkeypatch.setattr(live, "LAST_SYNC", tmp_path / "last_sync.json")
+    live._mark_sync(live.SyncResult(fetched=50, added=0, oldest=None, newest=None, watermark=None))
+    mark = live.last_sync()
+    assert mark and mark["fetched"] == 50 and mark["added"] == 0
+
+
+def test_no_marker_reads_as_none_rather_than_raising(tmp_path, monkeypatch):
+    monkeypatch.setattr(live, "LAST_SYNC", tmp_path / "absent.json")
+    assert live.last_sync() is None
+
+
+def test_a_corrupt_marker_does_not_take_the_status_down(tmp_path, monkeypatch):
+    bad = tmp_path / "last_sync.json"
+    bad.write_text("{not json", encoding="utf-8")
+    monkeypatch.setattr(live, "LAST_SYNC", bad)
+    assert live.last_sync() is None
+
+
+def test_ago_reads_naive_timestamps_as_utc():
+    """The store holds naive UTC; mixing that with an aware now() is a
+    TypeError, which is how this was found."""
+    import importlib.util
+    from datetime import UTC, datetime, timedelta
+
+    spec = importlib.util.spec_from_file_location("sync_recent", "scripts/sync_recent.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    naive = datetime.now(UTC).replace(tzinfo=None) - timedelta(minutes=5)
+    assert mod.ago(naive).endswith("m ago")
+    assert mod.ago(datetime.now(UTC)) == "0s ago"

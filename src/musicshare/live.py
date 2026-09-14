@@ -30,6 +30,14 @@ from musicshare.history import EXPORT_GLOB, LIVE_DIR, connect, has_export
 log = logging.getLogger(__name__)
 
 TOKENS = ROOT / "data" / "cache" / "spotify_user_token.json"
+# Written on every sync, whether or not it found anything. The live files
+# cannot answer "when did this last check" - a sync that adds nothing writes
+# nothing, so their timestamps go stale during a quiet afternoon and look
+# identical to a poller that has stopped.
+LAST_SYNC = ROOT / "data" / "cache" / "last_sync.json"
+# What the scheduled task is set to. Only used to judge whether a gap between
+# checks is ordinary or a sign the schedule is not firing.
+EXPECTED_EVERY = timedelta(minutes=30)
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 RECENT = "https://api.spotify.com/v1/me/player/recently-played"
 
@@ -167,7 +175,40 @@ def sync() -> SyncResult:
     if new:
         _write(new)
 
-    return SyncResult(len(rows), len(new), oldest, newest, mark)
+    result = SyncResult(len(rows), len(new), oldest, newest, mark)
+    _mark_sync(result)
+    return result
+
+
+def _mark_sync(r: SyncResult) -> None:
+    """Record that a check happened. Never fatal - this is a status file."""
+    try:
+        LAST_SYNC.parent.mkdir(parents=True, exist_ok=True)
+        LAST_SYNC.write_text(
+            json.dumps(
+                {
+                    "at": datetime.now(UTC).isoformat(timespec="seconds"),
+                    "fetched": r.fetched,
+                    "added": r.added,
+                    "missed": r.missed,
+                    "newest": r.newest.isoformat() if r.newest else None,
+                },
+                indent=1,
+            ),
+            encoding="utf-8",
+        )
+    except OSError as e:  # pragma: no cover - a status file is not worth failing over
+        log.warning("could not record sync time: %s", e)
+
+
+def last_sync() -> dict[str, Any] | None:
+    """The last check, or None if this has never run since the marker existed."""
+    if not LAST_SYNC.exists():
+        return None
+    try:
+        return json.loads(LAST_SYNC.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
 
 def _write(rows: list[dict]) -> None:
