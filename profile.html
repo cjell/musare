@@ -151,6 +151,10 @@ body{
 }
 .bdg-mile{border-color:var(--line-2);color:var(--ink-2)}
 .bdg-id{background:var(--raise);color:var(--ink-3)}
+/* Says a profile is invented. Deliberately not styled like the other badges -
+   those are achievements and this is a disclaimer, so it reads as a label
+   rather than as something the person earned. */
+.bdg-demo{background:rgba(255,157,46,.13);border-color:rgba(255,157,46,.5);color:#FF9D2E}
 /* an affordance, not an item: no box, smaller, quieter */
 .bdg-more{
   border-color:transparent;background:none;cursor:pointer;font:inherit;
@@ -2056,10 +2060,11 @@ var PROFILES = [
     accent:"#4FD6C0", accentRGB:"79,214,192",
     gen:"#7FA9FF", genRGB:"127,169,255",
     bannerHues:[172,196,148,214], avatarHues:[168,200], artHue:160,
-    bio:"junior, journalism. reverb is a personality trait. i drive to greensboro for shows.",
+    bio:"Sample profile. Every number here is invented - the computed ones on this app come from one real listener's 509k plays.",
     aux:{tracks:"what i'd play you",artists:"the ones that stuck"},
     stats:["842","511","79"],
     badges:[
+      {t:"demo",l:"Sample profile"},
       {t:"rank",l:"#1 Shoegaze \u00B7 UNC"},
       {t:"rank",l:"#7 Trending"},
       {t:"mile",l:"6,200 hrs"},
@@ -2091,10 +2096,11 @@ var PROFILES = [
     accent:"#FF4D6D", accentRGB:"255,77,109",
     gen:"#E8B84B", genRGB:"232,184,75",
     bannerHues:[350, 22, 8, 38], avatarHues:[348, 18], artHue:344,
-    bio:"senior. drums first, everything else second. crate digging is cardio.",
+    bio:"Sample profile. Every number here is invented - the computed ones on this app come from one real listener's 509k plays.",
     aux:{tracks:"if you ask me",artists:"the foundation"},
     stats:["2,038","297","93"],
     badges:[
+      {t:"demo",l:"Sample profile"},
       {t:"rank",l:"#2 Jazz \u00B7 UNC"},
       {t:"rank",l:"#4 Trending"},
       {t:"mile",l:"14,800 hrs"},
