@@ -3,9 +3,14 @@
     python scripts/sync_recent.py
     python scripts/sync_recent.py --status
 
-Fifty rows is roughly a day of listening, so daily is enough and missing a
-couple of days loses whatever fell out of the window. If it warns that plays
-were missed, a fresh export is the only way to recover them.
+Fifty rows is roughly a day of listening for a heavy listener, and about an
+hour on their busiest day, so this wants running on a schedule rather than by
+hand - every 30 minutes leaves comfortable headroom. Whatever falls out of the
+window between runs is gone unless a later export covers it, and if it warns
+that plays were missed, a fresh export is the only way to recover them.
+
+Safe to run repeatedly: rows are folded into one file per day and deduplicated
+on played_at, and nothing is deleted unless --prune is passed.
 """
 
 from __future__ import annotations
@@ -34,7 +39,9 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--status", action="store_true", help="show coverage and exit")
-    ap.add_argument("--prune", type=int, default=0, metavar="KEEP", help="delete older sync files")
+    ap.add_argument(
+        "--prune", action="store_true", help="delete live files the export now covers"
+    )
     args = ap.parse_args()
 
     if args.status:
@@ -55,7 +62,7 @@ def main() -> int:
         print(f"  WARNING: gap before {r.oldest:%Y-%m-%d %H:%M}; last known play was {r.watermark:%Y-%m-%d %H:%M}")
         print("           only a fresh export can recover those.")
     if args.prune:
-        print(f"  pruned {live.prune(args.prune)} old sync file(s)")
+        print(f"  pruned {live.prune()} covered live file(s)")
     print()
     show_status()
     return 0

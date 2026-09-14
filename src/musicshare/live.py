@@ -25,7 +25,7 @@ import duckdb
 import httpx
 
 from musicshare.config import ROOT, settings
-from musicshare.history import LIVE_DIR, connect
+from musicshare.history import EXPORT_GLOB, LIVE_DIR, connect, has_export
 
 log = logging.getLogger(__name__)
 
@@ -165,17 +165,57 @@ def sync() -> SyncResult:
     new = [r for r in rows if mark is None or r["played_at"] > mark]
 
     if new:
-        LIVE_DIR.mkdir(parents=True, exist_ok=True)
-        con = duckdb.connect()
-        con.register("incoming", _as_arrow(new))
-        stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-        path = LIVE_DIR / f"live-{stamp}.parquet"
-        con.execute(
-            f"copy (select * from incoming) to '{path.as_posix()}' (format parquet, compression zstd)"
-        )
-        log.info("wrote %d rows to %s", len(new), path.name)
+        _write(new)
 
     return SyncResult(len(rows), len(new), oldest, newest, mark)
+
+
+def _write(rows: list[dict]) -> None:
+    """Fold new rows into one file per day of listening.
+
+    A file per sync is fine at one sync a day and untenable at one every half
+    hour: 48 a day is about 17,500 files a year, each holding a handful of rows,
+    all of which DuckDB opens on every query. Grouping by the day a play
+    happened caps it at 365 and keeps each file worth reading.
+
+    Parquet cannot be appended to, so a day's file is rewritten with the union
+    of what it held and what arrived. Rows are deduplicated on played_at because
+    the fifty-play window overlaps itself on every sync - that is the point of
+    fetching the whole thing - so the same play arrives repeatedly.
+    """
+    LIVE_DIR.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect()
+    by_day: dict[str, list[dict]] = {}
+    for r in rows:
+        by_day.setdefault(r["played_at"].strftime("%Y%m%d"), []).append(r)
+
+    for day, batch in by_day.items():
+        path = LIVE_DIR / f"live-{day}.parquet"
+        con.register("incoming", _as_arrow(batch))
+        if path.exists():
+            # Materialised into a temp table, not streamed. `.arrow()` hands back
+            # a RecordBatchReader, which is lazy over the very file COPY is about
+            # to truncate - so the rows already on disk read back as nothing and
+            # the merge silently loses them. The first sync of a day looks fine
+            # either way, which is how this would have shipped.
+            con.execute(
+                f"create or replace temp table existing as "
+                f"select * from read_parquet('{path.as_posix()}')"
+            )
+            source = """
+                select * from existing
+                union all
+                select * from incoming
+                where played_at not in (select played_at from existing)
+            """
+        else:
+            source = "select * from incoming"
+        con.execute(
+            f"copy ({source} order by played_at) to '{path.as_posix()}' "
+            "(format parquet, compression zstd)"
+        )
+        con.unregister("incoming")
+        log.info("folded %d row(s) into %s", len(batch), path.name)
 
 
 def _as_arrow(rows: list[dict]):
@@ -191,13 +231,41 @@ def coverage() -> dict[str, object]:
     return {"total": n, "first": lo, "last": hi, "by_source": by_source}
 
 
-def prune(keep: int = 12) -> int:
-    """Keep the newest sync files; the rest are already covered by an export."""
+def prune() -> int:
+    """Delete live files the export has caught up with, and only those.
+
+    This used to keep a flat twelve files and delete the rest, on the assumption
+    that anything older was already covered by an export. That assumption is
+    only true if exports arrive faster than syncs do. At one sync a day it was
+    harmless; at one every half hour, twelve files is six hours, so polling
+    would have collected data all day and then destroyed it the next time the
+    app was opened - `sync_if_stale` calls this after every sync that adds rows.
+
+    Coverage is the real test, and `history.py` already defines it: live rows
+    only survive past the export's high-water mark, so a live file whose newest
+    play is at or before that mark contributes nothing and can go. Everything
+    else stays however old it is, because nothing else holds it.
+    """
     files = sorted(LIVE_DIR.glob("live-*.parquet"))
-    stale = files[:-keep] if len(files) > keep else []
-    for f in stale:
-        f.unlink()
-    return len(stale)
+    if not files or not has_export():
+        return 0
+
+    con = duckdb.connect()
+    tip = con.execute(f"select max(played_at) from read_parquet('{EXPORT_GLOB}')").fetchone()[0]
+    if tip is None:
+        return 0
+
+    removed = 0
+    for f in files:
+        newest = con.execute(
+            f"select max(played_at) from read_parquet('{f.as_posix()}')"
+        ).fetchone()[0]
+        if newest is not None and newest <= tip:
+            f.unlink()
+            removed += 1
+    if removed:
+        log.info("pruned %d live file(s) the export now covers", removed)
+    return removed
 
 
 NOW = "https://api.spotify.com/v1/me/player/currently-playing"
