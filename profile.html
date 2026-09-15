@@ -1276,6 +1276,33 @@ details[open] summary .chev{transform:rotate(180deg)}
   font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.1em;
   text-transform:uppercase;color:var(--ink-3);margin-top:5px;
 }
+/* Style: how a chart looks, chosen by the person. The options come from the
+   chart's plan, so only the ones that fit this chart are ever offered. */
+.chart-stylebar{display:flex;justify-content:flex-end;margin-top:6px}
+.st-open{
+  background:none;border:0;padding:0;cursor:pointer;
+  font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-2);
+}
+.st-open:hover,.st-open[aria-expanded="true"]{color:var(--ink)}
+.chart-style{
+  display:flex;flex-direction:column;gap:9px;margin-top:10px;padding-top:10px;
+  border-top:1px solid var(--line);
+}
+.st-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.st-k{
+  font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);width:66px;flex:none;
+}
+.st-opts{display:flex;gap:6px;flex-wrap:wrap}
+.st-chip{
+  font:inherit;font-size:11.5px;padding:4px 9px;border-radius:99px;cursor:pointer;
+  border:1px solid var(--line-2);background:transparent;color:var(--ink-2);
+}
+.st-chip[aria-pressed="true"]{border-color:var(--accent-line);background:var(--accent-tint);color:var(--accent)}
+.st-swatch{width:20px;height:20px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0}
+.st-swatch[aria-pressed="true"]{border-color:var(--ink)}
+.st-chip:focus-visible,.st-swatch:focus-visible,.st-open:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 /* Live or frozen, on every saved chart: a pink dot, or the day it was frozen. */
 .chart-mode{
   display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px;
@@ -4337,6 +4364,7 @@ function renderHomeCharts(){
       if(res && res.understood && res.data && !res.empty){
         html += chartCard(res.data, { unpin: x, key: "home" + i,
           mode: { live: isLive(p, "home"), since: p.frozenAt, toggle: true, scope: "home", id: p.id },
+          style: { scope: "home", id: p.id, style: p.style },
           actions: '<div class="chart-q">' + esc(p.q) + "</div>" });
         draw.push([i, res.data]);
         return;
@@ -4353,7 +4381,7 @@ function renderHomeCharts(){
     });
     $("homeCharts").innerHTML = html;
     draw.forEach(function(d){
-      drawChart(document.querySelector('#homeCharts [data-chart="home' + d[0] + '"]'), d[1]);
+      drawChart(document.querySelector('#homeCharts [data-chart="home' + d[0] + '"]'), d[1], pins[d[0]].style);
     });
   });
 }
@@ -4401,6 +4429,7 @@ function renderKept(){
     return chartCard(k.data, {
       key: "kept" + i,
       mode: { live: isLive(k, "kept"), since: k.frozenAt || k.at, toggle: true, scope: "kept", id: k.id },
+      style: { scope: "kept", id: k.id, style: k.style },
       unpin: isPinned ? '<span class="chart-badge">On profile</span>' : "",
       actions: '<div class="chart-q">' + esc(k.q) + "</div>" +
         '<div class="chart-acts">' +
@@ -4439,11 +4468,12 @@ function specId(spec){
 /* `history` is every earlier version of this chart, newest last, so a change can
    be undone. A kept chart saves the version on screen, with the question and
    each change that led to it as its caption. */
-function showChartResult(d, q, spec, history){
-  lastChart = { data: d, q: q, spec: spec, id: specId(spec), history: history || [] };
+function showChartResult(d, q, spec, history, style){
+  lastChart = { data: d, q: q, spec: spec, id: specId(spec), history: history || [], style: style || null };
   var n = lastChart.history.length;
   $("chartResult").innerHTML = chartCard(d, {
     key: "live",
+    style: { scope: "live", id: "live", style: lastChart.style },
     actions: '<div class="chart-q">' + esc(q) + "</div>" +
       '<div class="chart-acts">' +
       '<button class="btn btn-primary" type="button" id="chartKeep">Keep</button>' +
@@ -4455,7 +4485,7 @@ function showChartResult(d, q, spec, history){
         '<button class="sec-toggle" type="button" id="chartUndo">Undo</button></div>' : "")
   });
   $("chartResultSec").hidden = false;
-  drawChart($("chartResult").querySelector('[data-chart="live"]'), d);
+  drawChart($("chartResult").querySelector('[data-chart="live"]'), d, lastChart.style);
 }
 
 function askChart(){
@@ -4506,7 +4536,7 @@ $("chartKept").addEventListener("click", function(e){
     note.textContent = "Home holds " + HOME_CHARTS_MAX + " charts. Remove one from Home first.";
     return;
   }
-  list.push({ id: k.id, spec: k.spec, q: k.q, title: (k.data && k.data.title) || k.q });
+  list.push({ id: k.id, spec: k.spec, q: k.q, title: (k.data && k.data.title) || k.q, style: k.style });
   saveHomePins(list);
   note.textContent = "On Home now. It updates as you listen.";
   renderKept();
@@ -4539,7 +4569,7 @@ function refineChart(){
     }
     note.textContent = "";
     var prev = { data: lastChart.data, q: lastChart.q, spec: lastChart.spec };
-    showChartResult(d.data, lastChart.q + " \u00B7 " + change, d.spec, lastChart.history.concat([prev]));
+    showChartResult(d.data, lastChart.q + " \u00B7 " + change, d.spec, lastChart.history.concat([prev]), lastChart.style);
   }).catch(function(){
     if(go) go.disabled = false;
     note.className = "ask-note bad";
@@ -4551,7 +4581,7 @@ function undoChart(){
   if(!lastChart || !lastChart.history.length) return;
   var h = lastChart.history, prev = h[h.length - 1];
   $("chartNote").textContent = "";
-  showChartResult(prev.data, prev.q, prev.spec, h.slice(0, -1));
+  showChartResult(prev.data, prev.q, prev.spec, h.slice(0, -1), lastChart.style);
 }
 
 /* A page of every chart shape, drawn from the real history, for checking the
@@ -4578,7 +4608,7 @@ function showChartGallery(){
 }
 
 function chartRecord(c){
-  return { id: c.id, spec: c.spec, data: c.data, q: c.q, at: Date.now(), live: c.live, frozenAt: c.frozenAt };
+  return { id: c.id, spec: c.spec, data: c.data, q: c.q, at: Date.now(), live: c.live, frozenAt: c.frozenAt, style: c.style };
 }
 
 $("chartResult").addEventListener("click", function(e){
@@ -5525,8 +5555,14 @@ function chartTable(d){
    decision made here, where nothing tested it. */
 var CHART_GRID = "rgba(244,241,250,.06)";
 
-function drawChart(cv, d){
+function drawChart(cv, d, style){
   if(!cv || !d) return;
+  /* A restyled chart needs its own plan. The server makes it; the page still
+     decides nothing about the drawing. */
+  if(!plainStyle(style)){
+    planFor(d, style).then(function(plan){ if(plan) plotChart(cv, plan); });
+    return;
+  }
   if(d.plan) return plotChart(cv, d.plan);
   /* Kept before plans existed: the numbers are all it has. The server turns them
      into a plan once, and the record keeps it. */
@@ -5563,15 +5599,158 @@ function barValues(plan, color, font){
       ctx.save();
       ctx.fillStyle = color;
       ctx.font = font.size + "px " + font.family;
-      ctx.textBaseline = "middle";
-      ctx.textAlign = "left";
+      var flat = plan.kind === "hbar";
+      ctx.textBaseline = flat ? "middle" : "bottom";
+      ctx.textAlign = flat ? "left" : "center";
       meta.data.forEach(function(bar, i){
-        ctx.fillText(plan.value_labels[i] || "", bar.x + 5, bar.y);
+        ctx.fillText(plan.value_labels[i] || "", flat ? bar.x + 5 : bar.x, flat ? bar.y : bar.y - 3);
       });
       ctx.restore();
     }
   };
 }
+
+/* ---------- style ----------
+   How a chart looks, chosen by the person and saved with it: type, colour,
+   gridlines, values. Every option is a menu (plot.ChartStyle on the server) and
+   the plan says which ones this chart can take. */
+var STYLE_HEX = { pink: SWATCHES[0], orange: SWATCHES[1], teal: SWATCHES[2],
+                  blue: SWATCHES[3], purple: SWATCHES[4], yellow: SWATCHES[5] };
+var STYLE_COLORS = ["accent", "pink", "orange", "teal", "blue", "purple", "yellow"];
+var OPEN_STYLE = null;
+
+function plainStyle(st){
+  return !st || ((st.type || "auto") === "auto" && (st.color || "accent") === "accent" &&
+    (st.gridlines || "normal") === "normal" && (st.values || "auto") === "auto");
+}
+
+function planFor(d, style){
+  return fetch("/api/chart/plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data: d, style: style })
+  }).then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(res){ return res && res.plan; })
+    .catch(function(){ return null; });
+}
+
+function hexAlpha(hex, a){
+  var m = /^#([0-9a-f]{6})$/i.exec(hex || "");
+  if(!m) return hex;
+  var n = parseInt(m[1], 16);
+  return "rgba(" + (n >> 16) + "," + ((n >> 8) & 255) + "," + (n & 255) + "," + a + ")";
+}
+
+var STYLE_DATA = {};
+
+function styleBar(d, s){
+  var styles = d.plan && d.plan.styles;
+  /* A table has no drawing to style, and an empty chart has nothing in it. */
+  if((d.table && d.table.length) || (d.plan && !styles)) return "";
+  var k = s.scope + ":" + s.id;
+  /* A chart kept before plans existed has no list of options yet. The button still
+     shows; opening it fetches the plan once, and the record keeps it. */
+  STYLE_DATA[k] = d;
+  var open = OPEN_STYLE === k && !!styles;
+  return '<div class="chart-stylebar"><button type="button" class="st-open" data-st-scope="' + esc(s.scope) +
+    '" data-st-id="' + esc(s.id) + '" aria-expanded="' + open + '">Style</button></div>' +
+    (open ? stylePanel(s, styles) : "");
+}
+
+function stylePanel(s, styles){
+  var st = s.style || {};
+  function chips(key, opts, current){
+    return opts.map(function(o){
+      return '<button type="button" class="st-chip" data-st-key="' + key + '" data-st-val="' + o[0] +
+        '" aria-pressed="' + (current === o[0]) + '">' + o[1] + "</button>";
+    }).join("");
+  }
+  function row(label, inner){
+    return '<div class="st-row"><span class="st-k">' + label + '</span><div class="st-opts">' + inner + "</div></div>";
+  }
+  var html = "";
+  if(styles.types.length > 1){
+    var types = [["auto", "Auto"]].concat(styles.types.map(function(t){
+      return [t, t.charAt(0).toUpperCase() + t.slice(1)];
+    }));
+    html += row("Type", chips("type", types, st.type || "auto"));
+  }
+  if(styles.color){
+    html += row("Colour", STYLE_COLORS.map(function(c){
+      var bg = c === "accent" ? "var(--accent)" : STYLE_HEX[c];
+      return '<button type="button" class="st-swatch" data-st-key="color" data-st-val="' + c +
+        '" aria-pressed="' + ((st.color || "accent") === c) + '" aria-label="' + c +
+        (c === "accent" ? " (your profile colour)" : "") + '" style="background:' + bg + '"></button>';
+    }).join(""));
+  }
+  if(styles.gridlines){
+    html += row("Gridlines", chips("gridlines", [["fewer", "Fewer"], ["normal", "Normal"], ["more", "More"]],
+      st.gridlines || "normal"));
+  }
+  if(styles.values){
+    html += row("Values", chips("values", [["auto", "Auto"], ["show", "Show"], ["hide", "Hide"]], st.values || "auto"));
+  }
+  return '<div class="chart-style" data-st-scope="' + esc(s.scope) + '" data-st-id="' + esc(s.id) + '">' + html + "</div>";
+}
+
+function rerenderStyled(scope){
+  if(scope === "home") renderHomeCharts();
+  else if(scope === "kept") renderKept();
+  else if(scope === "live" && lastChart){
+    showChartResult(lastChart.data, lastChart.q, lastChart.spec, lastChart.history, lastChart.style);
+  }
+}
+
+function applyStyle(scope, id, key, val){
+  var patch = {};
+  patch[key] = val;
+  if(scope === "live"){
+    if(!lastChart) return;
+    lastChart.style = Object.assign({}, lastChart.style, patch);
+    rerenderStyled("live");
+    return;
+  }
+  var list = scope === "home" ? homePins() : keptList();
+  var rec = list.filter(function(r){ return r.id === id; })[0];
+  if(!rec) return;
+  rec.style = Object.assign({}, rec.style, patch);
+  if(scope === "home"){
+    saveHomePins(list);
+  } else {
+    saveKept(list);
+    /* The profile shows copies of kept charts, so they follow. */
+    var c = cust();
+    if(c.pins && c.pins.charts){
+      c.pins.charts.forEach(function(pin){ if(pin && pin.id === id) pin.style = rec.style; });
+      saveCustom();
+    }
+  }
+  rerenderStyled(scope);
+}
+
+document.addEventListener("click", function(e){
+  var open = e.target.closest(".st-open");
+  if(open){
+    var k = open.dataset.stScope + ":" + open.dataset.stId, scope = open.dataset.stScope;
+    OPEN_STYLE = OPEN_STYLE === k ? null : k;
+    var d = STYLE_DATA[k];
+    if(OPEN_STYLE && d && !d.plan){
+      planFor(d, null).then(function(plan){
+        if(!plan) return;
+        d.plan = plan;
+        saveCustom();
+        rerenderStyled(scope);
+      });
+      return;
+    }
+    rerenderStyled(scope);
+    return;
+  }
+  var opt = e.target.closest("[data-st-key]");
+  if(!opt) return;
+  var panel = opt.closest(".chart-style");
+  if(panel) applyStyle(panel.dataset.stScope, panel.dataset.stId, opt.dataset.stKey, opt.dataset.stVal);
+});
 
 function plotChart(cv, plan){
   var old = window.Chart && Chart.getChart(cv);
@@ -5596,6 +5775,7 @@ function plotChart(cv, plan){
   var ink3 = css.getPropertyValue("--ink-3").trim() || "#635C7A";
   var ink2 = css.getPropertyValue("--ink-2").trim() || "#A9A2BE";
   var font = { family: '"IBM Plex Mono", monospace', size: 9 };
+  if(plan.color && STYLE_HEX[plan.color]){ accent = STYLE_HEX[plan.color]; tint = hexAlpha(accent, 0.16); }
 
   cv.width = cv.clientWidth || (cv.parentNode && cv.parentNode.clientWidth) || 320;
   cv.height = plan.height || 150;
@@ -5629,7 +5809,7 @@ function plotChart(cv, plan){
         indexAxis: flat ? "y" : "x",
         scales: flat ? { x: valueAxis, y: catAxis } : { x: catAxis, y: valueAxis }
       },
-      plugins: flat ? [barValues(plan, ink3, font)] : []
+      plugins: plan.value_labels && plan.value_labels.length ? [barValues(plan, ink3, font)] : []
     };
   } else {
     var many = plan.series.length > 1, palette = many ? SWATCHES : [accent];
@@ -5669,7 +5849,8 @@ function plotChart(cv, plan){
   }
   cfg.options.responsive = false;
   cfg.options.animation = false;
-  cfg.options.layout = { padding: { top: 4, right: plan.kind === "hbar" ? 30 : 6 } };
+  var upright = plan.kind === "bar" && plan.value_labels && plan.value_labels.length;
+  cfg.options.layout = { padding: { top: upright ? 14 : 4, right: plan.kind === "hbar" ? 30 : 6 } };
   cfg.options.plugins = {
     legend: {
       display: !!plan.legend, position: "top", align: "start",
@@ -5731,12 +5912,12 @@ function runSpec(spec){
 
 function drawRecord(rec, scope, cv){
   if(!cv) return;
-  if(!isLive(rec, scope) || !rec.spec){ drawChart(cv, rec.data); return; }
+  if(!isLive(rec, scope) || !rec.spec){ drawChart(cv, rec.data, rec.style); return; }
   runSpec(rec.spec).then(function(res){
     /* No server, or a spec that no longer fits: the saved numbers beat an empty box. */
     var fresh = res && res.understood && res.data && !res.empty;
     if(fresh) LIVE_DATA[scope + ":" + rec.id] = res.data;
-    drawChart(cv, fresh ? res.data : rec.data);
+    drawChart(cv, fresh ? res.data : rec.data, rec.style);
   });
 }
 
@@ -5787,6 +5968,7 @@ function chartCard(d, opts){
       ? chartTable(d)
       : '<canvas class="chart-canvas" data-chart="' + esc(opts.key || "") + '"></canvas>') +
     (d.note ? '<div class="chart-note">' + esc(d.note) + "</div>" : "") +
+    (opts.style ? styleBar(d, opts.style) : "") +
     (opts.actions || "") +
     "</div>";
 }

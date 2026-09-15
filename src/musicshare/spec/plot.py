@@ -10,12 +10,18 @@ data. All of it was layout, decided in the one place with no tests.
 So the decisions live here. `plan` turns a chart's numbers into an exact
 description of the drawing - which kind of chart, where every point and tick sits,
 what each label says - and the page hands that to Chart.js without deciding
-anything itself. Colours and personal preferences are a layer on top of this, not
-a reason to change it.
+anything itself.
+
+A person's style is an input to the same function rather than a second place that
+decides things. `ChartStyle` says what they asked for - a line instead of bars,
+fewer gridlines, a colour - and `plan` works out what that means for these numbers,
+including which of those choices this chart can take at all. Bars cannot become a
+line across a list of artists, and a comparison of six things cannot be one colour,
+so those options are not offered and a stored style asking for them falls back.
 
 The input is the chart payload the API already sends (`labels`, `values`,
-`series`, `table`, axis labels, `cumulative`, `partial_last`), so a chart saved
-before plans existed can be planned from what it kept.
+`series`, `table`, axis labels, `cumulative`, `partial_last`, `timeline`), so a
+chart saved before plans existed can be planned from what it kept.
 """
 
 from __future__ import annotations
@@ -23,7 +29,9 @@ from __future__ import annotations
 import math
 import re
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict
 
 # Bars that name things rather than positions on a scale. Their labels are words,
 # which do not fit under vertical bars at phone width, so the bars lie on their side.
@@ -45,20 +53,43 @@ HEADROOM = 1.1
 LEGEND = 22
 ROW = 20
 
+# How many gaps between gridlines each setting aims for.
+DIVISIONS = {"fewer": 3, "normal": 5, "more": 10}
+
+
+class ChartStyle(BaseModel):
+    """How a person wants a chart to look.
+
+    Deliberately not part of ChartSpec. The spec is what to count and is filled in
+    by a model and scored by the evals; this is how to show it, is chosen with
+    buttons, and cannot change a single number on the chart. Keeping them apart is
+    what lets looks be personal without growing the model's job.
+
+    Every field is a short menu, like the spec's, so no stored style can ask for a
+    drawing that does not exist.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["auto", "bar", "line", "area"] = "auto"
+    color: Literal["accent", "pink", "orange", "teal", "blue", "purple", "yellow"] = "accent"
+    gridlines: Literal["fewer", "normal", "more"] = "normal"
+    values: Literal["auto", "show", "hide"] = "auto"
+
 
 # ------------------------------------------------------------------- scale
 
 
-def nice_step(top: float) -> float:
+def nice_step(top: float, divisions: int = 5) -> float:
     """A round gap between gridlines - 1, 2, 2.5 or 5 of a power of ten - that gives
-    about five of them.
+    about `divisions` of them.
 
     Three fixed lines at zero, half and top read 0, 2.5, 5 on a chart peaking at
     3.2, which left most values between two labels and a third of the plot empty.
     """
     if not top > 0:
         return 1.0
-    raw = top / 5
+    raw = top / divisions
     mag = 10 ** math.floor(math.log10(raw))
     n = raw / mag
     for s in (1, 2, 2.5, 5):
@@ -67,11 +98,11 @@ def nice_step(top: float) -> float:
     return 10 * mag
 
 
-def nice_top(peak: float) -> float:
+def nice_top(peak: float, divisions: int = 5) -> float:
     """The first gridline at or above the data, so the tallest point sits near the top."""
     if not peak > 0:
         return 1.0
-    step = nice_step(peak)
+    step = nice_step(peak, divisions)
     return round(math.ceil(peak / step - 1e-9) * step, 10)
 
 
@@ -93,9 +124,9 @@ def tick_label(v: float, step: float) -> str:
     return out + ("k" if thousands else "")
 
 
-def y_scale(peak: float) -> dict[str, Any]:
-    top = nice_top(peak * HEADROOM)
-    step = nice_step(top)
+def y_scale(peak: float, divisions: int = 5) -> dict[str, Any]:
+    top = nice_top(peak * HEADROOM, divisions)
+    step = nice_step(top, divisions)
     count = max(1, round(top / step))
     ticks = []
     for i in range(count + 1):
@@ -170,8 +201,9 @@ def _short(text: str) -> str:
 # -------------------------------------------------------------------- plan
 
 
-def plan(p: dict[str, Any]) -> dict[str, Any]:
-    """The drawing, exactly, for one chart's numbers."""
+def plan(p: dict[str, Any], style: ChartStyle | dict[str, Any] | None = None) -> dict[str, Any]:
+    """The drawing, exactly, for one chart's numbers in one style."""
+    st = style if isinstance(style, ChartStyle) else ChartStyle(**(style or {}))
     if p.get("table"):
         return {"kind": "table"}
 
@@ -185,36 +217,61 @@ def plan(p: dict[str, Any]) -> dict[str, Any]:
     unit = str(p.get("y_label") or "")
     cumulative = bool(p.get("cumulative"))
     partial = p.get("partial_last")
+    timeline = p.get("timeline") or []
+    divisions = DIVISIONS[st.gridlines]
 
     years = {m.group(1) for m in (ISO_DAY.fullmatch(x) for x in raw_labels) if m}
     labels = [x_label(x, axis, len(years) > 1) for x in raw_labels]
     lines = [{"name": str(s["name"]), "values": list(s["values"])} for s in series] or [
         {"name": unit, "values": values}
     ]
+    single = not series
     peak = max((v for ln in lines for v in ln["values"] if v is not None), default=0)
-    scale = {**y_scale(peak), "unit": unit}
 
-    if not (p.get("chart") == "line" or series or cumulative):
-        # Words lie on their side; short positions stand up. Hours and weekdays are
-        # two or three characters, names are not.
-        sideways = axis in RANKED or max(len(x) for x in labels) > 4
+    # What this chart can be. Words lie on their side and stay bars, because a line
+    # across a list of names implies an order that is not there. A comparison stays
+    # a line: grouped bars of six things over nine years are fifty-four rectangles.
+    # A running total only rises, which is what a line or an area draws.
+    drawn_as_bars = not (p.get("chart") == "line" or series or cumulative)
+    sideways = drawn_as_bars and (axis in RANKED or max(len(x) for x in labels) > 4)
+    if sideways:
+        allowed = ["bar"]
+    elif series:
+        allowed = ["line"]
+    elif cumulative:
+        allowed = ["line", "area"]
+    else:
+        allowed = ["bar", "line", "area"]
+    default = "bar" if drawn_as_bars else ("line" if series else "area")
+    kind = st.type if st.type in allowed else default
+
+    common = {
+        "color": st.color if single else None,
+        "style": {"type": kind, "color": st.color, "gridlines": st.gridlines, "values": st.values},
+        "styles": {"types": allowed, "color": single, "gridlines": True, "values": kind == "bar"},
+    }
+
+    if kind == "bar":
+        show = st.values == "show" or (st.values == "auto" and sideways)
         return {
             "kind": "hbar" if sideways else "bar",
             "labels": labels,
             "tick_labels": [_short(x) for x in labels] if sideways else labels,
             "values": values,
-            "value_labels": [value_label(v) for v in values] if sideways else [],
-            "y": scale,
+            "value_labels": [value_label(v) for v in values] if show else [],
+            "y": {**y_scale(peak, divisions), "unit": unit},
             "height": max(120, len(values) * ROW + 8) if sideways else HEIGHT,
             "legend": False,
             "fill": False,
             "now": False,
+            **common,
         }
 
+    fill = kind == "area" and single
     n = len(labels)
     span = _span(n, axis, partial)
-    timeline = p.get("timeline") or []
-    if cumulative and timeline and not series:
+
+    if cumulative and timeline and single:
         # Today, play by play: the points are the listening itself, on the same
         # hour axis as the labels, ending at the current minute.
         pts = [[float(x), float(y)] for x, y in timeline]
@@ -226,12 +283,14 @@ def plan(p: dict[str, Any]) -> dict[str, Any]:
                 "ticks": _hour_ticks(n, span, labels, [float(i) for i in range(n)]),
             },
             "series": [{"name": unit, "points": pts, "labels": [_clock(x) for x, _ in pts]}],
-            "y": {**y_scale(max(y for _, y in pts)), "unit": unit},
+            "y": {**y_scale(max(y for _, y in pts), divisions), "unit": unit},
             "legend": False,
-            "fill": True,
+            "fill": fill,
             "now": True,
             "height": HEIGHT,
+            **common,
         }
+
     if cumulative:
         # An amount at a moment, not over a bucket: zero at the left edge, each
         # bucket's total where that bucket ends, and today's last point at the
@@ -260,9 +319,10 @@ def plan(p: dict[str, Any]) -> dict[str, Any]:
         "kind": "line",
         "x": {"min": 0, "max": span, "ticks": _hour_ticks(n, span, labels, ticks_at)},
         "series": drawn,
-        "y": scale,
+        "y": {**y_scale(peak, divisions), "unit": unit},
         "legend": len(drawn) > 1,
-        "fill": len(drawn) == 1,
+        "fill": fill,
         "now": cumulative and partial is not None,
         "height": HEIGHT + (LEGEND if len(drawn) > 1 else 0),
+        **common,
     }

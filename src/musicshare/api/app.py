@@ -327,12 +327,21 @@ def chart_gallery() -> dict[str, object]:
 
 @app.post("/api/chart/plan")
 async def chart_plan(request: Request) -> dict[str, object]:
-    """A drawing plan for chart numbers saved before plans existed. No model, no history."""
+    """A drawing plan for chart numbers, in a style. No model, no history.
+
+    Takes either the numbers alone - a chart saved before plans existed - or
+    `{"data": ..., "style": ...}` when a person has restyled one. A style is a menu
+    (plot.ChartStyle), so anything off it is refused rather than guessed at.
+    """
     try:
-        data = await request.json()
-        if not isinstance(data, dict):
+        body = await request.json()
+        if not isinstance(body, dict):
             raise ValueError("expected an object")
-        return {"plan": plot.plan(data)}
+        if isinstance(body.get("data"), dict):
+            data, style = body["data"], body.get("style")
+        else:
+            data, style = body, None
+        return {"plan": plot.plan(data, style)}
     except Exception as e:
         raise HTTPException(422, f"not chart data: {e}"[:160]) from e
 
