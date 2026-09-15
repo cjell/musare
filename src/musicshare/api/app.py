@@ -24,6 +24,9 @@ from musicshare import regions as regions_mod
 from musicshare import shows as shows_mod
 from musicshare import taste
 from musicshare.spec import ChartSpec, run_chart, validate, validate_chart
+from musicshare.spec.apply import familiar_enough
+from musicshare.spec.chartrun import ChartData
+from musicshare.spec.filter import Familiarity
 from musicshare.spec.generate import CHART_MODEL, CHARTS, SHOW_MODEL, generate
 from musicshare.spotify import SpotifyClient, SpotifyError
 from musicshare.spotify.client import ALL_KINDS, SEARCH_MAX
@@ -104,7 +107,7 @@ def seed(refresh: bool = False) -> dict[str, object]:
 @app.get("/api/shows")
 def shows(
     refresh: bool = False,
-    only_mine: bool = False,
+    familiarity: Familiarity = Familiarity.ANY,
     limit: int = Query(400, ge=1, le=1000),
 ) -> dict[str, object]:
     """Upcoming shows near the user, each carrying how much they play that artist.
@@ -116,8 +119,8 @@ def shows(
     except Exception as e:
         log.error("shows build failed: %s", e)
         raise HTTPException(502, str(e)) from e
-    if only_mine:
-        data = [s for s in data if s.get("yours")]
+    if familiarity != Familiarity.ANY:
+        data = [s for s in data if familiar_enough(familiarity, s)]
     return {
         "total": len(data),
         "matching": sum(1 for s in data if s.get("yours")),
@@ -199,25 +202,55 @@ def chart(
         "problems": [],
         "model": g.model,
         "latency_ms": g.latency_ms,
-        "data": {
-            "labels": d.labels,
-            "values": d.values,
-            "title": d.title,
-            "x_label": d.x_label,
-            "y_label": d.y_label,
-            "chart": d.chart,
-            "note": d.note,
-            # Empty for an ordinary chart; when present it is the data and
-            # `values` is empty. The page branches on which one has content.
-            "series": [{"name": ln.name, "values": ln.values} for ln in d.series],
-            # Present when the answer exists but is not drawable - the page
-            # renders rows instead of a canvas. Never both.
-            "table": [
-                {"bucket": c.bucket, "rank": c.rank, "name": c.name, "value": c.value}
-                for c in d.table
-            ],
-        },
+        "data": _chart_payload(d),
     }
+
+
+def _chart_payload(d: ChartData) -> dict[str, object]:
+    """What the page draws from, for a chart asked now or one re-run from Home."""
+    return {
+        "labels": d.labels,
+        "values": d.values,
+        "title": d.title,
+        "x_label": d.x_label,
+        "y_label": d.y_label,
+        "chart": d.chart,
+        "note": d.note,
+        "cumulative": d.cumulative,
+        "partial_last": d.partial_last,
+        # Empty for an ordinary chart; when present it is the data and
+        # `values` is empty. The page branches on which one has content.
+        "series": [{"name": ln.name, "values": ln.values} for ln in d.series],
+        # Present when the answer exists but is not drawable - the page
+        # renders rows instead of a canvas. Never both.
+        "table": [
+            {"bucket": c.bucket, "rank": c.rank, "name": c.name, "value": c.value} for c in d.table
+        ],
+    }
+
+
+@app.post("/api/chart/run")
+def chart_run(spec: ChartSpec) -> dict[str, object]:
+    """Re-run a saved chart. No model: the question was read once, when it was
+    asked, and this only executes what was understood then.
+
+    This is what makes a chart on Home live. The page keeps the spec rather than
+    the numbers, and each refresh turns the same menu choices into a query over
+    whatever has been played since - including plays the capture job wrote a
+    minute ago, which is why it pulls first.
+
+    A spec saved against an older schema either still parses or is refused with a
+    422 before it gets here, and the page asks for the question again.
+    """
+    problems = validate_chart(spec)
+    if problems or not spec.understood:
+        return {
+            "understood": False,
+            "problems": [{"field": p.field, "message": p.message} for p in problems],
+        }
+    live_mod.pull_if_stale()
+    d = run_chart(spec)
+    return {"understood": True, "empty": d.empty, "problems": [], "data": _chart_payload(d)}
 
 
 @app.get("/api/home")

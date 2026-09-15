@@ -20,6 +20,8 @@ Two rules hold this schema together:
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from musicshare.spec.vocab import MAX_GENRES, Genre  # noqa: F401  (re-exported)
@@ -27,6 +29,26 @@ from musicshare.spec.vocab import MAX_GENRES, Genre  # noqa: F401  (re-exported)
 # Applied when the model says the user never mentioned these.
 DEFAULT_RADIUS_MI = 50
 DEFAULT_DAYS = 90
+
+
+class Familiarity(StrEnum):
+    """How well the user must already know an artist.
+
+    The model picks a level; what each level means in listening history is
+    decided in code (`shows.familiarity_of`), so moving a threshold never changes
+    what the model is asked to do. The first four are a scale and each includes
+    the ones above it - a favourite is also someone you have heard. NEW points the
+    other way: it asks for the absence of any level, not a fifth step.
+
+    This replaced a yes/no "only artists I listen to", which counted one play the
+    same as eight years of them.
+    """
+
+    ANY = "any"
+    HEARD = "heard"
+    REGULAR = "regular"
+    FAVORITE = "favorite"
+    NEW = "new"
 
 
 class ShowFilter(BaseModel):
@@ -38,13 +60,21 @@ class ShowFilter(BaseModel):
     # in whichever of those forgets to ask for `.value`.
     model_config = ConfigDict(use_enum_values=True)
 
-    only_mine: bool = Field(
-        default=False,
+    familiarity: Familiarity = Field(
+        default=Familiarity.ANY,
         description=(
-            "True when the request is limited to artists the user already listens to - "
-            "'artists I like', 'stuff I actually listen to', 'my artists', 'bands I know'. "
-            "False when they are open to anything, or say 'new', 'discover', "
-            "'someone I haven't heard'."
+            "How well the user must already know the artist. "
+            "'any' when the request does not raise it, which is most requests - "
+            "including ones that name a specific artist. "
+            "'heard' for anyone they have come across at all: 'bands I already know', "
+            "'stuff from my library'. "
+            "'regular' for artists they keep playing: 'artists I actually listen to', "
+            "'my artists'. "
+            "'favorite' for the ones they love most: 'my favourites', 'artists I love'. "
+            "'new' for artists they have never played: 'someone I've never heard of', "
+            "'help me discover a band'. "
+            "These are levels on a scale, not a list of accepted phrases: any wording "
+            "about how well they know the artist belongs at the level it describes."
         ),
     )
     radius_mi: int | None = Field(

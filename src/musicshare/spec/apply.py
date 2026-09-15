@@ -11,7 +11,25 @@ from datetime import date, timedelta
 from typing import Any
 
 from musicshare import genres
-from musicshare.spec.filter import DEFAULT_DAYS, DEFAULT_RADIUS_MI, ShowFilter
+from musicshare.spec.filter import DEFAULT_DAYS, DEFAULT_RADIUS_MI, Familiarity, ShowFilter
+
+# The scale's order. NEW is not on it - it asks for no level at all.
+RANK = {Familiarity.HEARD: 1, Familiarity.REGULAR: 2, Familiarity.FAVORITE: 3}
+
+
+def familiar_enough(want: str, show: dict[str, Any]) -> bool:
+    """Whether a show's artist is known well enough for the level asked for.
+
+    Each level includes the ones above it: someone asking for artists they listen
+    to regularly wants their favourites too. A row with no level but a play on
+    record was cached before levels existed, so it is not treated as new.
+    """
+    if want == Familiarity.ANY:
+        return True
+    level = show.get("familiarity")
+    if want == Familiarity.NEW:
+        return level is None and not show.get("yours")
+    return RANK.get(level, 0) >= RANK[Familiarity(want)]
 
 
 def apply(spec: ShowFilter, shows: list[dict[str, Any]], today: date | None = None) -> list[dict]:
@@ -29,7 +47,7 @@ def apply(spec: ShowFilter, shows: list[dict[str, Any]], today: date | None = No
 
     out = []
     for s in shows:
-        if spec.only_mine and not s.get("yours"):
+        if not familiar_enough(spec.familiarity, s):
             continue
 
         # Missing is not the same as far, or as unknown-ly popular: a field the

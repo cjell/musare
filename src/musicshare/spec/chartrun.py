@@ -98,6 +98,12 @@ RANGES = {
     "12mo": "interval 12 month",
 }
 
+# Today is a calendar day where the listener is, not the last 24 hours: at 9am
+# "today" means since midnight. Unlike the relative ranges it is anchored on the
+# clock rather than on the newest play, because a live chart of today that stops
+# at yesterday's last play is a chart of yesterday.
+TODAY = f"cast({LOCAL_TS} as date) = cast((current_timestamp AT TIME ZONE '{LOCAL}') as date)"
+
 DOW = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
 
 # Cyclical dimensions read in their own order, not by size - a day-of-week chart
@@ -144,13 +150,21 @@ class ChartData:
     # drawn. Showing the numbers beats drawing a chart of a different question,
     # which is what this used to do.
     table: list[Cell] = field(default_factory=list)
+    # A running total is drawn on a time axis, where each point is the total by the
+    # end of its bucket. For a chart of today the page also needs how far into the
+    # current hour "now" is, so the line stops there instead of at the end of an
+    # hour that has not finished. None whenever the last bucket is not that hour.
+    cumulative: bool = False
+    partial_last: float | None = None
 
     @property
     def empty(self) -> bool:
         return not self.values and not self.table and not any(ln.values for ln in self.series)
 
 
-def chart_for(dimension: str, series: str = "none", per_period: bool = False) -> str:
+def chart_for(
+    dimension: str, series: str = "none", per_period: bool = False, cumulative: bool = False
+) -> str:
     """Dates read as a line; everything else is a comparison, so bars.
 
     A split chart is always a line too. Grouped bars at 24 hours by 4 artists is
@@ -167,7 +181,21 @@ def chart_for(dimension: str, series: str = "none", per_period: bool = False) ->
     """
     if per_period:
         return "table"
-    return "line" if dimension == "date" or series != "none" else "bar"
+    # A running total is a line whatever its axis. It only rises, and the rise is
+    # the thing being shown - bars stood side by side do not draw it.
+    return "line" if dimension == "date" or series != "none" or cumulative else "bar"
+
+
+def effective(spec: ChartSpec) -> ChartSpec:
+    """The spec as it will be drawn.
+
+    A date axis over a single day has one bucket, so today over time is today by
+    hour. Derived rather than asked for, for the reason chart type is not a field:
+    a combination the model can get half-right is better removed than described.
+    """
+    if spec.range == "today" and spec.dimension == "date":
+        return spec.model_copy(update={"dimension": "hour_of_day", "grain": None})
+    return spec
 
 
 def _connect(spec: ChartSpec | None = None) -> duckdb.DuckDBPyConnection:
@@ -205,6 +233,8 @@ def _where(spec: ChartSpec, needs_min: bool) -> tuple[str, list[Any]]:
         clauses.append(f"ms_played >= {MIN_MS}")
     if spec.year is not None:
         clauses.append(f"year({LOCAL_TS}) = {int(spec.year)}")
+    elif spec.range == "today":
+        clauses.append(TODAY)
     elif spec.range == "this_year":
         clauses.append(f"year({LOCAL_TS}) = year(current_date)")
     elif spec.range in RANGES:
@@ -290,6 +320,7 @@ def _note(spec: ChartSpec, rated: bool, truncated: bool = False) -> str | None:
 
 
 def run(spec: ChartSpec) -> ChartData:
+    spec = effective(spec)
     if not spec.understood:
         return ChartData(
             [],
@@ -297,7 +328,7 @@ def run(spec: ChartSpec) -> ChartData:
             "",
             "",
             spec.title,
-            chart_for(spec.dimension, spec.series, spec.per_period),
+            chart_for(spec.dimension, spec.series, spec.per_period, spec.cumulative),
             note="not a question about listening",
         )
 
@@ -315,7 +346,8 @@ def run(spec: ChartSpec) -> ChartData:
         having += f" and count(*) >= {MIN_SAMPLE}"
 
     con = _connect(spec)
-    chart = chart_for(spec.dimension, spec.series, spec.per_period)
+    chart = chart_for(spec.dimension, spec.series, spec.per_period, spec.cumulative)
+    partial: float | None = None
 
     if spec.per_period:
         data = _per_period(spec, con, frm, where, params, dim_sql, dim_params, metric_sql)
@@ -337,9 +369,17 @@ def run(spec: ChartSpec) -> ChartData:
                 continue
             labels.append(_label(spec, k))
             values.append(round(float(v), 2))
+        if spec.dimension == "hour_of_day" and spec.metric not in RATE_METRICS:
+            labels, values = _every_hour(spec, con, labels, values)
+            if spec.range == "today" and spec.year is None:
+                partial = _into_this_hour(con)
         data = (labels, values, [], sql.strip(), [])
 
     labels, values, series, sql, table = data
+    if spec.cumulative:
+        values = _running(values)
+        series = [Line(ln.name, _running(ln.values)) for ln in series]
+        y_label = f"total {y_label}"
     total = con.execute(f"select count(*) from {frm} where {where}", params).fetchone()[0]
 
     return ChartData(
@@ -354,7 +394,51 @@ def run(spec: ChartSpec) -> ChartData:
         sql=sql,
         series=series,
         table=table,
+        cumulative=spec.cumulative,
+        partial_last=partial,
     )
+
+
+def _into_this_hour(con: duckdb.DuckDBPyConnection) -> float:
+    """How much of the current local hour has passed, from 0 to 1."""
+    row = con.execute(
+        f"select minute(ts), second(ts) from (select current_timestamp AT TIME ZONE '{LOCAL}' as ts)"
+    ).fetchone()
+    return round((int(row[0]) + int(row[1]) / 60) / 60, 3)
+
+
+def _running(values: list[float] | list[float | None]) -> list[float]:
+    """Each point as everything up to it.
+
+    Applied after the query and after empty hours are filled, so the line keeps
+    its level through a quiet stretch instead of stepping over it. A gap adds
+    nothing, because a bucket with no plays in it holds no hours or plays - the
+    validator has already refused the metrics for which that would not be true.
+    """
+    total, out = 0.0, []
+    for v in values:
+        total += v or 0.0
+        out.append(round(total, 2))
+    return out
+
+
+def _every_hour(
+    spec: ChartSpec, con: duckdb.DuckDBPyConnection, labels: list[str], values: list[float]
+) -> tuple[list[str], list[float]]:
+    """Hours with nothing played as zeros, rather than as missing bars.
+
+    Without this 10am sits beside 2pm as if they were neighbours. A chart of today
+    stops at the current hour: the hours still to come have not happened, which
+    is not the same as nothing having been played in them. A rate is left alone,
+    because a rate over no plays is unknown rather than zero.
+    """
+    have = dict(zip(labels, values, strict=True))
+    last = 23
+    if spec.range == "today" and spec.year is None:
+        now = con.execute(f"select hour(current_timestamp AT TIME ZONE '{LOCAL}')").fetchone()
+        last = int(now[0])
+    hours = [f"{h:02d}" for h in range(last + 1)]
+    return hours, [have.get(h, 0.0) for h in hours]
 
 
 def _named_genres(spec: ChartSpec) -> tuple[str, list[Any]]:

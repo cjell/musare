@@ -29,7 +29,7 @@ ART_CACHE = ROOT / "data" / "cache" / "art.json"
 # Bumped whenever what a cached feed means changes - a new field, a different
 # rule for choosing a picture - so an old file is rebuilt rather than served just
 # because no play has happened since.
-CACHE_VERSION = 3
+CACHE_VERSION = 5
 
 MIN_MS = 30_000
 URI_RE = re.compile(r"^spotify:track:([A-Za-z0-9]+)$")
@@ -397,6 +397,14 @@ def song_discoveries(limit: int = 5) -> list[dict[str, Any]]:
     ]
 
 
+# On repeat means played again and again, so it has a floor: in a light week -
+# or one with days missing - the list would otherwise pad itself with songs
+# heard once or twice. Over six fully recorded months the 20th track of a
+# typical week had 4 plays, so 3 leaves ordinary weeks at twenty and lets a thin
+# one come up short rather than fill itself with noise.
+MIN_REPEAT_PLAYS = 3
+
+
 def on_repeat(limit: int = 5) -> list[dict[str, Any]]:
     rows = _q(f"""
         with bounds as (select max(played_at) as tip from plays)
@@ -404,7 +412,8 @@ def on_repeat(limit: int = 5) -> list[dict[str, Any]]:
         from plays
         where played_at > (select tip from bounds) - interval 7 day
           and ms_played >= {MIN_MS} and track_uri is not null
-        group by track_uri order by 4 desc limit {int(limit)}
+        group by track_uri having count(*) >= {MIN_REPEAT_PLAYS}
+        order by 4 desc limit {int(limit)}
     """)
     return [{"name": n, "artist": a, "uri": u, "plays": c} for n, a, u, c in rows]
 
@@ -532,9 +541,14 @@ def build(refresh: bool = False) -> dict[str, Any]:
         if _cache_usable(cached, tip):
             return cached
 
-    up, down, repeat = _movers("up", 4), _movers("down", 4), on_repeat(5)
-    up_songs, down_songs = _song_movers("up", 5), _song_movers("down", 5)
-    found, found_songs = discoveries(4), song_discoveries(5)
+    # Up to ten of each; the page shows four at a time and scrolls sideways past
+    # that. Measured over six fully recorded weeks: cooling off had more than four
+    # candidates in every one of them and a median of eighteen artists, so four
+    # was hiding most of the answer. Ten, not all, because the ranking is percent
+    # change and the tail is four plays becoming five.
+    up, down, repeat = _movers("up", 10), _movers("down", 10), on_repeat(20)
+    up_songs, down_songs = _song_movers("up", 10), _song_movers("down", 10)
+    found, found_songs = discoveries(10), song_discoveries(10)
     names = [a["name"] for a in up + down + found]
     art = _art(
         names,

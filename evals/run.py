@@ -58,6 +58,13 @@ SUITES: dict[str, Suite] = {
     "shows-genre-heldout": Suite(SHOWS, "shows_genre_heldout.yaml", validate),
     "charts-series-heldout": Suite(CHARTS, "charts_series_heldout.yaml", validate_chart),
     "charts-perperiod-heldout": Suite(CHARTS, "charts_perperiod_heldout.yaml", validate_chart),
+    # Written before familiarity replaced the yes/no only_mine; see its header.
+    "shows-familiarity-heldout": Suite(SHOWS, "shows_familiarity_heldout.yaml", validate),
+    # Written before the 'today' range existed. Retired: its three failures are what
+    # the next round of description changes was made against.
+    "charts-today-heldout": Suite(CHARTS, "charts_today_heldout.yaml", validate_chart),
+    # Written before `cumulative` existed and before those changes; see its header.
+    "charts-cumulative-heldout": Suite(CHARTS, "charts_cumulative_heldout.yaml", validate_chart),
 }
 
 

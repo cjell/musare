@@ -42,6 +42,14 @@ DEFAULT_LAT, DEFAULT_LON = 35.9132, -79.0558
 # would refetch for every position.
 DEFAULT_RADIUS = 150
 
+# How well the user knows an artist, counted in separate days they came back
+# rather than in plays. Twenty plays can be one album on one afternoon; twenty
+# days is someone they keep returning to. Set from this listener's history: of
+# the 87 touring artists they had ever played, 16 were a single day and never
+# again, 58 cleared 15 days and 35 cleared 50. J. Cole is at 980.
+REGULAR_DAYS = 15
+FAVORITE_DAYS = 50
+
 SPOTIFY_ARTIST = re.compile(r"open\.spotify\.com/artist/([A-Za-z0-9]+)")
 _B32 = "0123456789bcdefghjkmnpqrstuvwxyz"
 
@@ -178,14 +186,30 @@ def _richness(r: dict) -> int:
     return sum(bool(r[k]) for k in ("image", "price_min", "distance_mi", "spotify_id", "time"))
 
 
-def _my_artists() -> dict[str, tuple[float, int]]:
-    """artist name (lowercased) -> (hours, plays) from the local history."""
+def _my_artists() -> dict[str, tuple[float, int, int]]:
+    """artist name (lowercased) -> (hours, plays, separate days) from the local history."""
     con = connect()
     rows = con.execute("""
-        select artist_name, sum(ms_played)/3600000.0 as hours, count(*) as plays
+        select artist_name, sum(ms_played)/3600000.0 as hours, count(*) as plays,
+               count(distinct cast(played_at as date)) as days
         from plays where ms_played >= 30000 and artist_name is not null group by 1
     """).fetchall()
-    return {n.lower(): (h, p) for n, h, p in rows}
+    return {n.lower(): (h, p, d) for n, h, p, d in rows}
+
+
+def familiarity_of(days: int) -> str | None:
+    """The level a number of separate listening days reaches; None if never played.
+
+    The values are `spec.filter.Familiarity`'s, written as strings because
+    importing the spec package from here would import this module back.
+    """
+    if days >= FAVORITE_DAYS:
+        return "favorite"
+    if days >= REGULAR_DAYS:
+        return "regular"
+    if days >= 1:
+        return "heard"
+    return None
 
 
 DEEZER = "https://api.deezer.com/search/artist"
@@ -262,7 +286,11 @@ def genre_of(artist: str) -> str | None:
 def build(refresh: bool = False, **kw) -> list[dict[str, Any]]:
     """Normalised upcoming shows, each carrying how much you play that artist."""
     if CACHE.exists() and not refresh and time.time() - CACHE.stat().st_mtime < CACHE_TTL:
-        return json.loads(CACHE.read_text(encoding="utf-8"))
+        cached = json.loads(CACHE.read_text(encoding="utf-8"))
+        # A cache written before levels existed would leave every show out of
+        # "Listen regularly" until it expired, six hours later.
+        if all("familiarity" in s for s in cached):
+            return cached
 
     shows = normalise(fetch_events(**kw))
     try:
@@ -278,10 +306,12 @@ def build(refresh: bool = False, **kw) -> list[dict[str, Any]]:
         # keep it as None so "unknown" never reads as "tiny".
         f = fans.get(s["artist"].lower(), -1)
         s["fans"] = f if f and f > 0 else None
-        hours, plays = mine.get(s["artist"].lower(), (0.0, 0))
+        hours, plays, days = mine.get(s["artist"].lower(), (0.0, 0, 0))
         s["your_hours"] = round(hours, 1)
         s["your_plays"] = plays
+        s["your_days"] = days
         s["yours"] = plays > 0
+        s["familiarity"] = familiarity_of(days)
         # The corpus's genre for this act, or None when it has never heard of
         # them. Resolved here rather than in the filter so it is cached with the
         # show and a filtered request costs no lookups at all.

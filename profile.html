@@ -282,6 +282,18 @@ body{
 
 /* ---- top tracks: classic rows ---- */
 .rows{display:flex;flex-direction:column;gap:3px}
+/* On repeat: five and a half rows tall (58px rows, 3px gaps), so the next row
+   peeks out under the fade. Padded by the rows' own -8px bleed, or the scroller
+   would clip their hover background at both edges. */
+.repscroll{
+  max-height:334px;overflow-y:auto;margin:0 -8px;padding:0 8px;
+  scrollbar-width:thin;scrollbar-color:var(--line-2) transparent;
+  -webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 40px),transparent);
+  mask-image:linear-gradient(to bottom,#000 calc(100% - 40px),transparent);
+}
+.repscroll::-webkit-scrollbar{width:4px}
+.repscroll::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:2px}
+.repscroll.fits,.repscroll.at-end{-webkit-mask-image:none;mask-image:none}
 .row{
   display:flex;align-items:center;gap:12px;padding:7px 8px;
   margin:0 -8px;border-radius:9px;cursor:pointer;
@@ -682,6 +694,10 @@ body{
   font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-2);
   flex:none;font-variant-numeric:tabular-nums;
 }
+.vt-fam{
+  font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--accent);flex:none;
+}
 .vt-go{display:flex;align-items:center;gap:8px;margin-top:10px}
 .vt-btn{margin-top:12px;height:30px;padding:0 15px;font-size:12.5px}
 /* the month interrupts the rail, so scrolling reads as moving through a
@@ -737,6 +753,19 @@ body{
 
 /* rising artists: same circle language as a profile, at list scale */
 .risegrid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px 10px}
+/* Past four, a row rather than more rows. The next card peeks in at the edge,
+   which is what says the row scrolls, and each one snaps into place. The
+   scrollbar stays, thin: without it a mouse has no way across. */
+.risegrid.scroll,.rowpages{
+  overflow-x:auto;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;
+  scrollbar-width:thin;scrollbar-color:var(--line-2) transparent;padding-bottom:8px;
+}
+.risegrid.scroll::-webkit-scrollbar,.rowpages::-webkit-scrollbar{height:4px}
+.risegrid.scroll::-webkit-scrollbar-thumb,.rowpages::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:2px}
+.risegrid.scroll{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:calc((100% - 40px) / 4.4)}
+.risegrid.scroll .rise{scroll-snap-align:start}
+.rowpages{display:flex;gap:14px}
+.rowpages > .rows{flex:0 0 88%;min-width:0;scroll-snap-align:start}
 .rise{text-align:center;cursor:pointer;display:flex;flex-direction:column}
 .rise .ring{display:block;border-color:var(--line-2)}
 .rise .rn{font-size:10.5px;font-weight:500;margin-top:8px;line-height:1.3;
@@ -1029,6 +1058,10 @@ body{
 .mf-r{right:12px;top:50%;transform:translateY(-50%)}
 .mf-t{top:12px;left:50%;transform:translateX(-50%)}
 .mf-b{bottom:12px;left:50%;transform:translateX(-50%)}
+/* All time or lately, above the genre bars. Same underline tabs as the
+   profile's, with a rule under them for the active one to sit on. */
+.mf-when{flex:none;margin-top:12px;border-bottom:1px solid var(--line)}
+.mf-empty{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3)}
 .mf-clusters{
   flex:none;padding:15px var(--pad) 3px;display:flex;flex-direction:column;gap:9px;
 }
@@ -1060,6 +1093,14 @@ body{
 .mf-key{display:flex;gap:14px;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3)}
 .mf-key span{display:inline-flex;align-items:center;gap:6px}
 .mf-key i{width:7px;height:7px;border-radius:50%;display:inline-block}
+/* The real map's key, matched to what realMap draws: the corpus in the
+   profile's purple, played artists in its pink, the recent window lit and
+   ringed in white. */
+.mf-key{flex-wrap:wrap;row-gap:6px}
+.mf-key .k-set{gap:12px}
+.mf-key i.k-all{background:var(--gen);opacity:.6}
+.mf-key i.k-yours{background:var(--accent);opacity:.45}
+.mf-key i.k-recent{background:var(--accent);outline:1px solid rgba(255,255,255,.55);outline-offset:1.5px}
 .mf-dist{
   font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-2);
   text-align:right;line-height:1.5;
@@ -1244,6 +1285,17 @@ details[open] summary .chev{transform:rotate(180deg)}
 .pl.chartpin .chartcard{padding:12px 12px 8px}
 
 .chart-keep{display:flex;flex-direction:column;gap:14px;margin-top:4px}
+/* Home's charts are always removable: Home is your own screen, not an edit mode,
+   so this cannot be the profile's .unpin, which only shows while editing. */
+.hc-unpin{
+  position:absolute;top:10px;right:10px;width:20px;height:20px;border-radius:50%;
+  border:1px solid var(--line-2);background:#15121D;color:var(--ink-2);
+  display:flex;align-items:center;justify-content:center;cursor:pointer;
+  font-family:inherit;font-size:13px;line-height:1;padding:0 0 1px;z-index:3;
+}
+.hc-unpin:hover{border-color:#FF4D6D;color:#FF4D6D}
+.hc-unpin:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#homeCharts .chart-t{padding-right:26px}
 .chart-badge{
   position:absolute;top:12px;right:12px;
   font-family:"IBM Plex Mono",monospace;font-size:8.5px;letter-spacing:.12em;
@@ -1290,17 +1342,17 @@ details[open] summary .chev{transform:rotate(180deg)}
 .chip-eg{border-color:var(--line);background:transparent;color:var(--ink-2)}
 .chip-eg:hover{border-color:var(--ink-3);color:var(--ink)}
 .rng{width:100%;accent-color:var(--accent);margin:2px 0}
-.tgl{
-  width:44px;height:25px;border-radius:99px;flex:none;padding:0;cursor:pointer;
-  border:1px solid var(--line-2);background:var(--raise);position:relative;
+/* Which artists: a scale plus its opposite, so a radio group, not a switch. */
+.fam{display:flex;flex-wrap:wrap;gap:6px}
+.fam button{
+  font:inherit;font-size:12.5px;padding:7px 11px;border-radius:999px;cursor:pointer;
+  border:1px solid var(--line-2);background:transparent;color:var(--ink-2);
+  display:inline-flex;align-items:baseline;gap:6px;
 }
-.tgl span{
-  position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;
-  background:var(--ink-3);transition:transform .16s ease,background .16s ease;
-}
-.tgl[aria-checked="true"]{background:var(--accent-tint);border-color:var(--accent-line)}
-.tgl[aria-checked="true"] span{transform:translateX(19px);background:var(--accent)}
-.tgl:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.fam button i{font-style:normal;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3)}
+.fam button[aria-checked="true"]{border-color:var(--accent-line);background:var(--accent-tint);color:var(--accent)}
+.fam button[aria-checked="true"] i{color:var(--accent)}
+.fam button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 /* the funnel carries the applied state, so a filter is visible without
    opening the sheet to check */
 .bell.on{color:var(--accent)}
@@ -1444,6 +1496,11 @@ details[open] summary .chev{transform:rotate(180deg)}
         </div>
       </section>
 
+      <section class="sec anim" id="homeChartsSec" hidden>
+        <div class="sec-label"><span>Your charts <span class="aux">live</span></span></div>
+        <div class="chart-keep" id="homeCharts"></div>
+      </section>
+
       <section class="sec anim">
         <div class="sec-label"><span>Climbing <span class="aux">vs last week</span></span>
           <span class="swap" data-a="youUp" data-b="youUpSongs">
@@ -1475,8 +1532,8 @@ details[open] summary .chev{transform:rotate(180deg)}
       </section>
 
       <section class="sec anim">
-        <div class="sec-label"><span>On repeat</span><span class="aux">This week</span></div>
-        <div class="rows" id="youTracks"></div>
+        <div class="sec-label"><span>On repeat <span class="aux">this week</span></span></div>
+        <div class="repscroll" id="repScroll"><div class="rows" id="youTracks"></div></div>
       </section>
     </div>
 
@@ -1874,9 +1931,15 @@ details[open] summary .chev{transform:rotate(180deg)}
         <div class="k">Within <b id="filtMiLabel">50 miles</b></div>
         <input class="rng" id="filtMi" type="range" min="5" max="150" step="5" value="50" aria-label="Maximum distance in miles">
       </div>
-      <div class="srow">
-        <span class="k">Only artists I listen to</span>
-        <button class="tgl" id="filtMine" type="button" role="switch" aria-checked="false"><span></span></button>
+      <div class="srow col">
+        <div class="k">Artists</div>
+        <div class="fam" id="filtFam" role="radiogroup" aria-label="Which artists">
+          <button type="button" role="radio" data-f="any" aria-checked="true">Anybody <i></i></button>
+          <button type="button" role="radio" data-f="heard" aria-checked="false">Heard before <i></i></button>
+          <button type="button" role="radio" data-f="regular" aria-checked="false">Listen regularly <i></i></button>
+          <button type="button" role="radio" data-f="favorite" aria-checked="false">Favorites only <i></i></button>
+          <button type="button" role="radio" data-f="new" aria-checked="false">New to me <i></i></button>
+        </div>
       </div>
       <div class="sheet-actions">
         <button type="button" id="filtReset">Reset</button>
@@ -2008,6 +2071,10 @@ details[open] summary .chev{transform:rotate(180deg)}
       <span class="mf-ax mf-r" id="mfAxR">Club</span>
       <span class="mf-ax mf-t" id="mfAxT">Instrumental</span>
       <span class="mf-ax mf-b" id="mfAxB">Vocal</span>
+    </div>
+    <div class="segs mf-when" id="mfWhen" role="group" aria-label="Genre shares over" hidden>
+      <button class="seg" type="button" data-w="all" aria-pressed="true">All time</button>
+      <button class="seg" type="button" data-w="recent" aria-pressed="false">Lately</button>
     </div>
     <div class="mf-clusters" id="mfClusters"></div>
     <div class="mf-foot">
@@ -3024,26 +3091,78 @@ function paintFull(){
   $("mapZoom").hidden = !realHere;
   $("mapFull").classList.toggle("real", realHere);
   if(realHere){
-    var n = realMap($("mapFullCanvas"), true);
-    $("mfDist").innerHTML = n + " of " + MAP_YOURS + " regions named<br>zoom in for the rest";
+    realMap($("mapFullCanvas"), true);
   } else {
     tasteMap($("mapFullCanvas"), p.map, p._accent, p._accentRGB, p._genRGB, true,
              current === 0 ? "self" : "");
   }
 }
 
+/* Which window the genre bars describe. All time is eight years, so it is
+   dominated by whoever mattered most across them; Lately uses the same
+   recent window the bright dots on the map already show. */
+var MAP_WHEN = "all";
+
+function renderMapBars(){
+  var p = PROFILES[current], mine = current === 0;
+  var tabs = $("mfWhen").querySelectorAll("[data-w]");
+  for(var i = 0; i < tabs.length; i++)
+    tabs[i].setAttribute("aria-pressed", tabs[i].getAttribute("data-w") === MAP_WHEN ? "true" : "false");
+
+  /* With real data these are the regions with the most hours in them, which is
+     a different quantity from the invented clusters' point counts - so the share
+     is read off the data rather than recomputed from bar lengths. Six, because
+     the listener occupies seventy-odd and a bar chart of seventy is a texture. */
+  var bars;
+  if(MAPDATA && mine){
+    var lately = MAP_WHEN === "recent";
+    var hrs = lately ? "recent_hours" : "hours", shr = lately ? "recent_share" : "share";
+    bars = MAPDATA.regions.filter(function(r){ return (r[hrs] || 0) > 0 && (lately || r.yours); })
+      /* By share, not hours: hours arrive rounded to a tenth, so two regions at
+         3.1h could sort one way and draw their bars the other. */
+      .sort(function(a, b){ return b[shr] - a[shr]; }).slice(0, 6)
+      .map(function(r){ return { nm: r.name, share: r[shr] }; });
+  } else {
+    var total = p.map.clusters.reduce(function(a, c){ return a + c[3]; }, 0);
+    bars = p.map.clusters.slice().sort(function(a, b){ return b[3] - a[3]; })
+      .map(function(c){ return { nm: c[4], share: c[3] / total }; });
+  }
+  if(!bars.length){
+    $("mfClusters").innerHTML = '<div class="mf-empty">No plays in the last ' +
+      ((MAPDATA && MAPDATA.recent_days) || 14) + " days</div>";
+    return;
+  }
+  var peak = bars[0].share || 1;
+  $("mfClusters").innerHTML = bars.map(function(b){
+    return '<div class="mf-cl"><span class="nm">' + b.nm + "</span>" +
+           '<span class="track"><i style="width:' + (b.share / peak * 100).toFixed(1) + '%"></i></span>' +
+           '<span class="pc">' + Math.round(b.share * 100) + "%</span></div>";
+  }).join("");
+}
+
+$("mfWhen").addEventListener("click", function(e){
+  var b = e.target.closest("[data-w]");
+  if(!b) return;
+  MAP_WHEN = b.getAttribute("data-w");
+  renderMapBars();
+});
+
 function openMap(){
   var p = PROFILES[current], first = p.name.split(" ")[0];
   var mine = current === 0;
   $("mfWho").textContent = mine ? "Your taste map" : "You & " + first;
   /* The white dot this used to describe was the "you are here" marker, and there
-     is no honest place to put one. With real data the same swatch means the
-     recent window instead, which is a subset of real positions rather than a
-     claim about where a person sits. */
+     is no honest place to put one. With real data the key names the three
+     things realMap actually draws instead - every artist, yours, and the
+     recent window - each swatch styled like its dots. */
   if(MAPDATA && mine){
-    $("mfKeyMine").innerHTML = '<i style="background:#F4F1FA"></i>Last ' +
-      (MAPDATA.recent_days || 14) + " days";
+    $("mfKeyMine").className = "k-set";
+    $("mfKeyMine").innerHTML =
+      '<span><i class="k-all"></i>All music</span>' +
+      '<span><i class="k-yours"></i>Your artists</span>' +
+      '<span><i class="k-recent"></i>Last ' + (MAPDATA.recent_days || 14) + " days</span>";
   } else {
+    $("mfKeyMine").className = "";
     $("mfKeyMine").innerHTML = '<i style="background:#F4F1FA"></i>You';
   }
   $("mfKeyName").textContent = first;
@@ -3056,30 +3175,15 @@ function openMap(){
   /* The placeholder line here read "0.34 apart - closer than 82% of UNC": a
      distance between two people measured on this picture. Map distance is flat
      past about three units, so that number cannot mean what it says. With real
-     data the line says what is actually on screen instead; paintFull rewrites it
-     as the zoom changes. */
+     data the line stays empty; the key beside it says what the colours are. */
   $("mfDist").innerHTML = (MAPDATA && mine) ? "" : p.map.note.replace(" \u00B7 ", "<br>");
 
-  /* With real data these are the regions with the most hours in them, which is
-     a different quantity from the invented clusters' point counts - so the share
-     is read off the data rather than recomputed from bar lengths. Six, because
-     the listener occupies seventy-odd and a bar chart of seventy is a texture. */
-  var bars;
-  if(MAPDATA && mine){
-    bars = MAPDATA.regions.filter(function(r){ return r.yours; })
-      .sort(function(a, b){ return b.hours - a.hours; }).slice(0, 6)
-      .map(function(r){ return { nm: r.name, share: r.share }; });
-  } else {
-    var total = p.map.clusters.reduce(function(a, c){ return a + c[3]; }, 0);
-    bars = p.map.clusters.slice().sort(function(a, b){ return b[3] - a[3]; })
-      .map(function(c){ return { nm: c[4], share: c[3] / total }; });
-  }
-  var peak = bars.length ? bars[0].share : 1;
-  $("mfClusters").innerHTML = bars.map(function(b){
-    return '<div class="mf-cl"><span class="nm">' + b.nm + "</span>" +
-           '<span class="track"><i style="width:' + (b.share / peak * 100).toFixed(1) + '%"></i></span>' +
-           '<span class="pc">' + Math.round(b.share * 100) + "%</span></div>";
-  }).join("");
+  /* Tabs only where there is a recent window to show - the sample profiles'
+     clusters are invented and have no time in them. */
+  var real = !!(MAPDATA && mine);
+  $("mfWhen").hidden = !real;
+  if(!real) MAP_WHEN = "all";
+  renderMapBars();
   MAPZ = 1; MAPCX = 0.5; MAPCY = 0.5;
   $("mapFull").hidden = false;
   document.body.style.overflow = "hidden";
@@ -3229,6 +3333,16 @@ var SHOW_BATCH = 6;
   }
 })();
 
+/* How well you know each act. The levels are decided in shows.py, counted in
+   separate days you came back; this only names them and mirrors apply.py. */
+var FAM_RANK = { heard: 1, regular: 2, favorite: 3 };
+var FAM_LABEL = { heard: "Heard", regular: "Regular", favorite: "Favorite" };
+function famOk(s, want){
+  if(!want || want === "any") return true;
+  if(want === "new") return !s.fam && !s.yours;
+  return (FAM_RANK[s.fam] || 0) >= FAM_RANK[want];
+}
+
 /* Vertical timeline: a continuous rail down the left, dates on it, each show
    opening to the right. The month interrupts the rail rather than sitting
    beside it, so scrolling reads as moving through a calendar. */
@@ -3254,7 +3368,8 @@ function renderTimeline(){
         '<div class="vt-meta">' +
           '<div class="vt-name">' + s.a + "</div>" +
           '<div class="vt-sub"><span class="vt-ven">' + esc(s.v) + "</span>" +
-            (s.dist ? '<span class="vt-mi">' + esc(s.dist) + "</span>" : "") + "</div>" +
+            (s.dist ? '<span class="vt-mi">' + esc(s.dist) + "</span>" : "") +
+            (FAM_LABEL[s.fam] ? '<span class="vt-fam">' + FAM_LABEL[s.fam] + "</span>" : "") + "</div>" +
           '<div class="vt-go"><span class="stack">' + stack + "</span>" +
             '<span class="sgo"><b data-going>' + (s.going + (on ? 1 : 0)) + "</b> going \u00B7 " + s.listen + " listen here</span></div>" +
           '<button class="sbtn vt-btn" type="button" data-k="' + key + '" aria-pressed="' + on + '">' +
@@ -3322,6 +3437,7 @@ function apiShow(x){
     img: x.image,
     hours: x.your_hours,
     yours: x.yours,
+    fam: x.familiarity || null,
     url: x.url
   };
 }
@@ -3330,13 +3446,14 @@ function apiShow(x){
    a wide radius so dragging the slider costs nothing - a cache keyed by radius
    would refetch on every position, for a spinner and no benefit. */
 var ALL_SHOWS = null;
-var SHOW_FILTER_DEFAULT = { maxMi: 50, onlyMine: false, days: null, maxFans: null, minFans: null, artists: [], genres: [] };
+var SHOW_FILTER_DEFAULT = { maxMi: 50, fam: "any", days: null, maxFans: null, minFans: null, artists: [], genres: [] };
 var showFilter = Object.assign({}, SHOW_FILTER_DEFAULT);
 
 /* Mirrors musicshare/spec/apply.py, which is the tested reference. It is
    duplicated here on purpose: dragging a slider must not wait on a round trip,
    and every show is already in memory. */
-function filterShows(){
+function filterShows(fam){
+  if(fam === undefined) fam = showFilter.fam;
   var src = ALL_SHOWS || [];
   var cutoff = null;
   if(showFilter.days != null){
@@ -3346,7 +3463,7 @@ function filterShows(){
   var want = showFilter.artists.map(function(a){ return a.toLowerCase(); });
 
   return src.filter(function(s){
-    if(showFilter.onlyMine && !s.yours) return false;
+    if(!famOk(s, fam)) return false;
     /* Shows with no distance are kept: absent is not the same as far. */
     if(s.mi != null && s.mi > showFilter.maxMi) return false;
 
@@ -3390,6 +3507,17 @@ function renderChips(){
   }).join("");
 }
 
+/* Each option says how many shows it would leave with everything else as set,
+   so the scale reads as a choice with consequences rather than five labels. */
+function renderFam(){
+  var btns = $("filtFam").querySelectorAll("button");
+  for(var i = 0; i < btns.length; i++){
+    var f = btns[i].getAttribute("data-f");
+    btns[i].setAttribute("aria-checked", f === showFilter.fam ? "true" : "false");
+    btns[i].querySelector("i").textContent = ALL_SHOWS ? filterShows(f).length : "";
+  }
+}
+
 function applyShowFilter(){
   if(!ALL_SHOWS) return;
   HOME.shows = filterShows();
@@ -3397,21 +3525,23 @@ function applyShowFilter(){
   renderTimeline();
 
   var n = HOME.shows.length, mine = 0;
-  for(var i = 0; i < n; i++) if(HOME.shows[i].yours) mine++;
+  /* "You listen to" is the regular level now, not a single play. */
+  for(var i = 0; i < n; i++) if(famOk(HOME.shows[i], "regular")) mine++;
   var lbl = document.querySelector("#showsUpcoming .sec-label span");
   if(lbl){
-    lbl.textContent = showFilter.onlyMine
+    lbl.textContent = showFilter.fam !== "any"
       ? n + " within " + showFilter.maxMi + " mi"
       : "Within " + showFilter.maxMi + " mi \u00B7 " + mine + " you listen to";
   }
   $("filtCount").textContent = n
     ? n + " show" + (n === 1 ? "" : "s") + ", " + mine + " you listen to"
     : "Nothing in range. Try a wider radius.";
+  renderFam();
   /* Active means "different from the default", not "not the maximum" - the
      feed opens at 50mi, so comparing against 150 lit the icon permanently. */
   renderChips();
   $("showsFilter").classList.toggle("on",
-    showFilter.onlyMine || showFilter.maxMi !== SHOW_FILTER_DEFAULT.maxMi ||
+    showFilter.fam !== "any" || showFilter.maxMi !== SHOW_FILTER_DEFAULT.maxMi ||
     showFilter.days != null || showFilter.maxFans != null ||
     showFilter.minFans != null || showFilter.artists.length > 0);
 }
@@ -3525,7 +3655,6 @@ function loadShows(){
 $("showsFilter").addEventListener("click", function(){
   $("filtMi").value = showFilter.maxMi;
   $("filtMiLabel").textContent = showFilter.maxMi + " miles";
-  $("filtMine").setAttribute("aria-checked", showFilter.onlyMine ? "true" : "false");
   applyShowFilter();
   $("filtWrap").hidden = false;
   document.body.style.overflow = "hidden";
@@ -3545,16 +3674,16 @@ $("filtMi").addEventListener("input", function(){
   $("filtMiLabel").textContent = showFilter.maxMi + " miles";
   applyShowFilter();
 });
-$("filtMine").addEventListener("click", function(){
-  showFilter.onlyMine = this.getAttribute("aria-checked") !== "true";
-  this.setAttribute("aria-checked", showFilter.onlyMine ? "true" : "false");
+$("filtFam").addEventListener("click", function(e){
+  var b = e.target.closest("[data-f]");
+  if(!b) return;
+  showFilter.fam = b.getAttribute("data-f");
   applyShowFilter();
 });
 $("filtReset").addEventListener("click", function(){
   showFilter = Object.assign({}, SHOW_FILTER_DEFAULT, { artists: [] });
   $("filtMi").value = showFilter.maxMi;
   $("filtMiLabel").textContent = showFilter.maxMi + " miles";
-  $("filtMine").setAttribute("aria-checked", "false");
   $("askInput").value = "";
   $("askNote").textContent = "";
   $("askNote").className = "ask-note";
@@ -3599,7 +3728,7 @@ function askShows(){
       return;
     }
     var sp = d.spec;
-    showFilter.onlyMine = !!sp.only_mine;
+    showFilter.fam = sp.familiarity || "any";
     showFilter.maxMi = sp.radius_mi != null ? sp.radius_mi : SHOW_FILTER_DEFAULT.maxMi;
     showFilter.days = sp.within_days;
     showFilter.maxFans = sp.max_fans;
@@ -3611,7 +3740,6 @@ function askShows(){
        user finds out what it decided. */
     $("filtMi").value = showFilter.maxMi;
     $("filtMiLabel").textContent = showFilter.maxMi + " miles";
-    $("filtMine").setAttribute("aria-checked", showFilter.onlyMine ? "true" : "false");
     /* Naming the genres back is the only way the user can tell a wrong reading
        from an empty night - "no metal shows" and "it did not hear metal" look
        identical otherwise. */
@@ -3634,17 +3762,31 @@ $("askInput").addEventListener("keydown", function(e){
 
 /* [title, artist, count, image] -> the numbered row On repeat already used.
    Extracted rather than copied when Found and kept needed the same shape. */
-function trackRows(list){
+function trackRows(list, start){
   return list.map(function(t, n){
     var art = t[3]
       ? 'class="art photo" style="background-image:url(' + t[3] + ')"'
       : 'class="art" style="' + artStyle(t[0], 200) + '"';
     return '<div class="row" tabindex="0" role="button">' +
-      '<span class="idx">' + (n + 1) + "</span>" +
+      '<span class="idx">' + ((start || 0) + n + 1) + "</span>" +
       "<div " + art + "></div>" +
       '<div class="meta"><div class="tt">' + esc(t[0]) + '</div><div class="ta">' + esc(t[1]) + "</div></div>" +
       '<span class="plays">' + esc(t[2]) + "</span></div>";
   }).join("");
+}
+
+/* How many fit a phone row. Past this a list scrolls sideways instead of
+   growing downward and pushing the rest of the feed off screen. */
+var ROW_FIT = 4;
+
+/* Songs are rows, not cards, so past ROW_FIT they become pages of rows side by
+   side - numbered straight through, so page two starts at 5. */
+function songPages(list){
+  if(list.length <= ROW_FIT) return trackRows(list);
+  var html = "";
+  for(var i = 0; i < list.length; i += ROW_FIT)
+    html += '<div class="rows">' + trackRows(list.slice(i, i + ROW_FIT), i) + "</div>";
+  return '<div class="rowpages">' + html + "</div>";
 }
 
 function artistCircles(list, down){
@@ -3659,8 +3801,34 @@ function artistCircles(list, down){
   }).join("");
 }
 
+/* On repeat lists everything the server sent - up to twenty, each played at least
+   three times - in a box about five rows tall that scrolls on its own. The fade
+   at the bottom says there is more and goes once the end is reached. Scroll
+   chaining is left on, so a swipe past the last row carries on down the page
+   instead of being trapped in the box. */
+var REPEAT_FIT = 5;
+
+function renderRepeat(){
+  var all = HOME.you.tracks || [];
+  $("youTracks").innerHTML = all.length
+    ? trackRows(all)
+    : '<div class="emptynote">Nothing played three times this week.</div>';
+  $("repScroll").classList.toggle("fits", all.length <= REPEAT_FIT);
+  repeatEdge();
+}
+
+/* Only once scrolled: rendered while Home is hidden, the box measures zero and
+   would otherwise look like it had already reached its end. */
+function repeatEdge(){
+  var el = $("repScroll");
+  el.classList.toggle("at-end", el.scrollTop > 0 && el.scrollTop + el.clientHeight >= el.scrollHeight - 2);
+}
+$("repScroll").addEventListener("scroll", repeatEdge, { passive: true });
+
 function renderYou(){
   var y = HOME.you;
+  /* New plays arrived, so the live charts have something new to say. */
+  renderHomeCharts();
   /* The map's own caption and axes are paintYou's business. Setting them here
      as well meant the feed arriving a second after load put the generated
      "Moved 0.12 toward club" back over the real one. */
@@ -3674,22 +3842,25 @@ function renderYou(){
   $("youDown").innerHTML = (y.down || []).length
     ? artistCircles(y.down, true)
     : '<div class="emptynote">No artist cooled this week.</div>';
+  $("youUp").classList.toggle("scroll", (y.up || []).length > ROW_FIT);
+  $("youDown").classList.toggle("scroll", (y.down || []).length > ROW_FIT);
   /* A month with nothing that stuck is a real answer, not a broken section. */
   var found = y.found || [];
   $("youFound").innerHTML = found.length
     ? artistCircles(found)
-    : '<div class="emptynote">No new artist stuck this month.</div>';
+    : '<div class="emptynote">No new artist stuck this week.</div>';
+  $("youFound").classList.toggle("scroll", found.length > ROW_FIT);
   $("youUpSongs").innerHTML = (y.upSongs || []).length
-    ? trackRows(y.upSongs)
+    ? songPages(y.upSongs)
     : '<div class="emptynote">No song climbed this week.</div>';
   $("youDownSongs").innerHTML = (y.downSongs || []).length
-    ? trackRows(y.downSongs)
+    ? songPages(y.downSongs)
     : '<div class="emptynote">No song cooled this week.</div>';
   var fs = y.foundSongs || [];
   $("youFoundSongs").innerHTML = fs.length
-    ? trackRows(fs)
-    : '<div class="emptynote">No new song stuck this month.</div>';
-  $("youTracks").innerHTML = trackRows(y.tracks);
+    ? songPages(fs)
+    : '<div class="emptynote">No new song stuck this week.</div>';
+  renderRepeat();
 }
 
 var actFilter = "all";
@@ -3973,7 +4144,7 @@ function showScreen(which){
 
   window.scrollTo(0, which === "profile" ? 0 : screenScroll[which]);
 
-  if(which === "home"){ loadHome(); playIn($("tabYou")); paintYou(); }
+  if(which === "home"){ loadHome(); playIn($("tabYou")); paintYou(); renderHomeCharts(); }
   else if(which === "discover") playIn($("tabGlobal").hidden ? $("tabCommunity") : $("tabGlobal"));
   else if(which === "activity") playIn($("screenActivity"));
   else if(which === "shows"){
@@ -4103,6 +4274,74 @@ $("chartEg").addEventListener("click", function(e){
    was charted. */
 var KEPT_MAX = 12;
 
+/* ---------- charts on Home ----------
+   Separate from the profile's pinned charts, which are snapshots other people
+   see. These are yours and they are live: what is stored is the spec - the
+   question as it was understood - and every render re-runs it against whatever
+   has been played since. The model reads a question once, when it is asked. */
+var HOME_CHARTS_MAX = 3, homeChartSeq = 0;
+
+function homePins(){
+  var c = CUSTOM[0] || {};
+  return (c.home || []).slice();
+}
+function saveHomePins(list){
+  (CUSTOM[0] || (CUSTOM[0] = {})).home = list.slice(0, HOME_CHARTS_MAX);
+  saveCustom();
+}
+
+function renderHomeCharts(){
+  var pins = homePins();
+  $("homeChartsSec").hidden = !pins.length;
+  if(!pins.length){ $("homeCharts").innerHTML = ""; return; }
+  var seq = ++homeChartSeq;
+  Promise.all(pins.map(function(p){
+    return fetch("/api/chart/run", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(p.spec)
+    }).then(function(r){
+      /* A 422 is a spec the schema no longer accepts - saved before a change. */
+      return r.ok ? r.json() : { understood: false };
+    }).catch(function(){ return null; });
+  })).then(function(results){
+    if(seq !== homeChartSeq) return;   /* a newer render has started */
+    var html = "", draw = [];
+    results.forEach(function(res, i){
+      var p = pins[i];
+      var x = '<button class="hc-unpin" type="button" data-home-unpin="' + esc(p.id) +
+              '" aria-label="Remove from Home">&#215;</button>';
+      if(res && res.understood && res.data && !res.empty){
+        html += chartCard(res.data, { unpin: x, key: "home" + i,
+          actions: '<div class="chart-q">' + esc(p.q) + "</div>" });
+        draw.push([i, res.data]);
+        return;
+      }
+      /* Three different situations, and saying which is the whole point: no
+         server, nothing played in that window yet, or a chart saved before the
+         schema changed under it. */
+      var why = res === null ? "Needs the local server to update."
+              : res.understood ? "Nothing to show yet."
+              : "This chart no longer fits. Ask it again from Charts.";
+      html += '<div class="chartcard">' + x + '<div class="chart-t">' + esc(p.title || p.q) +
+              '</div><div class="chart-note">' + why + '</div><div class="chart-q">' +
+              esc(p.q) + "</div></div>";
+    });
+    $("homeCharts").innerHTML = html;
+    draw.forEach(function(d){
+      drawChart(document.querySelector('#homeCharts [data-chart="home' + d[0] + '"]'), d[1]);
+    });
+  });
+}
+
+$("homeCharts").addEventListener("click", function(e){
+  var b = e.target.closest("[data-home-unpin]");
+  if(!b) return;
+  var id = b.dataset.homeUnpin;
+  saveHomePins(homePins().filter(function(p){ return p.id !== id; }));
+  renderHomeCharts();
+});
+
 function keptList(){
   var c = CUSTOM[current] || {};
   return (c.kept || []).slice();
@@ -4130,9 +4369,11 @@ function removeKept(id){
 function renderKept(){
   var l = keptList(), pins = pinList("charts");
   var pinnedIds = pins.filter(Boolean).map(function(p){ return p.id; });
+  var homeIds = homePins().map(function(p){ return p.id; });
 
   $("chartKept").innerHTML = l.map(function(k, i){
     var isPinned = pinnedIds.indexOf(k.id) >= 0;
+    var onHome = homeIds.indexOf(k.id) >= 0;
     return chartCard(k.data, {
       key: "kept" + i,
       unpin: isPinned ? '<span class="chart-badge">On profile</span>' : "",
@@ -4141,6 +4382,8 @@ function renderKept(){
         '<button class="btn ' + (isPinned ? "btn-ghost" : "btn-primary") + '" type="button" ' +
         'data-pin="' + esc(k.id) + '"' + (isPinned ? " disabled" : "") + ">" +
         (isPinned ? "On your profile" : "Pin to profile") + "</button>" +
+        '<button class="btn btn-ghost" type="button" data-home="' + esc(k.id) + '"' +
+        (onHome ? " disabled" : "") + ">" + (onHome ? "On Home" : "Pin to Home") + "</button>" +
         '<button class="btn btn-ghost" type="button" data-drop="' + esc(k.id) + '">Remove</button>' +
         "</div>"
     });
@@ -4211,6 +4454,25 @@ function askChart(){
     note.textContent = "Needs the local server - the charts are computed from your history on disk.";
   });
 }
+
+$("chartKept").addEventListener("click", function(e){
+  var b = e.target.closest("[data-home]");
+  if(!b || b.disabled) return;
+  var id = b.dataset.home;
+  var k = keptList().filter(function(x){ return x.id === id; })[0];
+  if(!k) return;
+  var list = homePins(), note = $("chartNote");
+  note.className = "ask-note";
+  if(list.length >= HOME_CHARTS_MAX){
+    note.textContent = "Home holds " + HOME_CHARTS_MAX + " charts. Remove one from Home first.";
+    return;
+  }
+  list.push({ id: k.id, spec: k.spec, q: k.q, title: (k.data && k.data.title) || k.q });
+  saveHomePins(list);
+  note.textContent = "On Home now. It updates as you listen.";
+  renderKept();
+  renderHomeCharts();
+});
 
 function chartRecord(c){
   return { id: c.id, spec: c.spec, data: c.data, q: c.q, at: Date.now() };
@@ -5170,26 +5432,55 @@ function fmtVal(v){
    Ticks land on round numbers rather than on the data's own maximum: a top
    gridline reading 63.5 is a number nobody chose, and rounding it up to 70
    costs a little headroom and buys labels that can be read at a glance. */
-function niceTop(max){
+function niceStep(max){
+  /* A round gap between gridlines - 1, 2, 2.5 or 5 of some power of ten - small
+     enough that the scale gets about five of them. Three fixed lines at zero,
+     half and top read 0, 2.5, 5 on a chart peaking at 3.2, which leaves most of
+     the values between two labels and a third of the plot empty. */
   if(!(max > 0)) return 1;
-  var mag = Math.pow(10, Math.floor(Math.log(max) / Math.LN10));
-  var n = max / mag;
-  var step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10;
-  return step * mag;
+  var raw = max / 5;
+  var mag = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
+  var n = raw / mag;
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * mag;
+}
+
+function niceTop(max){
+  /* The first gridline at or above the data, so the tallest point sits near the
+     top instead of rounding up a whole order of magnitude. The small epsilon
+     keeps a peak of exactly 4 from being floated up to 5. */
+  if(!(max > 0)) return 1;
+  var step = niceStep(max);
+  return Math.ceil(max / step - 1e-9) * step;
+}
+
+/* A gridline's label, with exactly the precision its step needs. fmtVal rounds
+   to one decimal and to whole thousands, which is right beside a bar and wrong
+   on a scale: steps of 0.25 would read 0.3 and 0.5, and 2,500 would read 3k. */
+function tickVal(v, step){
+  var k = step >= 1000, s = k ? step / 1000 : step;
+  var t = String(Math.round(s * 1e6) / 1e6), dot = t.indexOf(".");
+  var dec = dot < 0 ? 0 : t.length - dot - 1;
+  if(!v) return "0";
+  /* Trailing zeros go: 0.2, 0.4 ... 1 reads faster than 0.0, 0.2 ... 1.0, and the
+     step between lines is already visible from the lines themselves. */
+  var out = (k ? v / 1000 : v).toFixed(dec);
+  if(dec) out = out.replace(/0+$/, "").replace(/\.$/, "");
+  return out + (k ? "k" : "");
 }
 
 /* Left gutter, gridlines and their labels. Returns where the plot may start. */
 function drawScale(x, w, h, top, plotH, max, ink3){
+  /* max has already been through niceTop, so it is a whole number of steps. */
+  var step = niceStep(max), count = Math.max(1, Math.round(max / step)), ticks = [];
+  for(var i = 0; i <= count; i++) ticks.push(Math.round(step * i * 1e6) / 1e6);
   var gut = 0;
   x.font = '9px "IBM Plex Mono", monospace';
-  for(var i = 0; i <= 2; i++){
-    gut = Math.max(gut, x.measureText(String(fmtVal(max * i / 2))).width);
-  }
+  ticks.forEach(function(t){ gut = Math.max(gut, x.measureText(tickVal(t, step)).width); });
   gut = Math.ceil(gut) + 6;
   x.textAlign = "right";
   x.textBaseline = "middle";
-  for(var k = 0; k <= 2; k++){
-    var v = max * k / 2, y = top + plotH - (k / 2) * plotH;
+  for(var k = 0; k < ticks.length; k++){
+    var v = ticks[k], y = top + plotH - (v / max) * plotH;
     x.strokeStyle = "rgba(244,241,250,.06)";
     x.lineWidth = 1;
     x.beginPath();
@@ -5198,7 +5489,7 @@ function drawScale(x, w, h, top, plotH, max, ink3){
     x.lineTo(w, Math.round(y) + 0.5);
     x.stroke();
     x.fillStyle = ink3;
-    x.fillText(String(fmtVal(v)), gut - 6, y);
+    x.fillText(tickVal(v, step), gut - 6, y);
   }
   return gut;
 }
@@ -5368,27 +5659,53 @@ function drawChart(cv, d){
   var step = (w - gut) / n;
 
   if(d.chart === "line"){
-    x.beginPath();
-    for(var p = 0; p < n; p++){
-      var px = gut + step * p + step / 2;
-      var py = top + plotH - (d.values[p] / max) * plotH;
-      p ? x.lineTo(px, py) : x.moveTo(px, py);
+    /* A running total is an amount at a moment, not over a bucket: it starts at
+       zero on the left edge, each bucket's total lands where that bucket ends, and
+       on a chart of today the last one lands at the current minute rather than at
+       the end of an hour that has not finished. Drawn at bucket middles, the line
+       rose half an hour before the listening and ran flat into the future. Other
+       lines keep their points in the middle of their buckets. */
+    var pts = [];
+    if(d.cumulative){
+      pts.push([gut, 0]);
+      for(var q = 0; q < n; q++){
+        var end = q === n - 1 && d.partial_last != null ? q + d.partial_last : q + 1;
+        pts.push([gut + step * end, d.values[q]]);
+      }
+    } else {
+      for(var p = 0; p < n; p++) pts.push([gut + step * p + step / 2, d.values[p]]);
     }
+    x.beginPath();
+    pts.forEach(function(pt, i){
+      var py = top + plotH - (pt[1] / max) * plotH;
+      i ? x.lineTo(pt[0], py) : x.moveTo(pt[0], py);
+    });
     x.strokeStyle = accent;
     x.lineWidth = 2;
     x.lineJoin = "round";
     x.stroke();
     /* fill under the line so a sparse series still reads as a quantity */
-    x.lineTo(gut + step * (n - 1) + step / 2, top + plotH);
-    x.lineTo(gut + step / 2, top + plotH);
+    x.lineTo(pts[pts.length - 1][0], top + plotH);
+    x.lineTo(pts[0][0], top + plotH);
     x.closePath();
     var g = x.createLinearGradient(0, top, 0, top + plotH);
     g.addColorStop(0, css.getPropertyValue("--accent-tint").trim() || "rgba(231,64,148,.13)");
     g.addColorStop(1, "rgba(0,0,0,0)");
     x.fillStyle = g;
     x.fill();
+    /* Where "now" is, on a running total of today. */
+    if(d.cumulative && d.partial_last != null){
+      var last = pts[pts.length - 1];
+      x.beginPath();
+      x.arc(last[0], top + plotH - (last[1] / max) * plotH, 3, 0, Math.PI * 2);
+      x.fillStyle = accent;
+      x.fill();
+    }
   } else {
     for(var b = 0; b < n; b++){
+      /* A bucket with nothing in it draws nothing. A two-pixel stub read as "a
+         little", which on a chart of today's hours is a claim about 3am. */
+      if(!d.values[b]) continue;
       var bh = Math.max(2, (d.values[b] / max) * plotH);
       x.fillStyle = accent;
       x.beginPath();
@@ -5402,7 +5719,8 @@ function drawChart(cv, d){
   x.textAlign = "center";
   var every = Math.max(1, Math.ceil(n / Math.floor((w - gut) / 34)));
   for(var t = 0; t < n; t += every){
-    x.fillText(fmtLabel(d.labels[t], d.x_label), gut + step * t + step / 2, h - padB / 2 + 1);
+    /* On a running total's time axis a label marks where its hour begins. */
+    x.fillText(fmtLabel(d.labels[t], d.x_label), gut + step * t + (d.cumulative ? 0 : step / 2), h - padB / 2 + 1);
   }
 }
 
@@ -5670,6 +5988,7 @@ migrateInline().then(function(moved){
 }).then(function(adopted){
   if(!adopted) return;
   render(current);
+  renderHomeCharts();
   paintMood();
   if(!$("custWrap").hidden) syncSheet();
 });

@@ -40,6 +40,32 @@ def test_limit_is_respected():
     assert len(run(ChartSpec(dimension="artist", limit=3)).labels) == 3
 
 
+def test_today_by_hour_runs_from_midnight_to_now_with_no_gaps():
+    """Quiet hours are zeros, and hours that have not happened are not drawn."""
+    d = run(ChartSpec(range="today", dimension="hour_of_day"))
+    assert 1 <= len(d.labels) <= 24
+    assert d.labels == [f"{h:02d}" for h in range(len(d.labels))]
+    assert all(v >= 0 for v in d.values)
+
+
+def test_a_running_total_only_rises_and_ends_at_the_plain_total():
+    plain = run(ChartSpec(range="today", dimension="hour_of_day"))
+    total = run(ChartSpec(range="today", dimension="hour_of_day", cumulative=True))
+    assert total.chart == "line" and total.labels == plain.labels
+    assert all(b >= a for a, b in zip(total.values, total.values[1:], strict=False))
+    assert abs(total.values[-1] - sum(plain.values)) < 0.05
+    assert total.y_label == "total hours"
+
+
+def test_a_running_total_of_today_knows_how_far_into_the_hour_it_is():
+    """So the line can stop at the current minute instead of the end of the hour."""
+    d = run(ChartSpec(range="today", dimension="hour_of_day", cumulative=True))
+    assert d.cumulative is True
+    assert 0 <= d.partial_last <= 1
+    week = run(ChartSpec(range="7d", dimension="date", grain="day", cumulative=True))
+    assert week.partial_last is None
+
+
 def test_cyclical_dimensions_keep_their_own_order():
     """A day-of-week chart sorted by size is unreadable."""
     d = run(ChartSpec(dimension="day_of_week", metric="hours"))

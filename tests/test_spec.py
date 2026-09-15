@@ -6,6 +6,7 @@ from datetime import date
 
 import pytest
 
+from musicshare import shows as shows_mod
 from musicshare.spec import ShowFilter, apply, validate
 
 TODAY = date(2026, 9, 10)
@@ -18,20 +19,52 @@ def show(**kw):
         "distance_mi": 10.0,
         "fans": 40_000,
         "yours": True,
+        "familiarity": "regular",
     }
     base.update(kw)
     return base
 
 
 def test_defaults_keep_everything():
-    shows = [show(), show(artist="Deftones", yours=False)]
+    shows = [show(), show(artist="Deftones", yours=False, familiarity=None)]
     assert len(apply(ShowFilter(), shows, TODAY)) == 2
 
 
-def test_only_mine():
-    shows = [show(), show(artist="Deftones", yours=False)]
-    out = apply(ShowFilter(only_mine=True), shows, TODAY)
-    assert [s["artist"] for s in out] == ["Slow Pulp"]
+@pytest.mark.parametrize(
+    "want,kept",
+    [
+        ("any", ["Slow Pulp", "Deftones", "Wednesday", "Horsegirl"]),
+        ("heard", ["Slow Pulp", "Deftones", "Wednesday"]),
+        ("regular", ["Slow Pulp", "Wednesday"]),
+        ("favorite", ["Wednesday"]),
+        ("new", ["Horsegirl"]),
+    ],
+)
+def test_each_level_includes_the_ones_above_it(want, kept):
+    """Asking for artists you listen to regularly should not hide your favourites."""
+    shows = [
+        show(),
+        show(artist="Deftones", familiarity="heard"),
+        show(artist="Wednesday", familiarity="favorite"),
+        show(artist="Horsegirl", familiarity=None, yours=False),
+    ]
+    out = apply(ShowFilter(familiarity=want), shows, TODAY)
+    assert [s["artist"] for s in out] == kept
+
+
+def test_a_row_cached_before_levels_existed_is_not_new():
+    """It has a play on record and no level; calling that act new would be wrong."""
+    old = show(artist="Deftones")
+    del old["familiarity"]
+    assert apply(ShowFilter(familiarity="new"), [old], TODAY) == []
+
+
+@pytest.mark.parametrize(
+    "days,level",
+    [(0, None), (1, "heard"), (14, "heard"), (15, "regular"), (49, "regular"), (50, "favorite")],
+)
+def test_levels_are_counted_in_separate_days_not_plays(days, level):
+    assert shows_mod.familiarity_of(days) == level
 
 
 @pytest.mark.parametrize("radius,kept", [(5, 0), (10, 1), (500, 1)])
@@ -134,3 +167,45 @@ def test_a_refusal_is_not_judged_on_its_leftovers():
 
     spec = ChartSpec(understood=False, dimension="artist", series="genre")
     assert validate_chart(spec) == []
+
+
+def test_today_over_time_is_drawn_by_hour_not_refused_for_a_grain():
+    """A date axis over one day has a single bucket, so it is derived to hours."""
+    from musicshare.spec import ChartSpec, validate_chart
+    from musicshare.spec.chartrun import effective
+
+    spec = ChartSpec(range="today", dimension="date")
+    assert validate_chart(spec) == []
+    drawn = effective(spec)
+    assert drawn.dimension == "hour_of_day" and drawn.grain is None
+
+
+def test_a_date_chart_still_needs_a_grain_on_any_other_range():
+    from musicshare.spec import ChartSpec, validate_chart
+
+    problems = validate_chart(ChartSpec(range="7d", dimension="date"))
+    assert [p.field for p in problems] == ["grain"]
+
+
+@pytest.mark.parametrize(
+    "kw,ok",
+    [
+        ({"dimension": "hour_of_day", "range": "today", "metric": "hours"}, True),
+        ({"dimension": "date", "grain": "month", "metric": "plays"}, True),
+        ({"dimension": "artist", "metric": "hours"}, False),
+        ({"dimension": "date", "grain": "day", "metric": "distinct_artists"}, False),
+        ({"dimension": "date", "grain": "day", "metric": "skip_rate"}, False),
+    ],
+)
+def test_a_running_total_needs_an_order_and_a_quantity_that_adds(kw, ok):
+    """Distinct artists would be counted again every hour; a summed rate is not one."""
+    from musicshare.spec import ChartSpec, validate_chart
+
+    assert (validate_chart(ChartSpec(cumulative=True, **kw)) == []) is ok
+
+
+def test_a_running_total_is_always_a_line():
+    from musicshare.spec.chartrun import chart_for
+
+    assert chart_for("hour_of_day", cumulative=True) == "line"
+    assert chart_for("hour_of_day") == "bar"

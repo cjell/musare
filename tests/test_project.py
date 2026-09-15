@@ -236,3 +236,15 @@ def test_atlas_map_marks_which_regions_are_yours(atlas, basemap, space, con):
     mine = [r for r in m["regions"] if r["yours"]]
     assert len(mine) == 2  # the history covers two of three genres
     assert all(r["hours"] >= 1.0 for r in mine)
+
+
+def test_atlas_map_lately_is_its_own_share_not_all_time_relabelled(atlas, basemap, space, con):
+    """The fixture's bluegrass is two years old and its techno is recent, so all
+    of the recent listening sits in one region while all time splits across two."""
+    m = project.atlas_map(atlas, con=con, b=basemap, space=space)
+    mine = [r for r in m["regions"] if r["yours"]]
+    assert len(mine) == 2
+    assert all(0 < r["share"] < 1 for r in mine)
+    lately = [r for r in m["regions"] if r["recent_share"] > 0]
+    assert len(lately) == 1 and lately[0]["recent_share"] == 1.0
+    assert lately[0]["recent_hours"] > 0

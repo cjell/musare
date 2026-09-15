@@ -62,7 +62,8 @@ def validate_chart(spec: ChartSpec) -> list[SpecProblem]:
         return []
     problems: list[SpecProblem] = []
 
-    if spec.dimension == "date" and spec.grain is None:
+    # Today over time is drawn by hour (chartrun.effective), so it needs no grain.
+    if spec.dimension == "date" and spec.grain is None and spec.range != "today":
         problems.append(SpecProblem("grain", "a chart over time needs a bucket size"))
     if spec.year is not None and spec.year < DATA_FIRST_YEAR:
         problems.append(SpecProblem("year", f"history starts in {DATA_FIRST_YEAR}"))
@@ -90,6 +91,22 @@ def validate_chart(spec: ChartSpec) -> list[SpecProblem]:
             problems.append(
                 SpecProblem("per_period", f"'{spec.dimension}' is not a period to rank inside")
             )
+
+    # A running total adds each bucket to the ones before it, so it needs buckets
+    # that come in an order and a quantity that adds. Distinct counts do not - the
+    # same artist would be counted again in every hour - and a rate summed is not
+    # a rate. A ranking inside each period has nothing to add up across periods.
+    if spec.cumulative:
+        if spec.dimension not in ORDERED:
+            problems.append(
+                SpecProblem(
+                    "cumulative", f"a running total needs an ordered axis, not '{spec.dimension}'"
+                )
+            )
+        if spec.metric not in ("hours", "plays"):
+            problems.append(SpecProblem("cumulative", f"'{spec.metric}' does not add up"))
+        if spec.per_period:
+            problems.append(SpecProblem("cumulative", "a per-period ranking has nothing to add up"))
 
     # There is deliberately no "genre cannot be both the axis and the split"
     # check. It reads like a real rule and is unreachable: 'genre' is not an

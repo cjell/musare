@@ -360,6 +360,19 @@ def atlas_map(
     pos = region_positions(atlas, b=b, space=space)
     occ = {o["index"]: o for o in regions_mod.occupancy(atlas, space=space, con=con)}
 
+    # The same regions over the recent window, for the Lately view. All time is
+    # eight years and is dominated by whoever mattered most across them - one
+    # artist from 2019 holds a fifth of the largest region. Summed over every
+    # artist with a row in the space, the basis occupancy uses, so the two views
+    # are shares of the same thing over different windows.
+    recent_tot: dict[int, float] = {}
+    for name, h in recent.items():
+        i = space.row(name)
+        if i is not None:
+            k = int(atlas.assign[i])
+            recent_tot[k] = recent_tot.get(k, 0.0) + h
+    recent_grand = sum(recent_tot.values())
+
     artists = [
         {
             "name": names[j],
@@ -404,6 +417,10 @@ def atlas_map(
                 "your_artists": o["artists"],
                 "hours": o["hours"],
                 "share": o["share"],
+                "recent_hours": round(recent_tot.get(r.index, 0.0), 1),
+                "recent_share": (
+                    round(recent_tot.get(r.index, 0.0) / recent_grand, 4) if recent_grand else 0.0
+                ),
                 # Whether this listener has any business here at all. The frontend
                 # needs it: eighty labels on a phone is not a map, it is a wall.
                 "yours": o["hours"] >= min_hours,

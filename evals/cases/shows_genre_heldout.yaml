@@ -15,7 +15,7 @@
 
 # ------------------------------------------------------------ plain genre
 - input: any metal shows around here
-  expect: {genres: [metal], only_mine: false, radius_mi: null}
+  expect: {genres: [metal], familiarity: any, radius_mi: null}
   tags: [genre, single]
 
 - input: I want to see some jazz this weekend
@@ -58,7 +58,7 @@
 
 # ------------------------------------------------- genre is NOT what was asked
 - input: shows for artists I already listen to
-  expect: {genres: [], only_mine: true}
+  expect: {genres: [], familiarity: regular}
   tags: [genre, negative]
 
 - input: anything good on

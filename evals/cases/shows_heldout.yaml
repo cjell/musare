@@ -20,7 +20,7 @@
 
 # ------------------------------------------------------------------ defaults
 - input: any gigs around here
-  expect: {radius_mi: null, within_days: null, only_mine: false, artists: [], understood: true}
+  expect: {radius_mi: null, within_days: null, familiarity: any, artists: [], understood: true}
   tags: [defaults, idiom]
 
 - input: who's playing
@@ -70,18 +70,19 @@
   expect: {max_fans: {between: [1, 200000]}}
   tags: [fanbase, idiom]
 
-# ----------------------------------------------------------------- only mine
+# --------------------------------------------------------------- familiarity
+# Rescored when only_mine became familiarity; this file was already retired.
 - input: only people already in my rotation
-  expect: {only_mine: true}
-  tags: [only-mine]
+  expect: {familiarity: regular}
+  tags: [familiarity]
 
 - input: surprise me with someone I don't know
-  expect: {only_mine: false}
-  tags: [only-mine, negation]
+  expect: {familiarity: new}
+  tags: [familiarity, new]
 
 # -------------------------------------------------------------- named artist
 - input: is Clairo coming through
-  expect: {artists: [Clairo], only_mine: false}
+  expect: {artists: [Clairo], familiarity: any}
   tags: [named-artist]
 
 - input: anything from Beach House or Alvvays
@@ -99,8 +100,8 @@
   tags: [compound]
 
 - input: bands I follow, close by, this weekend
-  expect: {only_mine: true, within_days: {between: [1, 4]}}
-  tags: [compound, only-mine]
+  expect: {familiarity: {in: [heard, regular]}, within_days: {between: [1, 4]}}
+  tags: [compound, familiarity]
 
 # ------------------------------------------------------------------ refusals
 - input: what did I think of the last show I went to

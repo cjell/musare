@@ -19,7 +19,7 @@
 
 # ---------------------------------------------------------------- defaults
 - input: shows near me
-  expect: {only_mine: false, radius_mi: null, within_days: null, max_fans: null, artists: []}
+  expect: {familiarity: any, radius_mi: null, within_days: null, max_fans: null, artists: []}
   tags: [defaults]
 
 - input: what's on
@@ -27,7 +27,7 @@
   tags: [defaults, terse]
 
 - input: concerts
-  expect: {radius_mi: null, within_days: null, only_mine: false}
+  expect: {radius_mi: null, within_days: null, familiarity: any}
   tags: [defaults, terse]
 
 # ---------------------------------------------------------------- distance
@@ -112,34 +112,34 @@
   expect: {within_days: 10}
   tags: [time, explicit]
 
-# ---------------------------------------------------------------- only mine
+# -------------------------------------------------------------- familiarity
 - input: artists I actually listen to
-  expect: {only_mine: true}
-  tags: [only-mine]
+  expect: {familiarity: regular}
+  tags: [familiarity]
 
 - input: stuff from my library
-  expect: {only_mine: true}
-  tags: [only-mine]
+  expect: {familiarity: {in: [heard, regular]}}
+  tags: [familiarity]
 
 - input: bands I already know
-  expect: {only_mine: true}
-  tags: [only-mine]
+  expect: {familiarity: heard}
+  tags: [familiarity]
 
 - input: my artists only
-  expect: {only_mine: true}
-  tags: [only-mine]
+  expect: {familiarity: {in: [heard, regular]}}
+  tags: [familiarity]
 
 - input: someone I've never heard of
-  expect: {only_mine: false}
-  tags: [only-mine, negation]
+  expect: {familiarity: new}
+  tags: [familiarity, new]
 
 - input: show me something new
-  expect: {only_mine: false}
-  tags: [only-mine, negation]
+  expect: {familiarity: {in: [any, new]}}
+  tags: [familiarity, new]
 
 - input: help me discover a band
-  expect: {only_mine: false}
-  tags: [only-mine, negation]
+  expect: {familiarity: new}
+  tags: [familiarity, new]
 
 # ---------------------------------------------------------------- fanbase
 - input: small artists
@@ -180,7 +180,7 @@
   tags: [named-artist]
 
 - input: Four Tet
-  expect: {artists: [Four Tet], only_mine: false}
+  expect: {artists: [Four Tet], familiarity: any}
   tags: [named-artist, terse]
 
 - input: any shoegaze shows
@@ -194,7 +194,7 @@
 # ---------------------------------------------------------------- compound
 - input: artists I like with small fanbases, I don't mind driving a few hours
   expect:
-    only_mine: true
+    familiarity: {in: [regular, favorite]}
     max_fans: {between: [5000, 100000]}
     radius_mi: {between: [120, 260]}
     within_days: null
@@ -209,7 +209,7 @@
 
 - input: big shows I can drive to next month, artists I already listen to
   expect:
-    only_mine: true
+    familiarity: regular
     min_fans: {between: [200000, 5000000]}
     within_days: {between: [25, 45]}
   tags: [compound, fanbase, time, inverted]
@@ -260,7 +260,7 @@
 # here: the failure that would hurt is a model that finds a genre in every
 # request, which turns "what's on" into "what house shows are on".
 - input: any metal shows around
-  expect: {genres: [metal], only_mine: false}
+  expect: {genres: [metal], familiarity: any}
   tags: [genre]
 
 - input: looking for jazz
@@ -298,7 +298,7 @@
   tags: [genre, negative, timeframe]
 
 - input: bands I actually listen to
-  expect: {genres: [], only_mine: true}
+  expect: {genres: [], familiarity: regular}
   tags: [genre, negative]
 
 - input: something upbeat for a night out

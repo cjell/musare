@@ -21,6 +21,15 @@ def test_discoveries_respect_the_limit():
     assert len(home.discoveries(2)) <= 2
 
 
+def test_on_repeat_only_lists_songs_played_again_and_again():
+    """A thin week comes up short rather than padding with songs heard once."""
+    rows = home.on_repeat(20)
+    assert len(rows) <= 20
+    assert all(r["plays"] >= home.MIN_REPEAT_PLAYS for r in rows)
+    plays = [r["plays"] for r in rows]
+    assert plays == sorted(plays, reverse=True)
+
+
 def test_a_collaboration_with_a_known_act_is_not_a_discovery():
     """The failure this guards: "you discovered Lana Del Rey", to someone who
     has played her for years, because the credit string was new."""

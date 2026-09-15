@@ -149,6 +149,9 @@ being differently good teaches nothing.
 | shows + genre | 16/17 (94%) |
 | charts + series | 17/18 (94%) |
 | charts + per-period ranking | 14/14 (100%) |
+| shows + familiarity scale | 22/22 (100%) |
+| charts + today | 14/17 (82%) |
+| charts + running totals, and the three today misses | 15/15 (100%) |
 
 A held-out set is single-use. Reading its failures and fixing against them makes
 it a training set, so these are quoted once and the earlier two files in
