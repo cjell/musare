@@ -1,0 +1,81 @@
+# Held-out set for running totals, and for the three failures the 'today' set found.
+#
+# Written before the `cumulative` field existed and before the descriptions were
+# changed to answer those failures - which retires charts_today_heldout.yaml, since
+# its failures are what the changes were made against. Run ONCE.
+#
+# A running total is a question about accumulation, and the trap is the word
+# "total", which usually means nothing of the kind:
+#
+#   "running total of my hours today"   each point is everything so far  -> cumulative
+#   "total hours by artist"             one sum per artist                -> not cumulative
+#
+# The other three groups are the today set's misses, asked in new words:
+#   a request for a single winner shows one, a question about what was played
+#   ranks it rather than charting it by hour, and a question about the future is
+#   refused - the history holds none of it.
+
+# --------------------------------------------------------------- cumulative
+- input: running total of my hours today
+  expect: {cumulative: true, range: today, metric: hours, dimension: {in: [hour_of_day, date]}}
+  tags: [cumulative, today]
+
+- input: how my listening added up over the course of today
+  expect: {cumulative: true, range: today, dimension: {in: [hour_of_day, date]}}
+  tags: [cumulative, today, idiom]
+
+- input: cumulative plays this month by day
+  expect: {cumulative: true, metric: plays, dimension: date, grain: day, range: {in: [30d, this_year]}}
+  tags: [cumulative, month]
+
+- input: total hours this year building up month by month
+  expect: {cumulative: true, range: this_year, dimension: date, grain: month}
+  tags: [cumulative, year]
+
+- input: show my hours piling up since I started, year by year
+  expect: {cumulative: true, dimension: date, grain: year, range: all}
+  tags: [cumulative, all-time, idiom]
+
+- input: my running count of Faye Webster plays this year
+  expect: {cumulative: true, metric: plays, artists: [Faye Webster], range: this_year}
+  tags: [cumulative, compound]
+
+# -------------------------------------------------------- not cumulative
+- input: hours in each hour of today
+  expect: {cumulative: false, range: today}
+  tags: [negative, today]
+
+- input: how many hours did I listen each month this year
+  expect: {cumulative: false, dimension: date, grain: month}
+  tags: [negative, month]
+
+- input: total hours by artist
+  expect: {cumulative: false, dimension: artist}
+  tags: [negative, total-trap]
+
+# ----------------------------------------------------------- single winner
+- input: the one song I played most this week
+  expect: {dimension: track, limit: 1, range: 7d}
+  tags: [single, ranked]
+
+- input: who did I listen to more than anyone else today
+  expect: {dimension: artist, limit: 1, range: today}
+  tags: [single, ranked, today]
+
+# ------------------------------------------------ what was played ranks it
+- input: which artists have I had on today
+  expect: {dimension: artist, range: today}
+  tags: [ranked, today]
+
+- input: songs I've been into this week
+  expect: {dimension: track, range: 7d}
+  tags: [ranked, week]
+
+# ---------------------------------------------------------------- refusals
+- input: how much will I listen next week
+  expect: {understood: false}
+  tags: [refusal, prediction]
+
+- input: guess tomorrow's top artist for me
+  expect: {understood: false}
+  tags: [refusal, prediction]

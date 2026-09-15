@@ -1,0 +1,88 @@
+# Held-out set for charts about today - the listener's own calendar day.
+#
+# Written before the 'today' range existed, from its intended meaning, and run
+# ONCE. No chart case in this directory used "today" wording when it was written.
+#
+# What has to be learned is where the day ends:
+#
+#   "how long have I listened today"      today                  -> range today
+#   "hours per day this week"             the last seven days    -> range 7d, not today
+#   "what time of day do I usually listen" every day, all time  -> range all, not today
+#
+# A chart of today over time is a chart by hour. The runner derives that - a
+# 'date' axis over a single day is drawn by hour - so those cases accept either
+# dimension rather than scoring a choice the code makes anyway.
+#
+# If something fails, the fix goes in the schema description, and then this file
+# is retired and a new one written.
+
+# --------------------------------------------------------------------- today
+- input: how long have I listened today
+  expect: {range: today, metric: hours}
+  tags: [today]
+
+- input: my listening so far today, hour by hour
+  expect: {range: today, dimension: {in: [hour_of_day, date]}}
+  tags: [today, by-hour]
+
+- input: plays today broken down by hour
+  expect: {range: today, metric: plays, dimension: {in: [hour_of_day, date]}}
+  tags: [today, by-hour]
+
+- input: did I listen more this morning or this afternoon
+  expect: {range: today, dimension: {in: [hour_of_day, date]}}
+  tags: [today, by-hour, idiom]
+
+- input: what have I been playing today
+  expect: {range: today, dimension: {in: [artist, track]}}
+  tags: [today, ranked]
+
+- input: top songs today
+  expect: {range: today, dimension: track}
+  tags: [today, ranked]
+
+- input: today's most played artist
+  expect: {range: today, dimension: artist, limit: 1}
+  tags: [today, ranked, single]
+
+- input: genres today
+  expect: {range: today, dimension: genre}
+  tags: [today, genre, terse]
+
+- input: how many different artists have I put on today
+  expect: {range: today, metric: distinct_artists}
+  tags: [today, variety]
+
+- input: how much of today was house music
+  expect: {range: today, genres: [house]}
+  tags: [today, genre, compound]
+
+# ------------------------------------------------------------ not today
+- input: hours per day this week
+  expect: {range: 7d, dimension: date, grain: day}
+  tags: [negative, week]
+
+- input: my listening this month, day by day
+  expect: {range: {in: [30d, this_year]}, dimension: date, grain: day}
+  tags: [negative, month]
+
+- input: what time of day do I usually listen
+  expect: {range: all, dimension: hour_of_day}
+  tags: [negative, habit]
+
+- input: top artists this year
+  expect: {range: this_year, dimension: artist}
+  tags: [negative, year]
+
+- input: what have I had on lately
+  expect: {range: {in: [7d, 30d]}}
+  tags: [negative, lately]
+
+# ------------------------------------------------------------------ refusals
+- input: how many hours will I listen today
+  expect: {understood: false}
+  tags: [refusal, prediction]
+
+- input: what is my roommate playing today
+  expect: {understood: false}
+  tags: [refusal, other-person]

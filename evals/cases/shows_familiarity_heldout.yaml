@@ -1,0 +1,116 @@
+# Held-out set for how well the user knows an artist - ShowFilter.familiarity.
+#
+# Written before the field existed, from its intended meaning, and run ONCE.
+#
+# The field replaces a yes/no "only artists I listen to", which counted one play
+# the same as eight years. It is a scale, and the model only chooses a level;
+# what each level means in listening history is decided in code:
+#
+#   any       no preference                      - the default
+#   heard     played at least once               "Heard before"
+#   regular   came back on many separate days    "Listen regularly"
+#   favorite  one of the most returned-to        "Favorites only"
+#   new       never played                       "New to me"
+#
+# None of these phrasings appear in shows.yaml, which already carries its own
+# only_mine cases and is training data. Where two levels are both a fair reading
+# a case accepts either, because failing a defensible answer measures taste, not
+# correctness - but every such case still rules out the readings that are wrong.
+#
+# If something here fails, the fix goes in the schema description, and then this
+# file is retired and a new one written. Rewording a case until it passes turns
+# it into a second training set.
+
+# ------------------------------------------------------------------ defaults
+- input: what's going on this saturday
+  expect: {familiarity: any}
+  tags: [familiarity, defaults]
+
+- input: gigs downtown
+  expect: {familiarity: any}
+  tags: [familiarity, defaults, terse]
+
+- input: is Mitski touring
+  expect: {artists: [Mitski], familiarity: any}
+  tags: [familiarity, defaults, named-artist]
+
+- input: doesn't have to be someone I know
+  expect: {familiarity: any}
+  tags: [familiarity, negation]
+
+# --------------------------------------------------------------------- heard
+- input: musicians I'd recognize
+  expect: {familiarity: heard}
+  tags: [familiarity, heard]
+
+- input: anyone who's popped up in my listening before, even once
+  expect: {familiarity: heard}
+  tags: [familiarity, heard]
+
+- input: acts I've at least given a spin
+  expect: {familiarity: heard}
+  tags: [familiarity, heard, idiom]
+
+# ------------------------------------------------------------------- regular
+- input: groups I play a lot
+  expect: {familiarity: regular}
+  tags: [familiarity, regular]
+
+- input: acts I keep coming back to
+  expect: {familiarity: regular}
+  tags: [familiarity, regular, idiom]
+
+- input: not people I heard one time, people I really listen to
+  expect: {familiarity: regular}
+  tags: [familiarity, regular, contrast]
+
+- input: my go-to bands
+  expect: {familiarity: {in: [regular, favorite]}}
+  tags: [familiarity, regular, ambiguous]
+
+# ------------------------------------------------------------------ favorite
+- input: only my absolute favorites
+  expect: {familiarity: favorite}
+  tags: [familiarity, favorite]
+
+- input: acts I'm obsessed with
+  expect: {familiarity: favorite}
+  tags: [familiarity, favorite]
+
+- input: bands I'd camp out overnight for tickets to
+  expect: {familiarity: favorite}
+  tags: [familiarity, favorite, idiom]
+
+- input: my all-time top artists
+  expect: {familiarity: favorite}
+  tags: [familiarity, favorite]
+
+# ----------------------------------------------------------------------- new
+- input: acts I have zero history with
+  expect: {familiarity: new}
+  tags: [familiarity, new]
+
+- input: strangers only, nobody from my listening
+  expect: {familiarity: new}
+  tags: [familiarity, new]
+
+- input: introduce me to a band I've never played
+  expect: {familiarity: new}
+  tags: [familiarity, new]
+
+- input: something fresh to check out
+  expect: {familiarity: {in: [any, new]}}
+  tags: [familiarity, new, ambiguous]
+
+# ------------------------------------------------------------------ compound
+- input: favourite artists within 30 miles this month
+  expect: {familiarity: favorite, radius_mi: 30, within_days: {between: [28, 31]}}
+  tags: [familiarity, favorite, compound]
+
+- input: tiny bands I've never listened to, next weekend
+  expect: {familiarity: new, max_fans: 5000, within_days: {between: [5, 14]}}
+  tags: [familiarity, new, compound]
+
+- input: artists I'm always playing who draw huge crowds
+  expect: {familiarity: {in: [regular, favorite]}, min_fans: {between: [250000, 100000000]}}
+  tags: [familiarity, regular, compound]
