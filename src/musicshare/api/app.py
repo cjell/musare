@@ -14,6 +14,7 @@ import logging
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 
 from musicshare import genres as genrelib
 from musicshare import home as home_mod
@@ -23,11 +24,19 @@ from musicshare import playlists as pl_mod
 from musicshare import regions as regions_mod
 from musicshare import shows as shows_mod
 from musicshare import taste
-from musicshare.spec import ChartSpec, run_chart, validate, validate_chart
+from musicshare.spec import ChartSpec, plot, run_chart, validate, validate_chart
 from musicshare.spec.apply import familiar_enough
 from musicshare.spec.chartrun import ChartData
 from musicshare.spec.filter import Familiarity
-from musicshare.spec.generate import CHART_MODEL, CHARTS, SHOW_MODEL, generate
+from musicshare.spec.generate import (
+    CHART_MODEL,
+    CHARTS,
+    REFINE,
+    SHOW_MODEL,
+    Generated,
+    generate,
+    refine_input,
+)
 from musicshare.spotify import SpotifyClient, SpotifyError
 from musicshare.spotify.client import ALL_KINDS, SEARCH_MAX
 from musicshare.web.render import render
@@ -185,6 +194,11 @@ def chart(
         log.error("chart spec failed: %s", e)
         raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
 
+    return _chart_answer(g)
+
+
+def _chart_answer(g: Generated) -> dict[str, object]:
+    """Validate what the model produced, then draw it - for a question or a change."""
     spec: ChartSpec = g.spec
     problems = validate_chart(spec)
     if problems or not spec.understood:
@@ -206,9 +220,126 @@ def chart(
     }
 
 
+class ChartChange(BaseModel):
+    """A chart as it stands, and what to change about it."""
+
+    spec: ChartSpec
+    change: str = Field(min_length=1, max_length=400)
+
+
+@app.post("/api/chart/refine")
+def chart_refine(body: ChartChange, model: str = CHART_MODEL) -> dict[str, object]:
+    """Change a chart instead of asking a new question.
+
+    The model sees the current spec and the request and returns a whole spec,
+    not a patch, so everything after it is the path a fresh question takes:
+    validated, run, drawn. What it must not do is quietly reset the fields nobody
+    mentioned - which is what the refine held-out set exists to measure.
+    """
+    if not body.change.strip():
+        raise HTTPException(422, "say what to change")
+    try:
+        g = generate(refine_input(body.spec, body.change), task=REFINE, model=model)
+    except Exception as e:
+        log.error("chart change failed: %s", e)
+        raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
+    return _chart_answer(g)
+
+
+GALLERY: list[tuple[str, ChartSpec]] = [
+    ("ranked bars", ChartSpec(title="top artists, last 30 days", dimension="artist", range="30d")),
+    ("long names", ChartSpec(title="top tracks this week", dimension="track", range="7d", limit=8)),
+    ("hour of day", ChartSpec(title="when I listen", dimension="hour_of_day")),
+    ("day of week", ChartSpec(title="my week", dimension="day_of_week", metric="plays")),
+    (
+        "over time",
+        ChartSpec(title="this year by month", dimension="date", grain="month", range="this_year"),
+    ),
+    (
+        "months across years",
+        ChartSpec(title="the last twelve months", dimension="date", grain="month", range="12mo"),
+    ),
+    (
+        "comparison",
+        ChartSpec(
+            title="rap vs rock",
+            dimension="date",
+            grain="year",
+            series="genre",
+            genres=["rap", "rock"],
+        ),
+    ),
+    (
+        "six lines",
+        ChartSpec(title="how it shifted", dimension="date", grain="year", series="genre", limit=6),
+    ),
+    (
+        "running total, today",
+        ChartSpec(
+            title="today building up", dimension="hour_of_day", range="today", cumulative=True
+        ),
+    ),
+    (
+        "running total, this year",
+        ChartSpec(
+            title="this year adding up",
+            dimension="date",
+            grain="month",
+            range="this_year",
+            cumulative=True,
+        ),
+    ),
+    (
+        "table",
+        ChartSpec(
+            title="top 3 artists every year",
+            dimension="date",
+            grain="year",
+            series="artist",
+            per_period=True,
+            limit=3,
+        ),
+    ),
+    ("empty", ChartSpec(title="nobody", dimension="artist", artists=["no such artist anywhere"])),
+]
+
+
+@app.get("/api/chart/gallery")
+def chart_gallery() -> dict[str, object]:
+    """Every shape a chart can take, drawn from the real history on one page.
+
+    For checking the drawing in one place. Each layout bug so far arrived one
+    question at a time, on a shape nobody had looked at yet; this looks at all of
+    them. No model.
+    """
+    out = []
+    for name, spec in GALLERY:
+        problems = validate_chart(spec)
+        if problems:
+            out.append({"name": name, "error": problems[0].message})
+            continue
+        try:
+            out.append({"name": name, "data": _chart_payload(run_chart(spec))})
+        except Exception as e:  # one broken shape should not hide the others
+            out.append({"name": name, "error": f"{type(e).__name__}: {e}"[:160]})
+    return {"charts": out}
+
+
+@app.post("/api/chart/plan")
+async def chart_plan(request: Request) -> dict[str, object]:
+    """A drawing plan for chart numbers saved before plans existed. No model, no history."""
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            raise ValueError("expected an object")
+        return {"plan": plot.plan(data)}
+    except Exception as e:
+        raise HTTPException(422, f"not chart data: {e}"[:160]) from e
+
+
 def _chart_payload(d: ChartData) -> dict[str, object]:
     """What the page draws from, for a chart asked now or one re-run from Home."""
-    return {
+    out: dict[str, object] = {
         "labels": d.labels,
         "values": d.values,
         "title": d.title,
@@ -218,6 +349,7 @@ def _chart_payload(d: ChartData) -> dict[str, object]:
         "note": d.note,
         "cumulative": d.cumulative,
         "partial_last": d.partial_last,
+        "timeline": d.timeline,
         # Empty for an ordinary chart; when present it is the data and
         # `values` is empty. The page branches on which one has content.
         "series": [{"name": ln.name, "values": ln.values} for ln in d.series],
@@ -227,6 +359,9 @@ def _chart_payload(d: ChartData) -> dict[str, object]:
             {"bucket": c.bucket, "rank": c.rank, "name": c.name, "value": c.value} for c in d.table
         ],
     }
+    # How to draw it, decided where it is tested - see spec/plot.py.
+    out["plan"] = plot.plan(out)
+    return out
 
 
 @app.post("/api/chart/run")

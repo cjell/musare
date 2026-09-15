@@ -152,6 +152,7 @@ being differently good teaches nothing.
 | shows + familiarity scale | 22/22 (100%) |
 | charts + today | 14/17 (82%) |
 | charts + running totals, and the three today misses | 15/15 (100%) |
+| changing an existing chart, fields kept | 17/17 (100%) |
 
 A held-out set is single-use. Reading its failures and fixing against them makes
 it a training set, so these are quoted once and the earlier two files in
@@ -206,6 +207,7 @@ honest version of the feature.
       spec/generate.py   text -> spec; the only LLM call
       spec/apply.py      executes a show filter - no model involved
       spec/chartrun.py   executes a chart spec, in SQL, from menus only
+      spec/plot.py       how a chart is drawn - kind, points, ticks, labels - decided in tested code
       embed.py           artist tags -> 200-dimension space
       project.py         the fitted basemap and 2D positions, for drawing only
       regions.py         152 genre regions, their names and states

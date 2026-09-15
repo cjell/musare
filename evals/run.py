@@ -29,7 +29,16 @@ sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT))
 
 from evals.score import CaseResult, score_case, summarise  # noqa: E402
-from musicshare.spec.generate import CHARTS, DEFAULT_MODEL, SHOWS, Task, generate  # noqa: E402
+from musicshare.spec.chart import ChartSpec  # noqa: E402
+from musicshare.spec.generate import (  # noqa: E402
+    CHARTS,
+    DEFAULT_MODEL,
+    REFINE,
+    SHOWS,
+    Task,
+    generate,
+    refine_input,
+)
 from musicshare.spec.validate import validate, validate_chart  # noqa: E402
 
 CASE_DIR = ROOT / "evals" / "cases"
@@ -41,6 +50,8 @@ class Suite:
     task: Task
     cases: str
     validate: Callable
+    # Cases carry the chart being changed as `base`, and `input` is the change.
+    refine: bool = False
 
 
 SUITES: dict[str, Suite] = {
@@ -65,6 +76,10 @@ SUITES: dict[str, Suite] = {
     "charts-today-heldout": Suite(CHARTS, "charts_today_heldout.yaml", validate_chart),
     # Written before `cumulative` existed and before those changes; see its header.
     "charts-cumulative-heldout": Suite(CHARTS, "charts_cumulative_heldout.yaml", validate_chart),
+    # Written before changing a chart existed; see its header.
+    "charts-refine-heldout": Suite(
+        REFINE, "charts_refine_heldout.yaml", validate_chart, refine=True
+    ),
 }
 
 
@@ -79,7 +94,10 @@ def load_cases(suite: str = "shows", tag: str | None = None) -> list[dict]:
 def run_case(case: dict, model: str, suite: str = "shows") -> CaseResult:
     s = SUITES[suite]
     try:
-        g = generate(case["input"], task=s.task, model=model)
+        text = case["input"]
+        if s.refine:
+            text = refine_input(ChartSpec(**case["base"]), case["input"])
+        g = generate(text, task=s.task, model=model)
     except Exception as e:  # a provider failure is a result, not a crash
         return score_case(case, None, error=f"{type(e).__name__}: {e}"[:160])
 

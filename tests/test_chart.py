@@ -66,6 +66,18 @@ def test_a_running_total_of_today_knows_how_far_into_the_hour_it_is():
     assert week.partial_last is None
 
 
+def test_a_running_total_of_today_is_drawn_play_by_play():
+    d = run(ChartSpec(range="today", dimension="hour_of_day", cumulative=True))
+    if len(d.timeline) < 3:
+        pytest.skip("nothing played today yet")
+    xs = [x for x, _ in d.timeline]
+    ys = [y for _, y in d.timeline]
+    assert d.timeline[0] == [0.0, 0.0]
+    assert xs == sorted(xs) and ys == sorted(ys), "time moves forward, the total never falls"
+    assert abs(ys[-1] - d.values[-1]) < 0.02, "it ends where the hourly total does"
+    assert xs[-1] <= 24
+
+
 def test_cyclical_dimensions_keep_their_own_order():
     """A day-of-week chart sorted by size is unreadable."""
     d = run(ChartSpec(dimension="day_of_week", metric="hours"))

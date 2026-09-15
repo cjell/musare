@@ -1276,10 +1276,31 @@ details[open] summary .chev{transform:rotate(180deg)}
   font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.1em;
   text-transform:uppercase;color:var(--ink-3);margin-top:5px;
 }
+/* Live or frozen, on every saved chart: a pink dot, or the day it was frozen. */
+.chart-mode{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:7px;
+  font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);
+}
+.chart-mode .m{display:inline-flex;align-items:center;gap:6px}
+.chart-mode .m.live{color:var(--accent)}
+.chart-mode .m.live i{width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px var(--accent-tint)}
+.chart-mode button{
+  background:none;border:0;padding:0;cursor:pointer;font:inherit;letter-spacing:inherit;
+  text-transform:inherit;color:var(--ink-2);
+}
+.chart-mode button:hover{color:var(--ink)}
+.chart-mode button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
 .chart-canvas{display:block;width:100%;margin-top:10px}
 .chart-note{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3);margin-top:6px}
 .chart-acts{display:flex;gap:8px;margin-top:12px}
 .chart-acts .btn{flex:1;height:34px;font-size:12.5px}
+/* Changing a chart in place, under the chart being changed. */
+.refine{margin-top:12px}
+.chart-steps{
+  display:flex;justify-content:space-between;align-items:center;margin-top:10px;
+  font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3);
+}
 /* A pinned chart on someone else's profile is a thing they made, not a control */
 .pl.chartpin{grid-column:1 / -1}
 .pl.chartpin .chartcard{padding:12px 12px 8px}
@@ -1816,6 +1837,11 @@ details[open] summary .chev{transform:rotate(180deg)}
         <div class="chips" id="chartEg"></div>
       </section>
 
+      <section class="sec" id="chartGallerySec" hidden>
+        <div class="sec-label"><span>Every chart shape</span><span class="aux">gallery</span></div>
+        <div class="chart-keep" id="chartGallery"></div>
+      </section>
+
       <section class="sec" id="chartResultSec" hidden>
         <div id="chartResult"></div>
       </section>
@@ -2089,6 +2115,7 @@ details[open] summary .chev{transform:rotate(180deg)}
     </div>
   </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.0/chart.umd.min.js"></script>
 <script>
 (function(){
 "use strict";
@@ -4296,23 +4323,20 @@ function renderHomeCharts(){
   if(!pins.length){ $("homeCharts").innerHTML = ""; return; }
   var seq = ++homeChartSeq;
   Promise.all(pins.map(function(p){
-    return fetch("/api/chart/run", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(p.spec)
-    }).then(function(r){
-      /* A 422 is a spec the schema no longer accepts - saved before a change. */
-      return r.ok ? r.json() : { understood: false };
-    }).catch(function(){ return null; });
+    /* A frozen chart is the numbers it was frozen with; only live ones ask. */
+    if(!isLive(p, "home") && p.data) return Promise.resolve({ understood: true, empty: false, data: p.data });
+    return runSpec(p.spec);
   })).then(function(results){
     if(seq !== homeChartSeq) return;   /* a newer render has started */
     var html = "", draw = [];
     results.forEach(function(res, i){
       var p = pins[i];
+      if(res && res.data && isLive(p, "home")) LIVE_DATA["home:" + p.id] = res.data;
       var x = '<button class="hc-unpin" type="button" data-home-unpin="' + esc(p.id) +
               '" aria-label="Remove from Home">&#215;</button>';
       if(res && res.understood && res.data && !res.empty){
         html += chartCard(res.data, { unpin: x, key: "home" + i,
+          mode: { live: isLive(p, "home"), since: p.frozenAt, toggle: true, scope: "home", id: p.id },
           actions: '<div class="chart-q">' + esc(p.q) + "</div>" });
         draw.push([i, res.data]);
         return;
@@ -4376,6 +4400,7 @@ function renderKept(){
     var onHome = homeIds.indexOf(k.id) >= 0;
     return chartCard(k.data, {
       key: "kept" + i,
+      mode: { live: isLive(k, "kept"), since: k.frozenAt || k.at, toggle: true, scope: "kept", id: k.id },
       unpin: isPinned ? '<span class="chart-badge">On profile</span>' : "",
       actions: '<div class="chart-q">' + esc(k.q) + "</div>" +
         '<div class="chart-acts">' +
@@ -4396,7 +4421,7 @@ function renderKept(){
   if(empty) empty.hidden = !!l.length;
 
   l.forEach(function(k, i){
-    drawChart(document.querySelector('#chartKept [data-chart="kept' + i + '"]'), k.data);
+    drawRecord(k, "kept", document.querySelector('#chartKept [data-chart="kept' + i + '"]'));
   });
 }
 
@@ -4411,13 +4436,23 @@ function specId(spec){
   }).join("|")).toString(36);
 }
 
-function showChartResult(d, q, spec){
-  lastChart = { data: d, q: q, spec: spec, id: specId(spec) };
+/* `history` is every earlier version of this chart, newest last, so a change can
+   be undone. A kept chart saves the version on screen, with the question and
+   each change that led to it as its caption. */
+function showChartResult(d, q, spec, history){
+  lastChart = { data: d, q: q, spec: spec, id: specId(spec), history: history || [] };
+  var n = lastChart.history.length;
   $("chartResult").innerHTML = chartCard(d, {
     key: "live",
-    actions: '<div class="chart-acts">' +
+    actions: '<div class="chart-q">' + esc(q) + "</div>" +
+      '<div class="chart-acts">' +
       '<button class="btn btn-primary" type="button" id="chartKeep">Keep</button>' +
-      '<button class="btn btn-ghost" type="button" id="chartAgain">Ask again</button></div>'
+      '<button class="btn btn-ghost" type="button" id="chartAgain">Ask again</button></div>' +
+      '<div class="ask refine"><input id="chartChange" type="text" autocomplete="off" maxlength="400"' +
+      ' placeholder="Not quite? Say what to change" aria-label="Change this chart">' +
+      '<button type="button" id="chartChangeGo">Change</button></div>' +
+      (n ? '<div class="chart-steps"><span>' + n + " change" + (n === 1 ? "" : "s") + "</span>" +
+        '<button class="sec-toggle" type="button" id="chartUndo">Undo</button></div>' : "")
   });
   $("chartResultSec").hidden = false;
   drawChart($("chartResult").querySelector('[data-chart="live"]'), d);
@@ -4455,6 +4490,10 @@ function askChart(){
   });
 }
 
+$("chartResult").addEventListener("keydown", function(e){
+  if(e.key === "Enter" && e.target.id === "chartChange"){ e.preventDefault(); refineChart(); }
+});
+
 $("chartKept").addEventListener("click", function(e){
   var b = e.target.closest("[data-home]");
   if(!b || b.disabled) return;
@@ -4474,12 +4513,78 @@ $("chartKept").addEventListener("click", function(e){
   renderHomeCharts();
 });
 
+function refineChart(){
+  var input = $("chartChange"), change = input ? input.value.trim() : "";
+  var note = $("chartNote"), go = $("chartChangeGo");
+  note.className = "ask-note";
+  if(!lastChart) return;
+  if(!change){ note.textContent = "Say what to change first."; return; }
+  note.textContent = "Changing it...";
+  if(go) go.disabled = true;
+  fetch("/api/chart/refine", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ spec: lastChart.spec, change: change })
+  }).then(function(r){
+    if(!r.ok) throw new Error(r.status);
+    return r.json();
+  }).then(function(d){
+    if(!d.understood || !d.data){
+      if(go) go.disabled = false;
+      note.className = "ask-note bad";
+      note.textContent = d.problems && d.problems.length
+        ? "That change would not hold up: " + d.problems[0].message
+        : "That is not a change this chart can make.";
+      return;
+    }
+    note.textContent = "";
+    var prev = { data: lastChart.data, q: lastChart.q, spec: lastChart.spec };
+    showChartResult(d.data, lastChart.q + " \u00B7 " + change, d.spec, lastChart.history.concat([prev]));
+  }).catch(function(){
+    if(go) go.disabled = false;
+    note.className = "ask-note bad";
+    note.textContent = "Needs the local server to change a chart.";
+  });
+}
+
+function undoChart(){
+  if(!lastChart || !lastChart.history.length) return;
+  var h = lastChart.history, prev = h[h.length - 1];
+  $("chartNote").textContent = "";
+  showChartResult(prev.data, prev.q, prev.spec, h.slice(0, -1));
+}
+
+/* A page of every chart shape, drawn from the real history, for checking the
+   drawing in one place rather than one question at a time. Open #chart-gallery. */
+function showChartGallery(){
+  showScreen("charts");
+  $("chartGallerySec").hidden = false;
+  $("chartGallery").innerHTML = '<div class="ask-note">Drawing every chart shape...</div>';
+  fetch("/api/chart/gallery").then(function(r){ return r.json(); }).then(function(res){
+    var items = res.charts || [];
+    $("chartGallery").innerHTML = items.map(function(c, i){
+      if(!c.data){
+        return '<div class="chartcard"><div class="chart-t">' + esc(c.name) +
+          '</div><div class="chart-note">' + esc(c.error || "") + "</div></div>";
+      }
+      return chartCard(c.data, { key: "gal" + i, actions: '<div class="chart-q">' + esc(c.name) + "</div>" });
+    }).join("");
+    items.forEach(function(c, i){
+      if(c.data) drawChart(document.querySelector('#chartGallery [data-chart="gal' + i + '"]'), c.data);
+    });
+  }).catch(function(){
+    $("chartGallery").innerHTML = '<div class="ask-note bad">The gallery needs the local server.</div>';
+  });
+}
+
 function chartRecord(c){
-  return { id: c.id, spec: c.spec, data: c.data, q: c.q, at: Date.now() };
+  return { id: c.id, spec: c.spec, data: c.data, q: c.q, at: Date.now(), live: c.live, frozenAt: c.frozenAt };
 }
 
 $("chartResult").addEventListener("click", function(e){
   if(e.target.closest("#chartAgain")){ $("chartInput").focus(); $("chartInput").select(); return; }
+  if(e.target.closest("#chartChangeGo")){ refineChart(); return; }
+  if(e.target.closest("#chartUndo")){ undoChart(); return; }
   if(!e.target.closest("#chartKeep") || !lastChart) return;
   var note = $("chartNote");
   note.className = "ask-note";
@@ -5368,7 +5473,8 @@ function renderPins(p){
     var cpin = self ? cp[q] : null;
     if(cpin && cpin.data){
       ch += '<div class="pl chartpin pinbox">' +
-        chartCard(cpin.data, { unpin: unpinBtn("charts", q), key: "pin" + q }) + "</div>";
+        chartCard(cpin.data, { unpin: unpinBtn("charts", q), key: "pin" + q,
+          mode: { live: isLive(cpin, "pin"), since: cpin.frozenAt || cpin.at } }) + "</div>";
     } else if(editing && self){
       ch += '<div class="pl chartpin">' + slotBtn("charts", q, "slot-sq") + "</div>";
     }
@@ -5378,7 +5484,7 @@ function renderPins(p){
   $("chartAux").textContent = cAny ? cp.filter(Boolean).length + " pinned" : "";
   for(var z = 0; z < PIN_SLOTS.charts; z++){
     if(cp[z] && cp[z].data){
-      drawChart(document.querySelector('#charts [data-chart="pin' + z + '"]'), cp[z].data);
+      drawRecord(cp[z], "pin", document.querySelector('#charts [data-chart="pin' + z + '"]'));
     }
   }
 
@@ -5389,189 +5495,9 @@ function renderPins(p){
   $("albumAux").textContent = bAny ? bp.filter(Boolean).length + " pinned" : "";
 }
 
-/* ================= chart rendering =================
-   Canvas rather than SVG for consistency with the taste map and the bokeh, and
-   because a chart with 24 bars is cheaper to paint than to build as nodes.
-
-   Orientation is derived, not asked for: ten artist names cannot sit under
-   vertical bars at this width, so long labels lay the bars on their side. It is
-   the same reasoning that took chart type out of the schema - the data already
-   says what the drawing should be. */
-function longLabels(d){
-  if(d.chart === "line") return false;
-  var longest = 0;
-  for(var i = 0; i < d.labels.length; i++) longest = Math.max(longest, String(d.labels[i]).length);
-  return longest > 4 || d.labels.length <= 6;
-}
-
-/* Date buckets arrive as ISO dates. Truncating them to fit gives eight labels
-   all reading "2026-0", so they are formatted to the grain they were bucketed
-   at instead. */
-var MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-function fmtLabel(lab, grain){
-  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(lab));
-  if(!m) return String(lab);
-  if(grain === "year") return m[1];
-  if(grain === "month") return MONTHS[+m[2] - 1] || m[2];
-  return m[2] + "/" + m[3];
-}
-
 function fmtVal(v){
   if(v >= 1000) return Math.round(v / 1000) + "k";
   return v >= 100 ? Math.round(v) : Math.round(v * 10) / 10;
-}
-
-/* A scale a reader can put a number on.
-
-   The line and the bars used to be drawn with no vertical scale at all, which
-   makes the shape readable and the size unknowable - a peak could be ten hours
-   or two hundred and the picture is identical. `fmtVal` was already being used
-   on the horizontal bars, where the number sits beside each bar; these are the
-   two paths that had nowhere to put it.
-
-   Ticks land on round numbers rather than on the data's own maximum: a top
-   gridline reading 63.5 is a number nobody chose, and rounding it up to 70
-   costs a little headroom and buys labels that can be read at a glance. */
-function niceStep(max){
-  /* A round gap between gridlines - 1, 2, 2.5 or 5 of some power of ten - small
-     enough that the scale gets about five of them. Three fixed lines at zero,
-     half and top read 0, 2.5, 5 on a chart peaking at 3.2, which leaves most of
-     the values between two labels and a third of the plot empty. */
-  if(!(max > 0)) return 1;
-  var raw = max / 5;
-  var mag = Math.pow(10, Math.floor(Math.log(raw) / Math.LN10));
-  var n = raw / mag;
-  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * mag;
-}
-
-function niceTop(max){
-  /* The first gridline at or above the data, so the tallest point sits near the
-     top instead of rounding up a whole order of magnitude. The small epsilon
-     keeps a peak of exactly 4 from being floated up to 5. */
-  if(!(max > 0)) return 1;
-  var step = niceStep(max);
-  return Math.ceil(max / step - 1e-9) * step;
-}
-
-/* A gridline's label, with exactly the precision its step needs. fmtVal rounds
-   to one decimal and to whole thousands, which is right beside a bar and wrong
-   on a scale: steps of 0.25 would read 0.3 and 0.5, and 2,500 would read 3k. */
-function tickVal(v, step){
-  var k = step >= 1000, s = k ? step / 1000 : step;
-  var t = String(Math.round(s * 1e6) / 1e6), dot = t.indexOf(".");
-  var dec = dot < 0 ? 0 : t.length - dot - 1;
-  if(!v) return "0";
-  /* Trailing zeros go: 0.2, 0.4 ... 1 reads faster than 0.0, 0.2 ... 1.0, and the
-     step between lines is already visible from the lines themselves. */
-  var out = (k ? v / 1000 : v).toFixed(dec);
-  if(dec) out = out.replace(/0+$/, "").replace(/\.$/, "");
-  return out + (k ? "k" : "");
-}
-
-/* Left gutter, gridlines and their labels. Returns where the plot may start. */
-function drawScale(x, w, h, top, plotH, max, ink3){
-  /* max has already been through niceTop, so it is a whole number of steps. */
-  var step = niceStep(max), count = Math.max(1, Math.round(max / step)), ticks = [];
-  for(var i = 0; i <= count; i++) ticks.push(Math.round(step * i * 1e6) / 1e6);
-  var gut = 0;
-  x.font = '9px "IBM Plex Mono", monospace';
-  ticks.forEach(function(t){ gut = Math.max(gut, x.measureText(tickVal(t, step)).width); });
-  gut = Math.ceil(gut) + 6;
-  x.textAlign = "right";
-  x.textBaseline = "middle";
-  for(var k = 0; k < ticks.length; k++){
-    var v = ticks[k], y = top + plotH - (v / max) * plotH;
-    x.strokeStyle = "rgba(244,241,250,.06)";
-    x.lineWidth = 1;
-    x.beginPath();
-    /* Half-pixel so a 1px line lands on a pixel instead of across two. */
-    x.moveTo(gut, Math.round(y) + 0.5);
-    x.lineTo(w, Math.round(y) + 0.5);
-    x.stroke();
-    x.fillStyle = ink3;
-    x.fillText(tickVal(v, step), gut - 6, y);
-  }
-  return gut;
-}
-
-/* A comparison, drawn as one line per thing compared.
-
-   Kept apart from drawChart rather than branched into it: nothing below the
-   split applies here. There are no horizontal bars, no fill under the line -
-   six translucent fills over each other is mud - and the whole point is a
-   legend, which a single-series chart has no use for. */
-function drawLines(cv, d){
-  var css = getComputedStyle(document.querySelector(".phone"));
-  var ink3 = css.getPropertyValue("--ink-3").trim() || "#635C7A";
-  var ink2 = css.getPropertyValue("--ink-2").trim() || "#A9A2BE";
-  var lines = d.series, n = d.labels.length;
-
-  var legendH = 17, padB = 16, top = 8;
-  var w = cv.clientWidth || 320, h = 150 + legendH;
-  var dpr = Math.min(2, window.devicePixelRatio || 1);
-  cv.width = Math.round(w * dpr);
-  cv.height = Math.round(h * dpr);
-  cv.style.height = h + "px";
-
-  var x = cv.getContext("2d");
-  x.setTransform(dpr, 0, 0, dpr, 0, 0);
-  x.clearRect(0, 0, w, h);
-  x.font = '9px "IBM Plex Mono", monospace';
-  x.textBaseline = "middle";
-
-  /* One scale for every line, or the comparison is a lie. */
-  var max = 0;
-  lines.forEach(function(ln){
-    ln.values.forEach(function(v){ if(v != null && v > max) max = v; });
-  });
-  max = niceTop(max);
-
-  /* Legend first, so the plot knows what room it has left. */
-  var lx = 0;
-  x.textAlign = "left";
-  for(var i = 0; i < lines.length; i++){
-    var col = SWATCHES[i % SWATCHES.length];
-    var label = lines[i].name;
-    var tw = x.measureText(label).width;
-    if(lx + tw + 14 > w) break;
-    x.fillStyle = col;
-    x.beginPath();
-    x.roundRect(lx, legendH / 2 - 3, 6, 6, 2);
-    x.fill();
-    x.fillStyle = ink2;
-    x.fillText(label, lx + 9, legendH / 2);
-    lx += tw + 20;
-  }
-
-  var plotTop = legendH + top, plotH = h - padB - plotTop;
-  var gut = drawScale(x, w, h, plotTop, plotH, max, ink3);
-  var step = (w - gut) / n;
-
-  for(var j = 0; j < lines.length; j++){
-    var vals = lines[j].values, open = false;
-    x.strokeStyle = SWATCHES[j % SWATCHES.length];
-    x.lineWidth = 1.8;
-    x.lineJoin = "round";
-    x.beginPath();
-    for(var k = 0; k < n; k++){
-      var v = vals[k];
-      /* Null is "no reading", not zero - a rate over no plays is unknown, so
-         the line breaks rather than dropping to the floor and inventing a dip. */
-      if(v == null){ open = false; continue; }
-      var px = gut + step * k + step / 2;
-      var py = plotTop + plotH - (v / max) * plotH;
-      open ? x.lineTo(px, py) : x.moveTo(px, py);
-      open = true;
-    }
-    x.stroke();
-  }
-
-  x.fillStyle = ink3;
-  x.textAlign = "center";
-  var every = Math.max(1, Math.ceil(n / Math.floor(w / 34)));
-  for(var t = 0; t < n; t += every){
-    x.fillText(fmtLabel(d.labels[t], d.x_label), step * t + step / 2, h - padB / 2 + 1);
-  }
 }
 
 /* Rows grouped by period. The server decides this shape, not the page and not
@@ -5592,137 +5518,262 @@ function chartTable(d){
   return '<div class="ctab">' + out.join("") + "</div>";
 }
 
+/* ---------- drawing a chart ----------
+   Every chart arrives with a plan (spec/plot.py): what kind it is, where every
+   point and tick sits, what each label says. This hands the plan to Chart.js
+   and decides nothing itself - each layout bug the hand-drawn version had was a
+   decision made here, where nothing tested it. */
+var CHART_GRID = "rgba(244,241,250,.06)";
+
 function drawChart(cv, d){
   if(!cv || !d) return;
-  if(d.series && d.series.length && d.labels && d.labels.length) return drawLines(cv, d);
-  if(!d.values || !d.values.length) return;
-  var css = getComputedStyle(document.querySelector(".phone"));
-  var accent = css.getPropertyValue("--accent").trim() || "#E74094";
-  var ink3 = css.getPropertyValue("--ink-3").trim() || "#635C7A";
-  var ink2 = css.getPropertyValue("--ink-2").trim() || "#A9A2BE";
+  if(d.plan) return plotChart(cv, d.plan);
+  /* Kept before plans existed: the numbers are all it has. The server turns them
+     into a plan once, and the record keeps it. */
+  fetch("/api/chart/plan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(d)
+  }).then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(res){
+      if(!res || !res.plan) return;
+      d.plan = res.plan;
+      plotChart(cv, d.plan);
+      saveCustom();
+    }).catch(function(){});
+}
 
-  var horizontal = longLabels(d);
-  var n = d.values.length;
-  var w = cv.clientWidth || 320;
-  var h = horizontal ? Math.max(120, n * 20 + 8) : 150;
-  var dpr = Math.min(2, window.devicePixelRatio || 1);
-  cv.width = Math.round(w * dpr);
-  cv.height = Math.round(h * dpr);
-  cv.style.height = h + "px";
+/* The plan names its own ticks; Chart.js is told to use exactly those. */
+function tickAt(ticks){
+  return function(axis){ axis.ticks = ticks.map(function(t){ return { value: t.at }; }); };
+}
+function tickText(ticks){
+  return function(v){
+    for(var i = 0; i < ticks.length; i++) if(Math.abs(ticks[i].at - v) < 1e-9) return ticks[i].label;
+    return "";
+  };
+}
 
-  var x = cv.getContext("2d");
-  x.setTransform(dpr, 0, 0, dpr, 0, 0);
-  x.clearRect(0, 0, w, h);
-  x.font = '9px "IBM Plex Mono", monospace';
-  x.textBaseline = "middle";
+/* Values at the ends of sideways bars. */
+function barValues(plan, color, font){
+  return {
+    id: "barValues",
+    afterDatasetsDraw: function(chart){
+      var ctx = chart.ctx, meta = chart.getDatasetMeta(0);
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.font = font.size + "px " + font.family;
+      ctx.textBaseline = "middle";
+      ctx.textAlign = "left";
+      meta.data.forEach(function(bar, i){
+        ctx.fillText(plan.value_labels[i] || "", bar.x + 5, bar.y);
+      });
+      ctx.restore();
+    }
+  };
+}
 
-  var max = Math.max.apply(null, d.values) || 1;
-
-  if(horizontal){
-    var labelW = 0;
-    for(var i = 0; i < n; i++) labelW = Math.max(labelW, x.measureText(String(d.labels[i])).width);
-    labelW = Math.min(labelW, w * 0.42);
-    var valW = 30, gap = 8;
-    var barX = labelW + gap, barMax = w - barX - valW - gap;
-    var rowH = (h - 6) / n;
-
-    for(var r = 0; r < n; r++){
-      var cy = 3 + rowH * r + rowH / 2;
-      var bw = Math.max(2, (d.values[r] / max) * barMax);
-      x.fillStyle = ink2;
-      x.textAlign = "right";
-      /* Truncate against the width the ellipsis will take, or appending it
-         pushes the label back over the edge it was just trimmed to fit. */
-      var full = fmtLabel(d.labels[r], d.x_label), lab = full;
-      if(x.measureText(full).width > labelW){
-        var room = labelW - x.measureText("\u2026").width;
-        while(lab.length > 1 && x.measureText(lab).width > room) lab = lab.slice(0, -1);
-        lab += "\u2026";
-      }
-      x.fillText(lab, labelW, cy);
-      x.fillStyle = accent;
-      x.beginPath();
-      x.roundRect(barX, cy - rowH * 0.3, bw, rowH * 0.6, 3);
-      x.fill();
-      x.fillStyle = ink3;
-      x.textAlign = "left";
-      x.fillText(fmtVal(d.values[r]), barX + bw + 6, cy);
+function plotChart(cv, plan){
+  var old = window.Chart && Chart.getChart(cv);
+  if(old) old.destroy();
+  if(plan.kind === "table") return;
+  /* Nothing in that window yet is an answer, and a blank box does not say it. */
+  if(plan.kind === "empty"){
+    cv.hidden = true;
+    var sib = cv.nextElementSibling;
+    if(!(sib && sib.classList.contains("chart-empty"))){
+      cv.insertAdjacentHTML("afterend", '<div class="chart-note chart-empty">Nothing to show for this yet.</div>');
     }
     return;
   }
+  if(!window.Chart){
+    cv.insertAdjacentHTML("afterend", '<div class="chart-note">Charts need Chart.js, which did not load.</div>');
+    return;
+  }
+  var css = getComputedStyle(document.querySelector(".phone"));
+  var accent = css.getPropertyValue("--accent").trim() || "#E74094";
+  var tint = css.getPropertyValue("--accent-tint").trim() || "rgba(231,64,148,.13)";
+  var ink3 = css.getPropertyValue("--ink-3").trim() || "#635C7A";
+  var ink2 = css.getPropertyValue("--ink-2").trim() || "#A9A2BE";
+  var font = { family: '"IBM Plex Mono", monospace', size: 9 };
 
-  var padB = 16, top = 8, plotH = h - padB - top;
-  /* Bars and the line share this scale; the horizontal-bar path above prints a
-     number beside every bar and needs none. */
-  max = niceTop(max);
-  var gut = drawScale(x, w, h, top, plotH, max, ink3);
-  var step = (w - gut) / n;
+  cv.width = cv.clientWidth || (cv.parentNode && cv.parentNode.clientWidth) || 320;
+  cv.height = plan.height || 150;
 
-  if(d.chart === "line"){
-    /* A running total is an amount at a moment, not over a bucket: it starts at
-       zero on the left edge, each bucket's total lands where that bucket ends, and
-       on a chart of today the last one lands at the current minute rather than at
-       the end of an hour that has not finished. Drawn at bucket middles, the line
-       rose half an hour before the listening and ran flat into the future. Other
-       lines keep their points in the middle of their buckets. */
-    var pts = [];
-    if(d.cumulative){
-      pts.push([gut, 0]);
-      for(var q = 0; q < n; q++){
-        var end = q === n - 1 && d.partial_last != null ? q + d.partial_last : q + 1;
-        pts.push([gut + step * end, d.values[q]]);
-      }
-    } else {
-      for(var p = 0; p < n; p++) pts.push([gut + step * p + step / 2, d.values[p]]);
-    }
-    x.beginPath();
-    pts.forEach(function(pt, i){
-      var py = top + plotH - (pt[1] / max) * plotH;
-      i ? x.lineTo(pt[0], py) : x.moveTo(pt[0], py);
-    });
-    x.strokeStyle = accent;
-    x.lineWidth = 2;
-    x.lineJoin = "round";
-    x.stroke();
-    /* fill under the line so a sparse series still reads as a quantity */
-    x.lineTo(pts[pts.length - 1][0], top + plotH);
-    x.lineTo(pts[0][0], top + plotH);
-    x.closePath();
-    var g = x.createLinearGradient(0, top, 0, top + plotH);
-    g.addColorStop(0, css.getPropertyValue("--accent-tint").trim() || "rgba(231,64,148,.13)");
-    g.addColorStop(1, "rgba(0,0,0,0)");
-    x.fillStyle = g;
-    x.fill();
-    /* Where "now" is, on a running total of today. */
-    if(d.cumulative && d.partial_last != null){
-      var last = pts[pts.length - 1];
-      x.beginPath();
-      x.arc(last[0], top + plotH - (last[1] / max) * plotH, 3, 0, Math.PI * 2);
-      x.fillStyle = accent;
-      x.fill();
-    }
+  var valueAxis = {
+    min: 0, max: plan.y.max,
+    afterBuildTicks: tickAt(plan.y.ticks),
+    ticks: { callback: tickText(plan.y.ticks), color: ink3, font: font, padding: 4 },
+    grid: { color: CHART_GRID, drawTicks: false },
+    border: { display: false }
+  };
+  var cfg;
+  if(plan.kind === "bar" || plan.kind === "hbar"){
+    var flat = plan.kind === "hbar";
+    var catAxis = {
+      ticks: {
+        color: flat ? ink2 : ink3, font: font, autoSkip: !flat, maxRotation: 0,
+        callback: function(v, i){ return plan.tick_labels[i]; }
+      },
+      grid: { display: false },
+      border: { display: false }
+    };
+    cfg = {
+      type: "bar",
+      data: {
+        labels: plan.labels,
+        datasets: [{ data: plan.values, backgroundColor: accent, borderRadius: 2,
+          barPercentage: 0.64, categoryPercentage: 1 }]
+      },
+      options: {
+        indexAxis: flat ? "y" : "x",
+        scales: flat ? { x: valueAxis, y: catAxis } : { x: catAxis, y: valueAxis }
+      },
+      plugins: flat ? [barValues(plan, ink3, font)] : []
+    };
   } else {
-    for(var b = 0; b < n; b++){
-      /* A bucket with nothing in it draws nothing. A two-pixel stub read as "a
-         little", which on a chart of today's hours is a claim about 3am. */
-      if(!d.values[b]) continue;
-      var bh = Math.max(2, (d.values[b] / max) * plotH);
-      x.fillStyle = accent;
-      x.beginPath();
-      x.roundRect(gut + step * b + step * 0.18, top + plotH - bh, step * 0.64, bh, 2);
-      x.fill();
+    var many = plan.series.length > 1, palette = many ? SWATCHES : [accent];
+    cfg = {
+      type: "line",
+      data: {
+        datasets: plan.series.map(function(s, i){
+          var col = palette[i % palette.length], last = s.points.length - 1;
+          return {
+            label: s.name,
+            data: s.points.map(function(pt){ return { x: pt[0], y: pt[1] }; }),
+            borderColor: col,
+            backgroundColor: plan.fill ? tint : col,
+            borderWidth: many ? 1.8 : 2,
+            fill: plan.fill ? "origin" : false,
+            tension: 0,
+            spanGaps: false,
+            pointRadius: function(ctx){ return plan.now && ctx.dataIndex === last ? 3 : 0; },
+            pointBackgroundColor: col,
+            pointHoverRadius: 3
+          };
+        })
+      },
+      options: {
+        scales: {
+          x: {
+            type: "linear", min: plan.x.min, max: plan.x.max,
+            afterBuildTicks: tickAt(plan.x.ticks),
+            ticks: { callback: tickText(plan.x.ticks), color: ink3, font: font, maxRotation: 0, autoSkip: false },
+            grid: { display: false },
+            border: { display: false }
+          },
+          y: valueAxis
+        }
+      }
+    };
+  }
+  cfg.options.responsive = false;
+  cfg.options.animation = false;
+  cfg.options.layout = { padding: { top: 4, right: plan.kind === "hbar" ? 30 : 6 } };
+  cfg.options.plugins = {
+    legend: {
+      display: !!plan.legend, position: "top", align: "start",
+      labels: { color: ink2, font: font, boxWidth: 6, boxHeight: 6, padding: 10 }
+    },
+    tooltip: {
+      callbacks: {
+        title: function(items){
+          var it = items[0];
+          if(plan.kind !== "line") return plan.labels[it.dataIndex];
+          return plan.series[it.datasetIndex].labels[it.dataIndex] || "";
+        },
+        label: function(ctx){
+          var v = plan.kind === "hbar" ? ctx.parsed.x : ctx.parsed.y;
+          return (plan.legend ? ctx.dataset.label + ": " : "") + (Math.round(v * 100) / 100) + " " + plan.y.unit;
+        }
+      }
     }
-  }
-
-  /* Only as many x labels as will fit without colliding. */
-  x.fillStyle = ink3;
-  x.textAlign = "center";
-  var every = Math.max(1, Math.ceil(n / Math.floor((w - gut) / 34)));
-  for(var t = 0; t < n; t += every){
-    /* On a running total's time axis a label marks where its hour begins. */
-    x.fillText(fmtLabel(d.labels[t], d.x_label), gut + step * t + (d.cumulative ? 0 : step / 2), h - padB / 2 + 1);
-  }
+  };
+  new Chart(cv, cfg);
 }
+
+/* ---------- live or frozen ----------
+   A saved chart is either a snapshot - the numbers it had when it was frozen - or
+   live, re-running its spec whenever it is shown (no model: /api/chart/run).
+   Kept and profile charts were snapshots before this existed and Home charts were
+   live, so each keeps that as its default. The card always says which it is. */
+var LIVE_DATA = {};
+
+function isLive(rec, scope){
+  return scope === "home" ? rec.live !== false : rec.live === true;
+}
+
+function fmtDay(ts){
+  return ts ? new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+}
+
+function modeBar(m){
+  var label = m.live
+    ? '<span class="m live"><i></i>Live</span>'
+    : '<span class="m">Snapshot' + (m.since ? " \u00B7 " + esc(fmtDay(m.since)) : "") + "</span>";
+  var btn = m.toggle
+    ? '<button type="button" data-mode-scope="' + esc(m.scope) + '" data-mode-id="' + esc(m.id) + '">' +
+      (m.live ? "Freeze" : "Go live") + "</button>"
+    : "";
+  return '<div class="chart-mode">' + label + btn + "</div>";
+}
+
+function runSpec(spec){
+  return fetch("/api/chart/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(spec)
+  }).then(function(r){
+    /* A 422 is a spec the schema no longer accepts - saved before a change. */
+    return r.ok ? r.json() : { understood: false };
+  }).catch(function(){ return null; });
+}
+
+function drawRecord(rec, scope, cv){
+  if(!cv) return;
+  if(!isLive(rec, scope) || !rec.spec){ drawChart(cv, rec.data); return; }
+  runSpec(rec.spec).then(function(res){
+    /* No server, or a spec that no longer fits: the saved numbers beat an empty box. */
+    var fresh = res && res.understood && res.data && !res.empty;
+    if(fresh) LIVE_DATA[scope + ":" + rec.id] = res.data;
+    drawChart(cv, fresh ? res.data : rec.data);
+  });
+}
+
+function setChartLive(scope, id){
+  var list = scope === "home" ? homePins() : keptList();
+  var rec = list.filter(function(r){ return r.id === id; })[0];
+  if(!rec) return;
+  if(isLive(rec, scope)){
+    /* Freezing keeps exactly what was on screen. */
+    rec.live = false;
+    rec.frozenAt = Date.now();
+    rec.data = LIVE_DATA[scope + ":" + id] || rec.data;
+  } else {
+    rec.live = true;
+    delete rec.frozenAt;
+  }
+  if(scope === "home"){
+    saveHomePins(list);
+    renderHomeCharts();
+    return;
+  }
+  saveKept(list);
+  /* The profile shows copies of kept charts, so they follow. */
+  var c = cust();
+  if(c.pins && c.pins.charts){
+    c.pins.charts.forEach(function(pin){
+      if(pin && pin.id === id){ pin.live = rec.live; pin.frozenAt = rec.frozenAt; pin.data = rec.data; }
+    });
+    saveCustom();
+  }
+  renderKept();
+}
+
+document.addEventListener("click", function(e){
+  var b = e.target.closest("[data-mode-id]");
+  if(b) setChartLive(b.dataset.modeScope, b.dataset.modeId);
+});
 
 function chartCard(d, opts){
   opts = opts || {};
@@ -5731,6 +5782,7 @@ function chartCard(d, opts){
     '<div class="chart-t">' + esc(d.title) + "</div>" +
     '<div class="chart-sub">' + esc(d.y_label) + " by " + esc(d.x_label) +
       (d.series && d.series.length ? " \u00B7 " + d.series.length + " compared" : "") + "</div>" +
+    (opts.mode ? modeBar(opts.mode) : "") +
     (d.table && d.table.length
       ? chartTable(d)
       : '<canvas class="chart-canvas" data-chart="' + esc(opts.key || "") + '"></canvas>') +
@@ -5977,6 +6029,7 @@ nowPolling(true);
 homePolling();
 loadPlaylists();
 showScreen("home");
+if(location.hash === "#chart-gallery") showChartGallery();
 
 /* After the first paint, not before it: the local copy is almost always the
    right one and waiting on a request to draw anything would trade a correct

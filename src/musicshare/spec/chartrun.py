@@ -156,6 +156,9 @@ class ChartData:
     # hour that has not finished. None whenever the last bucket is not that hour.
     cumulative: bool = False
     partial_last: float | None = None
+    # A running total of today as it happened, as [hours since midnight, total]
+    # pairs, one ramp per play. Empty for every other chart.
+    timeline: list[list[float]] = field(default_factory=list)
 
     @property
     def empty(self) -> bool:
@@ -348,6 +351,7 @@ def run(spec: ChartSpec) -> ChartData:
     con = _connect(spec)
     chart = chart_for(spec.dimension, spec.series, spec.per_period, spec.cumulative)
     partial: float | None = None
+    timeline: list[list[float]] = []
 
     if spec.per_period:
         data = _per_period(spec, con, frm, where, params, dim_sql, dim_params, metric_sql)
@@ -373,6 +377,8 @@ def run(spec: ChartSpec) -> ChartData:
             labels, values = _every_hour(spec, con, labels, values)
             if spec.range == "today" and spec.year is None:
                 partial = _into_this_hour(con)
+                if spec.cumulative and spec.metric in ("hours", "plays"):
+                    timeline = _timeline(spec, con, frm, where, params)
         data = (labels, values, [], sql.strip(), [])
 
     labels, values, series, sql, table = data
@@ -396,7 +402,51 @@ def run(spec: ChartSpec) -> ChartData:
         table=table,
         cumulative=spec.cumulative,
         partial_last=partial,
+        timeline=timeline,
     )
+
+
+def _timeline(
+    spec: ChartSpec,
+    con: duckdb.DuckDBPyConnection,
+    frm: str,
+    where: str,
+    params: list[Any],
+) -> list[list[float]]:
+    """Today's running total play by play, instead of hour by hour.
+
+    Hourly points joined by straight lines hid how a day was listened to: a break
+    from 12:16 to 13:12 drew as a slow climb, and a total that stopped at 15:30
+    kept rising to the next hour's mark. Here each play adds its time across the
+    minutes it played - it ends at `played_at` and began its own length earlier -
+    so the line climbs while music is on and lies flat while it is not. A count
+    has no duration, so for plays each one is a step where it ended. The line
+    stops at the current minute.
+    """
+    clock = f"hour({LOCAL_TS}) + minute({LOCAL_TS}) / 60.0 + second({LOCAL_TS}) / 3600.0"
+    rows = con.execute(
+        f"select {clock} as h, ms_played from {frm} where {where} order by 1", params
+    ).fetchall()
+    now = con.execute(
+        f"select hour(t) + minute(t) / 60.0 + second(t) / 3600.0 "
+        f"from (select current_timestamp AT TIME ZONE '{LOCAL}' as t)"
+    ).fetchone()[0]
+
+    points, total, cursor = [[0.0, 0.0]], 0.0, 0.0
+    for end_h, ms in rows:
+        end = float(end_h)
+        if spec.metric == "plays":
+            points += [[end, total], [end, total + 1]]
+            total += 1
+        else:
+            heard = (ms or 0) / 3_600_000
+            # Plays can overlap by a second or two; a line cannot go back in time.
+            start = max(cursor, end - heard)
+            points += [[start, total], [end, total + heard]]
+            total += heard
+        cursor = end
+    points.append([max(float(now), cursor), total])
+    return [[round(x, 4), round(y, 3)] for x, y in points]
 
 
 def _into_this_hour(con: duckdb.DuckDBPyConnection) -> float:
