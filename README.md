@@ -90,9 +90,9 @@ is a picture, not a metric; distance on it is flat past about three units.
 
 **One fixed basemap, fitted on the whole corpus.** Separate fits produce
 unrelated coordinate systems, so a map you could compare two people on has to
-come from one fitting. The fitted artefacts are 534MB and serve nothing: what
-the app reads is a 1.5MB table of `(artist, x, y, region)` produced from them at
-build time.
+come from one fitting. The fitted artefacts are 534MB, and only drawing the map
+loads them, once per process. Everything else - genre filters, the live status,
+the avatar - reads a 1.5MB table produced from them at build time.
 
 Region names come from a **frozen 385-word vocabulary** derived from the corpus
 itself. Naming was the one place a model wrote free text and the one thing that

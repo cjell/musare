@@ -18,13 +18,6 @@ from musicshare.spec.vocab import MAX_GENRES
 
 MAX_ARTISTS = 12
 
-# A name is letters, and the handful of marks real genre names use: "hip-hop",
-# "r&b", "rock 'n' roll", "post-punk/new wave", "2000s pop". Allowlisting by
-# character class rather than by byte keeps accented names workable while
-# refusing brackets, braces, pipes, backticks and everything else that only
-# appears when something is trying to be read as code rather than as a label.
-NAME_MARKS = set(" -'&/.+")
-
 
 @dataclass(frozen=True)
 class SpecProblem:

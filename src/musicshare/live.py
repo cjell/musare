@@ -258,14 +258,16 @@ def _as_arrow(rows: list[dict]):
     string in the next, and the glob over all of them stops reading."""
     import pyarrow as pa
 
-    schema = pa.schema([
-        ("played_at", pa.timestamp("us")),
-        ("track_uri", pa.string()),
-        ("track_name", pa.string()),
-        ("artist_name", pa.string()),
-        ("album_name", pa.string()),
-        ("ms_played", pa.int64()),
-    ])
+    schema = pa.schema(
+        [
+            ("played_at", pa.timestamp("us")),
+            ("track_uri", pa.string()),
+            ("track_name", pa.string()),
+            ("artist_name", pa.string()),
+            ("album_name", pa.string()),
+            ("ms_played", pa.int64()),
+        ]
+    )
     return pa.Table.from_pylist(rows, schema=schema)
 
 
@@ -312,7 +314,9 @@ def pull_if_stale(every: timedelta = PULL_EVERY) -> PullResult | None:
     if result.changed:
         prune()
     if result.stalled:
-        log.warning("capture watcher has not succeeded since %s", (result.watch or {}).get("last_ok_at"))
+        log.warning(
+            "capture watcher has not succeeded since %s", (result.watch or {}).get("last_ok_at")
+        )
     return result
 
 

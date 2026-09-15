@@ -9,8 +9,7 @@ description = "Taste as identity - a campus music social network, and the pipeli
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
 
-# Floors, not pins. Exact versions belong in the lockfile so this file stays
-# readable and CI stays reproducible. See requirements.lock.
+# Floors, not pins, so this file stays readable.
 dependencies = [
   # spec grammar, validation, settings-from-env
   "pydantic>=2.11",
@@ -64,7 +63,7 @@ packages = ["src/musicshare"]
 [tool.ruff]
 line-length = 100
 target-version = "py313"
-extend-exclude = ["mscs", "dist"]
+extend-exclude = ["mscs"]
 
 [tool.ruff.lint]
 select = [

@@ -122,8 +122,10 @@ def status() -> int:
             print(f"  {label:<9} never run")
             continue
         ok = f"ok {ago(st['last_ok_at'])}" if st["last_ok_at"] else "never succeeded"
-        print(f"  {label:<9} checked {ago(st['last_run_at'])}, {ok}, {st['runs']:,} runs, "
-              f"{st['added']:,} plays written")
+        print(
+            f"  {label:<9} checked {ago(st['last_run_at'])}, {ok}, {st['runs']:,} runs, "
+            f"{st['added']:,} plays written"
+        )
         if st["last_error"]:
             print(f"            last error: {st['last_error']}")
 
@@ -158,7 +160,9 @@ def pull() -> int:
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("command", choices=["install", "status", "pull"])
     args = ap.parse_args()
     return {"install": install, "status": status, "pull": pull}[args.command]()

@@ -35,9 +35,11 @@ def store(tmp_path, monkeypatch):
 
 
 def rows_in(path) -> int:
-    return duckdb.connect().execute(
-        f"select count(*) from read_parquet('{path.as_posix()}')"
-    ).fetchone()[0]
+    return (
+        duckdb.connect()
+        .execute(f"select count(*) from read_parquet('{path.as_posix()}')")
+        .fetchone()[0]
+    )
 
 
 def names(store) -> list[str]:
@@ -62,9 +64,13 @@ def test_a_pull_replaces_a_day_rather_than_merging_into_it(store):
     measured = row(datetime(2026, 9, 14, 1, 0, 4))
     live._store([estimate], date(2026, 9, 14))
     live._store([measured], date(2026, 9, 14))
-    got = duckdb.connect().execute(
-        f"select played_at from read_parquet('{(store / 'live-20260914.parquet').as_posix()}')"
-    ).fetchall()
+    got = (
+        duckdb.connect()
+        .execute(
+            f"select played_at from read_parquet('{(store / 'live-20260914.parquet').as_posix()}')"
+        )
+        .fetchall()
+    )
     assert got == [(measured["played_at"],)]
 
 
@@ -93,18 +99,18 @@ def test_a_day_with_no_album_names_still_reads_beside_the_others(store):
     in the next, and a glob over both refuses to read."""
     bare = {**row(datetime(2026, 9, 14, 1, 0)), "album_name": None}
     live._store([bare, row(datetime(2026, 9, 15, 1, 0), "b")], None)
-    n = duckdb.connect().execute(
-        f"select count(*) from read_parquet('{(store / '*.parquet').as_posix()}')"
-    ).fetchone()[0]
+    n = (
+        duckdb.connect()
+        .execute(f"select count(*) from read_parquet('{(store / '*.parquet').as_posix()}')")
+        .fetchone()[0]
+    )
     assert n == 2
 
 
 def _export_ending(tmp_path, when: datetime) -> str:
     path = tmp_path / "export.parquet"
     con = duckdb.connect()
-    con.execute(
-        "create table e as select ?::timestamp as played_at, 'x' as track_uri", [when]
-    )
+    con.execute("create table e as select ?::timestamp as played_at, 'x' as track_uri", [when])
     con.execute(f"copy e to '{path.as_posix()}' (format parquet)")
     return path.as_posix()
 

@@ -122,9 +122,7 @@ def build() -> int:
         counts = Counter()
         for j in members:
             counts.update(set(tags_by_artist[j]))
-        dominant[i] = sorted(
-            t for t, c in counts.items() if c / len(members) >= DOMINANT_SHARE
-        )
+        dominant[i] = sorted(t for t, c in counts.items() if c / len(members) >= DOMINANT_SHARE)
 
     names = [str(by_index[int(i)]["name"]) for i in assign]
     pq.write_table(

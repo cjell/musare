@@ -29,7 +29,6 @@ DEFAULT_RADIUS_MI = 50
 DEFAULT_DAYS = 90
 
 
-
 class ShowFilter(BaseModel):
     """A filter over upcoming shows, derived from a request in plain language."""
 

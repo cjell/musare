@@ -40,8 +40,6 @@ __all__ = ["MAX_NAMED", "Genre", "ModeName", "Naming"]
 # count and rejects any index at or above it, so a too-high index cannot survive
 # whichever of the two is being named.
 MAX_NAMED = 256
-MAX_NAME_CHARS = 28
-MAX_NAME_WORDS = 3
 
 
 class ModeName(BaseModel):

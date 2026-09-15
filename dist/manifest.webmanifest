@@ -1,9 +1,0 @@
-{
-  "name": "MusicShare",
-  "short_name": "MusicShare",
-  "start_url": ".",
-  "display": "standalone",
-  "background_color": "#0B0A0F",
-  "theme_color": "#0B0A0F",
-  "orientation": "portrait"
-}

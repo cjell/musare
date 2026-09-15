@@ -385,4 +385,3 @@ def occupancy(
 # region vocabulary.
 SLEEPING = "sleeping"
 UNKNOWN = "unknown"
-

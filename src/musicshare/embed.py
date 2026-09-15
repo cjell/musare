@@ -7,9 +7,8 @@ acousticness are how a machine hears it.
 
 The pipeline is deliberately unfashionable. TF-IDF over tags, SVD to a few
 hundred dimensions, UMAP to two for drawing. A sentence transformer over tag
-bags is the obvious alternative and is benchmarked against this in
-scripts/embed_artists.py; being able to say why the simpler one was kept is
-worth more than having used the fancier one.
+bags is the obvious alternative, and being able to say why the simpler one was
+kept is worth more than having used the fancier one.
 
 One rule that matters more than any of the modelling: **similarity is measured
 in the high-dimensional space, never in the 2D projection.** UMAP is a drawing,
@@ -33,7 +32,6 @@ from musicshare.config import ROOT
 
 log = logging.getLogger(__name__)
 
-CORPUS_CSV = Path("C:/Users/colli/dev/SpotifyExplore/consolidated_backbone_embeddable.csv")
 OUT_DIR = ROOT / "data" / "embed"
 
 # Tags that describe the listener or the file rather than the music. "all" alone
@@ -170,8 +168,11 @@ class Corpus:
         return len(self.artists)
 
 
-def load_corpus(csv: Path = CORPUS_CSV, drop_soft: bool = False, min_tags: int = 1) -> Corpus:
+def load_corpus(csv: Path, drop_soft: bool = False, min_tags: int = 1) -> Corpus:
     """artist -> normalised tag list, one row per artist.
+
+    `csv` is the Last.fm tag export - artist and semicolon-separated tags. It
+    is not in the repository.
 
     The file has 6.1M rows but 99.9% carry resolution 'artist', so every track
     by an artist repeats that artist's tags. Deduplicating is not an
@@ -233,19 +234,6 @@ def reduce_dims(X, n: int = 200, seed: int = 20260910):
     return normalize(Z), svd
 
 
-def cosine(Z, i: int, j: int) -> float:
-    return float(np.dot(Z[i], Z[j]))
-
-
-def nearest(Z, index: dict[str, int], artists: list[str], name: str, k: int = 8):
-    i = index.get(name.lower())
-    if i is None:
-        return []
-    sims = Z @ Z[i]
-    order = np.argsort(-sims)[: k + 1]
-    return [(artists[j], float(sims[j])) for j in order if j != i][:k]
-
-
 # ---------------------------------------------------------------- persistence
 # Fitting the space means reading 6.1M CSV rows, a TF-IDF over 131k documents
 # and a 200-component SVD - tens of seconds, and identical every time. Nothing
@@ -285,7 +273,7 @@ class Space:
 
 
 def build_space(
-    csv: Path = CORPUS_CSV,
+    csv: Path,
     dims: int = 200,
     seed: int = 20260910,
     min_df: int = 3,
@@ -348,12 +336,16 @@ def save_space(space: Space) -> None:
     log.info("wrote space to %s", OUT_DIR)
 
 
-def load_space(rebuild: bool = False, **kw) -> Space:
-    """The fitted space, from disk if it is there and from the corpus if not."""
-    if rebuild or not (SPACE_Z.exists() and SPACE_META.exists()):
-        space = build_space(**kw)
-        save_space(space)
-        return space
+def load_space() -> Space:
+    """The fitted space, from disk.
+
+    Fitting one needs the tag corpus, which is not in the repository, so a
+    missing space is an error that says how to make one.
+    """
+    if not (SPACE_Z.exists() and SPACE_META.exists()):
+        raise FileNotFoundError(
+            f"no fitted space in {OUT_DIR} - run scripts/rebuild_embeddings.py --corpus <tags csv>"
+        )
     meta = json.loads(SPACE_META.read_text(encoding="utf-8"))
     artists = meta["artists"]
     return Space(

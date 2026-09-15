@@ -22,13 +22,7 @@ data/
 *.duckdb
 *.sqlite
 
-# node / next, once the web app lands
-node_modules/
-.next/
-out/
-
 # editor + os
-.vscode/*
-!.vscode/settings.json
+.vscode/
 .DS_Store
 Thumbs.db

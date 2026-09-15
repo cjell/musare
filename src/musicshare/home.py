@@ -119,20 +119,20 @@ def _q(sql: str, params: list | None = None) -> list[tuple]:
 def week_stats() -> dict[str, Any]:
     """This week against last, anchored on the newest play rather than today.
 
-    Anchoring on today would report zeros whenever a sync has not run, which
-    reads as "you stopped listening" rather than "the data stops here".
+        Anchoring on today would report zeros whenever a sync has not run, which
+        reads as "you stopped listening" rather than "the data stops here".
 
-Plays and hours both. Plays are the unit the movers compare on, because a count
-    means the same thing in both sources; hours are what a person actually wants
-    to know about a week, so the strip carries them too.
+    Plays and hours both. Plays are the unit the movers compare on, because a count
+        means the same thing in both sources; hours are what a person actually wants
+        to know about a week, so the strip carries them too.
 
-    Hours were briefly removed and are back on firmer ground. The live endpoint
-    carries no ms_played and this used to substitute the track's full duration,
-    which assumes every play finished and ran about 30% high against the export.
-    `live.py` now estimates from the gap between consecutive plays instead -
-    played_at marks the end of a play, so what was heard is the smaller of the
-    track's length and the time available before the next one. Rows written
-    before that change keep the old estimate until an export covers them.
+        Hours were briefly removed and are back on firmer ground. The live endpoint
+        carries no ms_played and this used to substitute the track's full duration,
+        which assumes every play finished and ran about 30% high against the export.
+        `live.py` now estimates from the gap between consecutive plays instead -
+        played_at marks the end of a play, so what was heard is the smaller of the
+        track's length and the time available before the next one. Rows written
+        before that change keep the old estimate until an export covers them.
     """
     rows = _q(f"""
         with bounds as (select max(played_at) as tip from plays),
@@ -245,10 +245,7 @@ def _movers(direction: str, limit: int) -> list[dict[str, Any]]:
         order by (recent - prior) * 1.0 / prior {order}
         limit {int(limit)}
     """)
-    return [
-        {"name": n, "plays": r, "plays_prev": p, "pct": int(pct)}
-        for n, r, p, pct in rows
-    ]
+    return [{"name": n, "plays": r, "plays_prev": p, "pct": int(pct)} for n, r, p, pct in rows]
 
 
 def discoveries(limit: int = 4) -> list[dict[str, Any]]:

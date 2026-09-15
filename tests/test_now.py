@@ -44,9 +44,7 @@ def test_paused_is_sleeping(monkeypatch):
     assert body["now"]["artist"] == "Metallica"
 
 
-@pytest.mark.skipif(
-    not app_mod.genrelib.TABLE.exists(), reason="no genre serving table built"
-)
+@pytest.mark.skipif(not app_mod.genrelib.TABLE.exists(), reason="no genre serving table built")
 def test_a_known_artist_resolves_on_a_cold_process(monkeypatch):
     """No map request has been made, so the fitted artefacts are not loaded."""
     monkeypatch.setattr(app_mod.live_mod, "now_playing", lambda: playing("Metallica"))
@@ -93,6 +91,7 @@ def test_an_oversized_profile_is_refused(monkeypatch):
 def test_a_profile_that_cannot_be_read_is_not_an_error(monkeypatch):
     """A page that cannot reach storage falls back to what the browser holds,
     which is where all of this used to live - so this must not 500."""
+
     def boom(*a, **k):
         raise RuntimeError("storage gone")
 

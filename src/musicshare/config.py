@@ -31,10 +31,6 @@ class Settings(BaseSettings):
     # reason rather than from the browser straight to Supabase.
     supabase_service_role_key: str = ""
 
-    @property
-    def plays_glob(self) -> str:
-        return (ROOT / "data" / "raw" / "plays" / "**" / "*.parquet").as_posix()
-
 
 @lru_cache(maxsize=1)
 def settings() -> Settings:

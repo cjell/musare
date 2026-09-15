@@ -203,15 +203,17 @@ def test_a_cached_feed_is_served_only_while_the_newest_play_is_unchanged():
 def test_the_picture_comes_from_the_act_credited_on_the_played_track():
     """Searching "My Friend" ranks Mark Lee first; the played track credits My
     Friend by id, which no name search can get wrong."""
-    track = {"artists": [{"name": "My Friend", "id": "right"},
-                         {"name": "Tommy Farrow", "id": "other"}]}
+    track = {
+        "artists": [{"name": "My Friend", "id": "right"}, {"name": "Tommy Farrow", "id": "other"}]
+    }
     assert home._credited(track, "My Friend") == "right"
     assert home._credited(track, "my friend") == "right"
 
 
 def test_a_joined_live_credit_resolves_on_its_first_act():
-    track = {"artists": [{"name": "My Friend", "id": "right"},
-                         {"name": "Tommy Farrow", "id": "other"}]}
+    track = {
+        "artists": [{"name": "My Friend", "id": "right"}, {"name": "Tommy Farrow", "id": "other"}]
+    }
     assert home._credited(track, "My Friend, Tommy Farrow") == "right"
 
 

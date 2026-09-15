@@ -1,7 +1,9 @@
 """Rebuild every fitted artefact, in the order they depend on each other.
 
+    python scripts/rebuild_embeddings.py --corpus <tags.csv>
+
     space  ->  basemap  ->  atlas  ->  region names
-                \->  every saved listener profile
+                +->  every saved listener profile
 
 Each step is fitted from the one before it, so they cannot be rebuilt
 independently: new vectors mean new 2D positions, new positions mean the saved
@@ -24,6 +26,7 @@ import argparse
 import json
 import logging
 import time
+from pathlib import Path
 
 from musicshare import modes, regions
 from musicshare.embed import build_space, save_space
@@ -38,6 +41,12 @@ log = logging.getLogger("rebuild")
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
+        "--corpus",
+        type=Path,
+        required=True,
+        help="the Last.fm tag export: a CSV of artist and semicolon-separated tags",
+    )
+    ap.add_argument(
         "--keep-soft",
         action="store_true",
         help="keep geography and demographic tags (american, canadian, female vocalists). "
@@ -50,7 +59,7 @@ def main() -> None:
     t0 = time.time()
 
     log.info("1/4 fitting the space (drop_soft=%s)", not args.keep_soft)
-    space = build_space(drop_soft=not args.keep_soft)
+    space = build_space(args.corpus, drop_soft=not args.keep_soft)
     save_space(space)
     log.info("    %d artists, %dd", len(space), space.dims)
 

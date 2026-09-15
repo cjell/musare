@@ -45,16 +45,24 @@ def snap(uri: str | None, prog: int = 0, playing: bool = True, dur: int = 200_00
     return {
         "is_playing": playing,
         "progress_ms": prog,
-        "item": {"uri": uri, "name": uri[-4:], "duration_ms": dur,
-                 "artists": [{"name": "One"}, {"name": "Two"}], "album": {"name": "Al"}},
+        "item": {
+            "uri": uri,
+            "name": uri[-4:],
+            "duration_ms": dur,
+            "artists": [{"name": "One"}, {"name": "Two"}],
+            "album": {"name": "Al"},
+        },
     }
 
 
 def step(db, state, s, at):
     out = db.execute(
         "select listen.watch_step(%s::jsonb, %s::jsonb, %s)",
-        [json.dumps(state) if state is not None else None,
-         json.dumps(s) if s is not None else None, at],
+        [
+            json.dumps(state) if state is not None else None,
+            json.dumps(s) if s is not None else None,
+            at,
+        ],
     ).fetchone()[0]
     return out["state"], out["play"]
 
@@ -156,8 +164,11 @@ def test_a_flicker_under_a_second_is_not_a_play(db):
 
 
 def test_an_episode_reads_as_nothing_playing(db):
-    episode = {"is_playing": True, "progress_ms": 1000,
-               "item": {"uri": "spotify:episode:xyz", "name": "Pod"}}
+    episode = {
+        "is_playing": True,
+        "progress_ms": 1000,
+        "item": {"uri": "spotify:episode:xyz", "name": "Pod"},
+    }
     state, plays = run(db, (0, episode))
     assert state is None and plays == []
 
@@ -167,14 +178,24 @@ def test_an_episode_reads_as_nothing_playing(db):
 
 def test_recently_played_rows_estimate_listening_from_the_gap(db):
     def item(when, ms):
-        return {"played_at": when, "track": {"uri": A, "name": "S", "duration_ms": ms,
-                "artists": [{"name": "X"}], "album": {"name": "Al"}}}
+        return {
+            "played_at": when,
+            "track": {
+                "uri": A,
+                "name": "S",
+                "duration_ms": ms,
+                "artists": [{"name": "X"}],
+                "album": {"name": "Al"},
+            },
+        }
 
-    body = {"items": [  # newest first, as Spotify sends them
-        item("2026-09-14T12:04:05Z", 200_000),
-        item("2026-09-14T12:00:45Z", 200_000),
-        item("2026-09-14T12:00:00Z", 200_000),
-    ]}
+    body = {
+        "items": [  # newest first, as Spotify sends them
+            item("2026-09-14T12:04:05Z", 200_000),
+            item("2026-09-14T12:00:45Z", 200_000),
+            item("2026-09-14T12:00:00Z", 200_000),
+        ]
+    }
     rows = db.execute(
         "select ms_played from listen.recent_rows(%s::jsonb)", [json.dumps(body)]
     ).fetchall()
@@ -187,8 +208,18 @@ def test_recently_played_rows_estimate_listening_from_the_gap(db):
 def add(db, uri, at, src, ms=100_000, name="A Song", artist="An Artist"):
     return db.execute(
         "select listen.add_play(%s::jsonb, %s)",
-        [json.dumps({"played_at": at.isoformat(), "track_uri": uri, "ms_played": ms,
-                     "track_name": name, "artist_name": artist}), src],
+        [
+            json.dumps(
+                {
+                    "played_at": at.isoformat(),
+                    "track_uri": uri,
+                    "ms_played": ms,
+                    "track_name": name,
+                    "artist_name": artist,
+                }
+            ),
+            src,
+        ],
     ).fetchone()[0]
 
 
@@ -224,8 +255,17 @@ def test_one_song_under_two_ids_is_one_play(db):
     """Power Trip came back under a different id from each endpoint, 0.2s apart,
     and was stored twice."""
     add(db, A, T0, "watch", name="Power Trip", artist="J. Cole, Miguel")
-    assert add(db, B, T0 + timedelta(milliseconds=200), "recent",
-               name="power trip ", artist="J. Cole, Miguel") == 0
+    assert (
+        add(
+            db,
+            B,
+            T0 + timedelta(milliseconds=200),
+            "recent",
+            name="power trip ",
+            artist="J. Cole, Miguel",
+        )
+        == 0
+    )
     assert rows_for(db, B) == []
 
 
