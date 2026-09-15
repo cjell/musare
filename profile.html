@@ -282,7 +282,7 @@ body{
 
 /* ---- top tracks: classic rows ---- */
 .rows{display:flex;flex-direction:column;gap:3px}
-/* On repeat: five and a half rows tall (58px rows, 3px gaps), so the next row
+/* On repeat and Home's song lists: five and a half rows tall (58px rows, 3px gaps), so the next row
    peeks out under the fade. Padded by the rows' own -8px bleed, or the scroller
    would clip their hover background at both edges. */
 .repscroll{
@@ -756,16 +756,14 @@ body{
 /* Past four, a row rather than more rows. The next card peeks in at the edge,
    which is what says the row scrolls, and each one snaps into place. The
    scrollbar stays, thin: without it a mouse has no way across. */
-.risegrid.scroll,.rowpages{
+.risegrid.scroll{
   overflow-x:auto;scroll-snap-type:x mandatory;overscroll-behavior-x:contain;
   scrollbar-width:thin;scrollbar-color:var(--line-2) transparent;padding-bottom:8px;
 }
-.risegrid.scroll::-webkit-scrollbar,.rowpages::-webkit-scrollbar{height:4px}
-.risegrid.scroll::-webkit-scrollbar-thumb,.rowpages::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:2px}
+.risegrid.scroll::-webkit-scrollbar{height:4px}
+.risegrid.scroll::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:2px}
 .risegrid.scroll{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:calc((100% - 40px) / 4.4)}
 .risegrid.scroll .rise{scroll-snap-align:start}
-.rowpages{display:flex;gap:14px}
-.rowpages > .rows{flex:0 0 88%;min-width:0;scroll-snap-align:start}
 .rise{text-align:center;cursor:pointer;display:flex;flex-direction:column}
 .rise .ring{display:block;border-color:var(--line-2)}
 .rise .rn{font-size:10.5px;font-weight:500;margin-top:8px;line-height:1.3;
@@ -1068,11 +1066,12 @@ body{
 .mf-cl{display:flex;align-items:center;gap:10px}
 .mf-cl .nm{
   font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.09em;
-  text-transform:uppercase;color:var(--gen);width:104px;flex:none;
+  text-transform:uppercase;color:var(--accent);width:104px;flex:none;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .mf-cl .track{flex:1;height:3px;border-radius:2px;background:rgba(244,241,250,.08);overflow:hidden}
-.mf-cl .track i{display:block;height:100%;border-radius:2px;background:var(--gen);opacity:.75}
+/* Pink, not the corpus purple: these bars are your listening, like the pink dots. */
+.mf-cl .track i{display:block;height:100%;border-radius:2px;background:var(--accent);opacity:.75}
 .mf-cl .pc{
   font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);
   font-variant-numeric:tabular-nums;width:30px;text-align:right;flex:none;
@@ -1556,7 +1555,7 @@ details[open] summary .chev{transform:rotate(180deg)}
             <button type="button" data-swap="b" aria-pressed="false">Songs</button>
           </span></div>
         <div class="risegrid" id="youUp"></div>
-        <div class="rows" id="youUpSongs" hidden></div>
+        <div class="rows repscroll" id="youUpSongs" hidden></div>
       </section>
 
       <section class="sec anim">
@@ -1566,7 +1565,7 @@ details[open] summary .chev{transform:rotate(180deg)}
             <button type="button" data-swap="b" aria-pressed="false">Songs</button>
           </span></div>
         <div class="risegrid" id="youDown"></div>
-        <div class="rows" id="youDownSongs" hidden></div>
+        <div class="rows repscroll" id="youDownSongs" hidden></div>
       </section>
 
       <section class="sec anim">
@@ -1576,7 +1575,7 @@ details[open] summary .chev{transform:rotate(180deg)}
             <button type="button" data-swap="b" aria-pressed="false">Songs</button>
           </span></div>
         <div class="risegrid" id="youFound"></div>
-        <div class="rows" id="youFoundSongs" hidden></div>
+        <div class="rows repscroll" id="youFoundSongs" hidden></div>
       </section>
 
       <section class="sec anim">
@@ -3816,13 +3815,13 @@ $("askInput").addEventListener("keydown", function(e){
 
 /* [title, artist, count, image] -> the numbered row On repeat already used.
    Extracted rather than copied when Found and kept needed the same shape. */
-function trackRows(list, start){
+function trackRows(list){
   return list.map(function(t, n){
     var art = t[3]
       ? 'class="art photo" style="background-image:url(' + t[3] + ')"'
       : 'class="art" style="' + artStyle(t[0], 200) + '"';
     return '<div class="row" tabindex="0" role="button">' +
-      '<span class="idx">' + ((start || 0) + n + 1) + "</span>" +
+      '<span class="idx">' + (n + 1) + "</span>" +
       "<div " + art + "></div>" +
       '<div class="meta"><div class="tt">' + esc(t[0]) + '</div><div class="ta">' + esc(t[1]) + "</div></div>" +
       '<span class="plays">' + esc(t[2]) + "</span></div>";
@@ -3832,16 +3831,6 @@ function trackRows(list, start){
 /* How many fit a phone row. Past this a list scrolls sideways instead of
    growing downward and pushing the rest of the feed off screen. */
 var ROW_FIT = 4;
-
-/* Songs are rows, not cards, so past ROW_FIT they become pages of rows side by
-   side - numbered straight through, so page two starts at 5. */
-function songPages(list){
-  if(list.length <= ROW_FIT) return trackRows(list);
-  var html = "";
-  for(var i = 0; i < list.length; i += ROW_FIT)
-    html += '<div class="rows">' + trackRows(list.slice(i, i + ROW_FIT), i) + "</div>";
-  return '<div class="rowpages">' + html + "</div>";
-}
 
 function artistCircles(list, down){
   return list.map(function(a){
@@ -3867,17 +3856,22 @@ function renderRepeat(){
   $("youTracks").innerHTML = all.length
     ? trackRows(all)
     : '<div class="emptynote">Nothing played three times this week.</div>';
-  $("repScroll").classList.toggle("fits", all.length <= REPEAT_FIT);
-  repeatEdge();
+  fitScroll($("repScroll"), all.length);
 }
 
-/* Only once scrolled: rendered while Home is hidden, the box measures zero and
-   would otherwise look like it had already reached its end. */
-function repeatEdge(){
-  var el = $("repScroll");
+/* The fade at the bottom of a scroll box says there is more, and goes once the
+   end is reached. Only once scrolled: rendered while Home is hidden, a box
+   measures zero and would otherwise look like it had already reached its end. */
+function scrollEdge(el){
   el.classList.toggle("at-end", el.scrollTop > 0 && el.scrollTop + el.clientHeight >= el.scrollHeight - 2);
 }
-$("repScroll").addEventListener("scroll", repeatEdge, { passive: true });
+function fitScroll(el, count){
+  el.classList.toggle("fits", count <= REPEAT_FIT);
+  scrollEdge(el);
+}
+["repScroll", "youUpSongs", "youDownSongs", "youFoundSongs"].forEach(function(id){
+  $(id).addEventListener("scroll", function(){ scrollEdge(this); }, { passive: true });
+});
 
 function renderYou(){
   var y = HOME.you;
@@ -3905,15 +3899,20 @@ function renderYou(){
     : '<div class="emptynote">No new artist stuck this week.</div>';
   $("youFound").classList.toggle("scroll", found.length > ROW_FIT);
   $("youUpSongs").innerHTML = (y.upSongs || []).length
-    ? songPages(y.upSongs)
+    ? trackRows(y.upSongs)
     : '<div class="emptynote">No song climbed this week.</div>';
   $("youDownSongs").innerHTML = (y.downSongs || []).length
-    ? songPages(y.downSongs)
+    ? trackRows(y.downSongs)
     : '<div class="emptynote">No song cooled this week.</div>';
   var fs = y.foundSongs || [];
   $("youFoundSongs").innerHTML = fs.length
-    ? songPages(fs)
+    ? trackRows(fs)
     : '<div class="emptynote">No new song stuck this week.</div>';
+  /* Songs read top to bottom, so they scroll down inside the same box as On
+     repeat rather than paging sideways like the artists above them. */
+  fitScroll($("youUpSongs"), (y.upSongs || []).length);
+  fitScroll($("youDownSongs"), (y.downSongs || []).length);
+  fitScroll($("youFoundSongs"), fs.length);
   renderRepeat();
 }
 
@@ -4173,6 +4172,11 @@ var currentScreen = "home";
 function showScreen(which){
   screenScroll[currentScreen] = window.scrollY;
   currentScreen = which;
+
+  /* Every screen but a profile is yours. Opening someone's profile themes the
+     whole page and makes them the current person, and nothing put that back:
+     Home kept their colours, and Charts read - and saved to - their kept charts. */
+  if(which !== "profile" && current !== 0) render(0);
 
   /* Editing belongs to the profile screen, so leaving it ends the session the
      same way Done would - the bar was staying pinned over Home and Shows,
