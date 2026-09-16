@@ -2184,11 +2184,13 @@ var PROFILES = [
     /* Every badge here is true of the real history (2026-09-15): 14,262 hours and
        509,773 plays since 2018-08-11, a longest run of 812 consecutive days with a
        play, and 61 genres with 5+ hours in the last year. The ranking badges that
-       used to lead were against other users, and there are none yet. */
+       used to lead were against other users, and there are none yet.
+       The streak is the current run, not that longest one, and loadStreak
+       replaces its label from the server - 469 is only what shows without one. */
     badges:[
       {t:"mile",l:"14,000+ hrs"},
       {t:"mile",l:"500k plays"},
-      {t:"mile",l:"812-day streak"},
+      {t:"mile",l:"469-day streak",live:"streak"},
       {t:"mile",l:"61 genres this year"},
       {t:"mile",l:"Since 2018"},
       {t:"id",l:"UNC '27"},
@@ -5149,6 +5151,34 @@ function loadNow(){
     .catch(function(){ NOW = null; paintNow(); });
 }
 
+/* The one badge that moves by the day, so it is asked for rather than written
+   down. Only the owner's profile has it; the sample profiles are made up.
+   A broken streak takes the badge off rather than bragging about zero, and it
+   goes back in the same slot once a new run starts. */
+var STREAK_BADGES = PROFILES[0].badges;
+var STREAK_AT = STREAK_BADGES.findIndex(function(x){ return x.live === "streak"; });
+var STREAK_BADGE = STREAK_BADGES[STREAK_AT];
+
+function loadStreak(){
+  if(!STREAK_BADGE) return;
+  fetch("/api/streak").then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(d){
+      if(!d || d.days == null) return;
+      var at = STREAK_BADGES.indexOf(STREAK_BADGE);
+      var label = d.days.toLocaleString() + "-day streak";
+      if(d.days === 0){
+        if(at < 0) return;
+        STREAK_BADGES.splice(at, 1);
+      } else {
+        if(at >= 0 && STREAK_BADGE.l === label) return;
+        STREAK_BADGE.l = label;
+        if(at < 0) STREAK_BADGES.splice(STREAK_AT, 0, STREAK_BADGE);
+      }
+      if(current === 0) render(0);
+    })
+    .catch(function(){});
+}
+
 function nowPolling(on){
   if(nowTimer){ clearInterval(nowTimer); nowTimer = null; }
   /* 20s: a track is three minutes, so this is wrong by at most a few percent of
@@ -5160,7 +5190,7 @@ function nowPolling(on){
 
 document.addEventListener("visibilitychange", function(){
   if(document.hidden) nowPolling(false);
-  else { loadNow(); nowPolling(true); }
+  else { loadNow(); loadStreak(); nowPolling(true); }
 });
 
 /* Real playlists, for the owner only. Spotify allows a listener their own
@@ -6341,6 +6371,7 @@ renderHome();
 render(0);
 loadMap();
 loadNow();
+loadStreak();
 nowPolling(true);
 homePolling();
 loadPlaylists();
