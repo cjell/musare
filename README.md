@@ -27,9 +27,7 @@ features are not yet measurable.**
 
 ## The taste map
 
-<!-- video: replace the line below by dragging taste-map.mp4 in here.
-     The bare URL GitHub inserts renders as a player; keep it on its own line. -->
-[Watch it](docs/demo/taste-map.mp4)
+https://github.com/user-attachments/assets/959a974e-b17c-4e05-acab-24695f64dbff
 
 The largest piece of work here, and the one nothing else could fake. Every
 artist in the corpus is embedded from its tags into **200 dimensions**, then
