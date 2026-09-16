@@ -29,7 +29,7 @@ ART_CACHE = ROOT / "data" / "cache" / "art.json"
 # Bumped whenever what a cached feed means changes - a new field, a different
 # rule for choosing a picture - so an old file is rebuilt rather than served just
 # because no play has happened since.
-CACHE_VERSION = 5
+CACHE_VERSION = 7
 
 MIN_MS = 30_000
 URI_RE = re.compile(r"^spotify:track:([A-Za-z0-9]+)$")
@@ -63,6 +63,18 @@ MIN_RECENT_PLAYS_ARTIST = 2
 # Songs sit lower, because one track is a smaller unit than a body of work.
 MIN_PRIOR_PLAYS_SONG = 3
 MIN_RECENT_PLAYS_SONG = 2
+
+# Back in rotation: known before, below the Climbing floor last week, and heavy
+# this week. Those floors exist so a percentage has a real base under it, which
+# is exactly why an artist who went from one play to seven fell through every
+# section - Climbing had nothing to measure against, Found and kept wants someone
+# new, and On repeat ranks songs. Set from 26 fully recorded weeks: at 6 plays a
+# typical week has ten artists back (range 2-24), which fills a ten-item row
+# without padding it. Songs sit at 3, where a typical week has 25 (median) and
+# the ten shown are simply the most played; 4 would have kept Michael Jackson
+# the artist and dropped two of the three songs that put him there.
+MIN_BACK_PLAYS_ARTIST = 6
+MIN_BACK_PLAYS_SONG = 3
 
 # How far back an artist can have been found and still count as a discovery.
 # A week, the same window as every other section of the feed.
@@ -330,7 +342,9 @@ def discoveries(limit: int = 4) -> list[dict[str, Any]]:
            and count(*) >= {MIN_DISCOVER_PLAYS}
            and max(p.played_at) > (select tip from bounds)
                                   - interval {STILL_PLAYING_DAYS} day
-        order by 4 desc, 2 desc
+        -- Most played first, like the songs. Days already decided who qualifies -
+        -- everyone here came back on at least two - so they only break ties.
+        order by 2 desc, 4 desc
         limit {int(limit)}
     """)
     return [
@@ -403,6 +417,77 @@ def song_discoveries(limit: int = 5) -> list[dict[str, Any]]:
 # typical week had 4 plays, so 3 leaves ordinary weeks at twenty and lets a thin
 # one come up short rather than fill itself with noise.
 MIN_REPEAT_PLAYS = 3
+
+
+def back_in_rotation(limit: int = 10) -> list[dict[str, Any]]:
+    """Artists played before, next to nothing last week, and a lot this week.
+
+    Every artist with a real prior week is Climbing's or Cooling off's to judge;
+    this takes the ones below that floor, so an artist lands in one place or the
+    other and never both. "Played before" means before last week, which also keeps
+    out anyone new - they are Found and kept's.
+    """
+    rows = _q(f"""
+        with bounds as (select max(played_at) as tip from plays),
+        w as (
+          select artist_name,
+            count(*) filter (where played_at > (select tip from bounds) - interval 7 day) as recent,
+            count(*) filter (
+              where played_at > (select tip from bounds) - interval 14 day
+                and played_at <= (select tip from bounds) - interval 7 day) as prior,
+            count(*) filter (
+              where played_at <= (select tip from bounds) - interval 14 day) as earlier
+          from plays
+          where artist_name is not null and ms_played >= {MIN_MS}
+          group by 1
+        )
+        select artist_name, recent, prior
+        from w
+        where earlier > 0
+          and prior < {MIN_PRIOR_PLAYS_ARTIST}
+          and recent >= {MIN_BACK_PLAYS_ARTIST}
+        order by recent desc, artist_name
+        limit {int(limit)}
+    """)
+    return [{"name": n, "plays": r, "plays_prev": p} for n, r, p in rows]
+
+
+def songs_back_in_rotation(limit: int = 10) -> list[dict[str, Any]]:
+    """Songs played before, next to nothing last week, and a lot this week.
+
+    Keyed on title and artist rather than the track id, for the reason
+    song_discoveries guards against re-releases: a remaster has a fresh id and is
+    still the song you used to play. The newest id and spelling are the ones shown.
+    """
+    rows = _q(f"""
+        with bounds as (select max(played_at) as tip from plays),
+        w as (
+          select lower(trim(track_name)) || '|' || lower(trim(artist_name)) as k,
+            arg_max(track_name, played_at) as name,
+            arg_max(artist_name, played_at) as artist,
+            arg_max(track_uri, played_at) as uri,
+            count(*) filter (where played_at > (select tip from bounds) - interval 7 day) as recent,
+            count(*) filter (
+              where played_at > (select tip from bounds) - interval 14 day
+                and played_at <= (select tip from bounds) - interval 7 day) as prior,
+            count(*) filter (
+              where played_at <= (select tip from bounds) - interval 14 day) as earlier
+          from plays
+          where track_name is not null and artist_name is not null
+            and track_uri is not null and ms_played >= {MIN_MS}
+          group by 1
+        )
+        select name, artist, uri, recent, prior
+        from w
+        where earlier > 0
+          and prior < {MIN_PRIOR_PLAYS_SONG}
+          and recent >= {MIN_BACK_PLAYS_SONG}
+        order by recent desc, name
+        limit {int(limit)}
+    """)
+    return [
+        {"name": n, "artist": a, "uri": u, "plays": r, "plays_prev": p} for n, a, u, r, p in rows
+    ]
 
 
 def on_repeat(limit: int = 5) -> list[dict[str, Any]]:
@@ -549,15 +634,16 @@ def build(refresh: bool = False) -> dict[str, Any]:
     up, down, repeat = _movers("up", 10), _movers("down", 10), on_repeat(20)
     up_songs, down_songs = _song_movers("up", 10), _song_movers("down", 10)
     found, found_songs = discoveries(10), song_discoveries(10)
-    names = [a["name"] for a in up + down + found]
+    back, back_songs = back_in_rotation(10), songs_back_in_rotation(10)
+    names = [a["name"] for a in up + down + found + back]
     art = _art(
         names,
-        [t["uri"] for t in repeat + found_songs + up_songs + down_songs],
+        [t["uri"] for t in repeat + found_songs + up_songs + down_songs + back_songs],
         played=_played_tracks(names),
     )
-    for a in up + down + found:
+    for a in up + down + found + back:
         a["image"] = art.get(f"ai:{a['name'].lower()}") or None
-    for t in repeat + found_songs + up_songs + down_songs:
+    for t in repeat + found_songs + up_songs + down_songs + back_songs:
         t["image"] = art.get(f"t:{t['uri']}") or None
 
     out = {
@@ -567,6 +653,8 @@ def build(refresh: bool = False) -> dict[str, Any]:
         "down": down,
         "up_songs": up_songs,
         "down_songs": down_songs,
+        "back": back,
+        "back_songs": back_songs,
         "found": found,
         "found_songs": found_songs,
         "on_repeat": repeat,

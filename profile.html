@@ -1569,6 +1569,16 @@ details[open] summary .chev{transform:rotate(180deg)}
       </section>
 
       <section class="sec anim">
+        <div class="sec-label"><span>Back in rotation <span class="aux">this week</span></span>
+          <span class="swap" data-a="youBack" data-b="youBackSongs">
+            <button type="button" data-swap="a" aria-pressed="true">Artists</button>
+            <button type="button" data-swap="b" aria-pressed="false">Songs</button>
+          </span></div>
+        <div class="risegrid" id="youBack"></div>
+        <div class="rows repscroll" id="youBackSongs" hidden></div>
+      </section>
+
+      <section class="sec anim">
         <div class="sec-label"><span>Found and kept <span class="aux">new this week</span></span>
           <span class="swap" data-a="youFound" data-b="youFoundSongs">
             <button type="button" data-swap="a" aria-pressed="true">Artists</button>
@@ -1853,7 +1863,7 @@ details[open] summary .chev{transform:rotate(180deg)}
 
     <div class="pad">
       <section class="sec anim">
-        <div class="sec-label"><span>Ask</span><span class="aux">503,236 plays</span></div>
+        <div class="sec-label"><span>Ask</span></div>
         <div class="ask">
           <input id="chartInput" type="text" autocomplete="off"
                  placeholder="what changed about my listening this year?">
@@ -2155,14 +2165,16 @@ var PROFILES = [
     bio:"this is a bio about me and about the things that I do and whatnot and what I enjoy probably",
     aux:{tracks:"my picks",artists:"My Favs"},
     stats:["1,247","389","87"],
+    /* Every badge here is true of the real history (2026-09-15): 14,262 hours and
+       509,773 plays since 2018-08-11, a longest run of 812 consecutive days with a
+       play, and 61 genres with 5+ hours in the last year. The ranking badges that
+       used to lead were against other users, and there are none yet. */
     badges:[
-      {t:"rank",l:"#3 Electronic \u00B7 UNC"},
-      {t:"rank",l:"#22 Trending"},
-      {t:"mile",l:"10,000+ hrs"},
-      {t:"mile",l:"Since 2016"},
-      {t:"mile",l:"412 deep cuts"},
-      {t:"mile",l:"38 shows"},
-      {t:"mile",l:"Cradle regular"},
+      {t:"mile",l:"14,000+ hrs"},
+      {t:"mile",l:"500k plays"},
+      {t:"mile",l:"812-day streak"},
+      {t:"mile",l:"61 genres this year"},
+      {t:"mile",l:"Since 2018"},
       {t:"id",l:"UNC '27"},
       {t:"id",l:"Makes music"}
     ],
@@ -2180,7 +2192,10 @@ var PROFILES = [
          shared:["Four Tet","Overmono","DJ Python"],
          sameShows:["Four Tet","Overmono","Yaeji"],
          note:"Four Tet is #1 for both of you \u00B7 2 shared deep cuts: Priori, Skee Mask"},
-    genres:["UK garage","ambient jazz","dub techno","footwork","deconstructed club","jungle"],
+    /* From listening, weighted to now: deep house leads the last 90 days, nu metal
+       and shoegaze the last year, indie rock and dream pop run through both, and
+       trap is the all-time pillar at 2,681 hours. */
+    genres:["deep house","indie rock","dream pop","nu metal","shoegaze","trap"],
     makes:"soundcloud.com/cjellok"
   },
   {
@@ -3645,6 +3660,10 @@ function loadHome(){
 
     HOME.you.up = d.up.map(function(a){ return [a.name, "+" + a.pct + "%", a.image]; });
     HOME.you.down = d.down.map(function(a){ return [a.name, a.pct + "%", a.image]; });
+    HOME.you.back = (d.back || []).map(function(a){ return [a.name, a.plays + " plays", a.image]; });
+    HOME.you.backSongs = (d.back_songs || []).map(function(t){
+      return [t.name, t.artist, String(t.plays), t.image];
+    });
     /* Time listened rather than days returned, because "20 days" beside a face
        reads as "20 days ago". Coming back is what got them into this list at
        all - the server will not return an artist played on only one day - so
@@ -3869,7 +3888,7 @@ function fitScroll(el, count){
   el.classList.toggle("fits", count <= REPEAT_FIT);
   scrollEdge(el);
 }
-["repScroll", "youUpSongs", "youDownSongs", "youFoundSongs"].forEach(function(id){
+["repScroll", "youUpSongs", "youDownSongs", "youBackSongs", "youFoundSongs"].forEach(function(id){
   $(id).addEventListener("scroll", function(){ scrollEdge(this); }, { passive: true });
 });
 
@@ -3892,6 +3911,16 @@ function renderYou(){
     : '<div class="emptynote">No artist cooled this week.</div>';
   $("youUp").classList.toggle("scroll", (y.up || []).length > ROW_FIT);
   $("youDown").classList.toggle("scroll", (y.down || []).length > ROW_FIT);
+  /* Back in rotation: played before, quiet last week, heavy this week - the rise
+     Climbing's floor cannot put a percentage on, so it says plays instead. */
+  $("youBack").innerHTML = (y.back || []).length
+    ? artistCircles(y.back)
+    : '<div class="emptynote">Nobody came back this week.</div>';
+  $("youBack").classList.toggle("scroll", (y.back || []).length > ROW_FIT);
+  $("youBackSongs").innerHTML = (y.backSongs || []).length
+    ? trackRows(y.backSongs)
+    : '<div class="emptynote">No song came back this week.</div>';
+  fitScroll($("youBackSongs"), (y.backSongs || []).length);
   /* A month with nothing that stuck is a real answer, not a broken section. */
   var found = y.found || [];
   $("youFound").innerHTML = found.length

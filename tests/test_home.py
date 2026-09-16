@@ -21,6 +21,33 @@ def test_discoveries_respect_the_limit():
     assert len(home.discoveries(2)) <= 2
 
 
+def test_found_artists_are_listed_most_played_first():
+    """Sapian at 6 plays over 3 days sat above M-High at 11 over 2."""
+    found = home.discoveries(10)
+    keys = [(d["plays"], d["days"]) for d in found]
+    assert keys == sorted(keys, reverse=True)
+
+
+def test_back_in_rotation_is_what_climbing_and_found_cannot_hold():
+    """One play last week and seven this week went nowhere on Home."""
+    back = home.back_in_rotation(50)
+    for a in back:
+        assert a["plays_prev"] < home.MIN_PRIOR_PLAYS_ARTIST
+        assert a["plays"] >= home.MIN_BACK_PLAYS_ARTIST
+    names = {a["name"] for a in back}
+    assert not names & {a["name"] for a in home._movers("up", 50)}, "one place or the other"
+    assert not names & {a["name"] for a in home.discoveries(50)}, "someone new is found, not back"
+
+
+def test_songs_back_in_rotation_follow_the_song_floors_most_played_first():
+    rows = home.songs_back_in_rotation(10)
+    for t in rows:
+        assert t["plays_prev"] < home.MIN_PRIOR_PLAYS_SONG
+        assert t["plays"] >= home.MIN_BACK_PLAYS_SONG
+    plays = [t["plays"] for t in rows]
+    assert plays == sorted(plays, reverse=True)
+
+
 def test_on_repeat_only_lists_songs_played_again_and_again():
     """A thin week comes up short rather than padding with songs heard once."""
     rows = home.on_repeat(20)
