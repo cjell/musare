@@ -13,7 +13,11 @@ feed.
 Short clips of the app running on my own history. GitHub plays them in the
 browser.
 
-- **[The taste map](docs/demo/taste-map.mp4)** - the map itself, and where my
+- **[The taste map](
+
+https://github.com/user-attachments/assets/959a974e-b17c-4e05-acab-24695f64dbff
+
+)** - the map itself, and where my
   listening sits on it
 - **[Shows](docs/demo/shows.mp4)** - live events filtered by who I actually
   listen to
