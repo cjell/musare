@@ -1349,18 +1349,23 @@ details[open] summary .chev{transform:rotate(180deg)}
 
 .chart-keep{display:flex;flex-direction:column;gap:14px;margin-top:4px}
 /* Home's charts are always removable: Home is your own screen, not an edit mode,
-   so this cannot be the profile's .unpin, which only shows while editing. */
-.hc-unpin{
+   so this cannot be the profile's .unpin, which only shows while editing. The
+   chart you just asked for gets the same button, to put it away unkept. */
+.hc-unpin,.chart-x{
   position:absolute;top:10px;right:10px;width:20px;height:20px;border-radius:50%;
   border:1px solid var(--line-2);background:#15121D;color:var(--ink-2);
   display:flex;align-items:center;justify-content:center;cursor:pointer;
   font-family:inherit;font-size:13px;line-height:1;padding:0 0 1px;z-index:3;
 }
-.hc-unpin:hover{border-color:#FF4D6D;color:#FF4D6D}
-.hc-unpin:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
-#homeCharts .chart-t{padding-right:26px}
+.hc-unpin:hover,.chart-x:hover{border-color:#FF4D6D;color:#FF4D6D}
+.hc-unpin:focus-visible,.chart-x:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#homeCharts .chart-t,#chartResult .chart-t{padding-right:26px}
+/* Where a kept chart is showing - the profile, Home, or both - in the corner,
+   with the title kept clear of however many there are. */
+.chart-badges{position:absolute;top:12px;right:12px;display:flex;gap:4px}
+.chart-badges[data-n="1"] + .chart-t{padding-right:86px}
+.chart-badges[data-n="2"] + .chart-t{padding-right:150px}
 .chart-badge{
-  position:absolute;top:12px;right:12px;
   font-family:"IBM Plex Mono",monospace;font-size:8.5px;letter-spacing:.12em;
   text-transform:uppercase;color:var(--accent);
   border:1px solid var(--accent-line);background:var(--accent-tint);
@@ -4479,6 +4484,14 @@ function removeKept(id){
   saveKept(keptList().filter(function(k){ return k.id !== id; }));
 }
 
+function chartBadges(labels){
+  labels = labels.filter(Boolean);
+  if(!labels.length) return "";
+  return '<div class="chart-badges" data-n="' + labels.length + '">' +
+    labels.map(function(l){ return '<span class="chart-badge">' + esc(l) + "</span>"; }).join("") +
+    "</div>";
+}
+
 function renderKept(){
   var l = keptList(), pins = pinList("charts");
   var pinnedIds = pins.filter(Boolean).map(function(p){ return p.id; });
@@ -4491,7 +4504,7 @@ function renderKept(){
       key: "kept" + i,
       mode: { live: isLive(k, "kept"), since: k.frozenAt || k.at, toggle: true, scope: "kept", id: k.id },
       style: { scope: "kept", id: k.id, style: k.style },
-      unpin: isPinned ? '<span class="chart-badge">On profile</span>' : "",
+      unpin: chartBadges([isPinned && "On profile", onHome && "On Home"]),
       actions: '<div class="chart-q">' + esc(k.q) + "</div>" +
         '<div class="chart-acts">' +
         '<button class="btn ' + (isPinned ? "btn-ghost" : "btn-primary") + '" type="button" ' +
@@ -4534,6 +4547,7 @@ function showChartResult(d, q, spec, history, style){
   var n = lastChart.history.length;
   $("chartResult").innerHTML = chartCard(d, {
     key: "live",
+    unpin: '<button class="chart-x" type="button" id="chartDismiss" aria-label="Close this chart">&#215;</button>',
     style: { scope: "live", id: "live", style: lastChart.style },
     actions: '<div class="chart-q">' + esc(q) + "</div>" +
       '<div class="chart-acts">' +
@@ -4547,6 +4561,20 @@ function showChartResult(d, q, spec, history, style){
   });
   $("chartResultSec").hidden = false;
   drawChart($("chartResult").querySelector('[data-chart="live"]'), d, lastChart.style);
+}
+
+/* Put the chart away without keeping it. Nothing is saved, so there is nothing
+   to undo - asking again brings it back. */
+function dismissChart(){
+  var cv = $("chartResult").querySelector('[data-chart="live"]');
+  var old = cv && window.Chart && Chart.getChart(cv);
+  if(old) old.destroy();
+  if(OPEN_STYLE === "live:live") OPEN_STYLE = null;
+  lastChart = null;
+  $("chartResult").innerHTML = "";
+  $("chartResultSec").hidden = true;
+  $("chartNote").textContent = "";
+  $("chartInput").focus();
 }
 
 function askChart(){
@@ -4673,6 +4701,7 @@ function chartRecord(c){
 }
 
 $("chartResult").addEventListener("click", function(e){
+  if(e.target.closest("#chartDismiss")){ dismissChart(); return; }
   if(e.target.closest("#chartAgain")){ $("chartInput").focus(); $("chartInput").select(); return; }
   if(e.target.closest("#chartChangeGo")){ refineChart(); return; }
   if(e.target.closest("#chartUndo")){ undoChart(); return; }
