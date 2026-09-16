@@ -8,6 +8,18 @@ Everything on a profile is computed from listening history. Nothing is authored:
 there are no posts, so nothing is written into a void and nobody performs for a
 feed.
 
+## Watch it work
+
+Short clips of the app running on my own history. GitHub plays them in the
+browser.
+
+- **[The taste map](docs/demo/taste-map.mp4)** - the map itself, and where my
+  listening sits on it
+- **[Shows](docs/demo/shows.mp4)** - live events filtered by who I actually
+  listen to
+- **[Charts](docs/demo/charts.mp4)** - a question in plain language becoming a
+  drawn chart
+
 ## What it runs on
 
 My own Spotify history - **509,811 plays and 14,264 hours, from August 2018 to
