@@ -56,6 +56,18 @@ ROW = 20
 # How many gaps between gridlines each setting aims for.
 DIVISIONS = {"fewer": 3, "normal": 5, "more": 10}
 
+# Axes whose buckets are names rather than positions on a scale. A line across
+# one of these draws a slope between Sunday and Monday that does not exist, and
+# six of them over seven weekdays is unreadable besides, so a comparison here
+# becomes bars.
+CATEGORICAL = frozenset({"day of week", "platform"})
+# Grouped and stacked bars draw every series inside every bucket, so the axis
+# has to be short: seven weekdays fit, twenty-four hours do not.
+MAX_GROUPED_BUCKETS = 8
+# A heatmap takes more columns than grouped bars do, because a cell is a block
+# of colour rather than a bar that needs width to be compared by eye.
+MAX_HEAT_BUCKETS = 12
+
 
 class ChartStyle(BaseModel):
     """How a person wants a chart to look.
@@ -71,7 +83,7 @@ class ChartStyle(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["auto", "bar", "line", "area"] = "auto"
+    type: Literal["auto", "bar", "line", "area", "grouped", "stacked", "share", "heatmap"] = "auto"
     color: Literal["accent", "pink", "orange", "teal", "blue", "purple", "yellow"] = "accent"
     gridlines: Literal["fewer", "normal", "more"] = "normal"
     values: Literal["auto", "show", "hide"] = "auto"
@@ -198,6 +210,108 @@ def _short(text: str) -> str:
     return text if len(text) <= MAX_BAR_LABEL else text[: MAX_BAR_LABEL - 1] + "…"
 
 
+# --------------------------------------------------- comparisons on a category
+
+
+def _percent_scale(divisions: int) -> dict[str, Any]:
+    """A fixed 0-100 axis: a share chart's top is the whole bucket, not its peak."""
+    step = nice_step(100, divisions)
+    count = max(1, round(100 / step))
+    ticks = [
+        {"at": round(step * i, 10), "label": tick_label(round(step * i, 10), step)}
+        for i in range(count + 1)
+    ]
+    return {"max": 100.0, "ticks": ticks}
+
+
+def _columns(lines: list[dict[str, Any]]) -> list[tuple[float, ...]]:
+    """Each bucket's values across every series, for stacking and for shares."""
+    return [
+        tuple(v or 0.0 for v in col) for col in zip(*[ln["values"] for ln in lines], strict=True)
+    ]
+
+
+def _bars(
+    kind: str, labels: list[str], lines: list[dict[str, Any]], unit: str, divisions: int
+) -> dict[str, Any]:
+    """Several series over a short axis - side by side, or on top of each other.
+
+    Grouped answers "which is bigger here", stacked "how big is this bucket", and
+    share "what is this bucket made of". Which of the three a person wants is not
+    in the numbers, so all three are offered and the plan does the arithmetic for
+    whichever is asked - a share is the same query seen as proportions, and
+    computing it here keeps one set of numbers behind every view of one chart.
+    """
+    cols = _columns(lines)
+    if kind == "share":
+        totals = [sum(col) for col in cols]
+        drawn = [
+            {
+                "name": ln["name"],
+                "values": [
+                    round((v or 0.0) * 100.0 / totals[i], 2) if totals[i] else None
+                    for i, v in enumerate(ln["values"])
+                ],
+            }
+            for ln in lines
+        ]
+        y = {**_percent_scale(divisions), "unit": "%"}
+    else:
+        drawn = [{"name": ln["name"], "values": list(ln["values"])} for ln in lines]
+        peak = (
+            max((sum(col) for col in cols), default=0.0)
+            if kind == "stacked"
+            else max((v for ln in lines for v in ln["values"] if v is not None), default=0.0)
+        )
+        y = {**y_scale(peak, divisions), "unit": unit}
+    return {
+        "kind": "grouped" if kind == "grouped" else "stacked",
+        "percent": kind == "share",
+        "labels": labels,
+        "tick_labels": [_short(x) for x in labels],
+        "series": drawn,
+        "y": y,
+        "legend": True,
+        "fill": False,
+        "now": False,
+        "height": HEIGHT + LEGEND,
+    }
+
+
+def _heat(labels: list[str], lines: list[dict[str, Any]], unit: str) -> dict[str, Any]:
+    """One cell per pair, shaded by value.
+
+    The honest shape for two sets of names - genres against weekdays - where a
+    line has no order to run along and grouped bars run out of width. Intensity
+    is relative to the largest cell rather than to each row, so a week that is
+    the same every day looks the same every day instead of being stretched into
+    a pattern it does not have.
+    """
+    peak = max((v for ln in lines for v in ln["values"] if v is not None), default=0.0)
+    rows = [
+        {
+            "name": ln["name"],
+            "cells": [
+                {"v": v, "label": value_label(v), "t": round((v or 0.0) / peak, 3) if peak else 0.0}
+                for v in ln["values"]
+            ],
+        }
+        for ln in lines
+    ]
+    return {
+        "kind": "heatmap",
+        "cols": labels,
+        "tick_labels": [_short(x) for x in labels],
+        "rows": rows,
+        "y": {"unit": unit, "max": peak, "ticks": []},
+        "peak_label": value_label(peak),
+        "legend": False,
+        "fill": False,
+        "now": False,
+        "height": len(rows) * ROW + LEGEND,
+    }
+
+
 # -------------------------------------------------------------------- plan
 
 
@@ -234,15 +348,27 @@ def plan(p: dict[str, Any], style: ChartStyle | dict[str, Any] | None = None) ->
     # A running total only rises, which is what a line or an area draws.
     drawn_as_bars = not (p.get("chart") == "line" or series or cumulative)
     sideways = drawn_as_bars and (axis in RANKED or max(len(x) for x in labels) > 4)
+    buckets = len(labels)
     if sideways:
         allowed = ["bar"]
     elif series:
+        # A comparison over dates is a line. Over named buckets it was one too,
+        # which is how "my genres by day of the week" arrived as six flat lines
+        # sloping from Sunday into Monday. Bars per bucket say the same numbers
+        # without implying that the axis runs anywhere.
         allowed = ["line"]
+        if not cumulative and buckets <= MAX_GROUPED_BUCKETS:
+            allowed = ["grouped", "stacked", "share", "line"]
+        if not cumulative and buckets <= MAX_HEAT_BUCKETS:
+            allowed.append("heatmap")
     elif cumulative:
         allowed = ["line", "area"]
     else:
         allowed = ["bar", "line", "area"]
-    default = "bar" if drawn_as_bars else ("line" if series else "area")
+    if series:
+        default = "grouped" if axis in CATEGORICAL and "grouped" in allowed else "line"
+    else:
+        default = "bar" if drawn_as_bars else "area"
     kind = st.type if st.type in allowed else default
 
     common = {
@@ -250,6 +376,12 @@ def plan(p: dict[str, Any], style: ChartStyle | dict[str, Any] | None = None) ->
         "style": {"type": kind, "color": st.color, "gridlines": st.gridlines, "values": st.values},
         "styles": {"types": allowed, "color": single, "gridlines": True, "values": kind == "bar"},
     }
+
+    if kind in ("grouped", "stacked", "share"):
+        return {**_bars(kind, labels, lines, unit, divisions), **common}
+
+    if kind == "heatmap":
+        return {**_heat(labels, lines, unit), **common}
 
     if kind == "bar":
         show = st.values == "show" or (st.values == "auto" and sideways)

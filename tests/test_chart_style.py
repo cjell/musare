@@ -62,7 +62,9 @@ def test_a_style_is_a_menu_and_nothing_else():
         (ARTISTS, ["bar"]),
         (HOURS, ["bar", "line", "area"]),
         (YEARS, ["bar", "line", "area"]),
-        (COMPARED, ["line"]),
+        # Two years of rap against rock can be read as bars per year too; only
+        # the default stays a line, because the axis is time.
+        (COMPARED, ["grouped", "stacked", "share", "line", "heatmap"]),
         (RUNNING, ["line", "area"]),
     ],
 )

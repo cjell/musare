@@ -217,3 +217,109 @@ def test_a_finished_period_spans_exactly_its_buckets():
 def test_every_point_fits_under_the_top_gridline():
     p = plan(payload(labels=["a", "b"], values=[3.19, 0.2], chart="line"))
     assert all(pt[1] <= p["y"]["max"] for pt in p["series"][0]["points"])
+
+
+# ------------------------------------------- comparisons over named buckets
+
+DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+WEEK = [
+    {"name": "trap", "values": [11.3, 9.73, 9.93, 13.55, 9.07, 10.54, 11.28]},
+    {"name": "indie rock", "values": [7.01, 8.87, 6.96, 7.08, 7.38, 9.45, 7.23]},
+    {"name": "nu metal", "values": [9.57, 8.02, 7.42, 7.92, 7.75, 5.55, 7.1]},
+]
+
+
+def week(**kw):
+    return payload(labels=DAYS, series=WEEK, x_label="day of week", **kw)
+
+
+def test_a_comparison_over_named_buckets_is_bars_rather_than_lines():
+    """ "My genres by day of the week" arrived as six lines sloping Sunday into Monday."""
+    p = plan(week())
+    assert p["kind"] == "grouped"
+    assert p["legend"] is True and p["percent"] is False
+    assert [s["name"] for s in p["series"]] == ["trap", "indie rock", "nu metal"]
+    # The other readings of the same numbers stay available, a line among them.
+    assert p["styles"]["types"] == ["grouped", "stacked", "share", "line", "heatmap"]
+
+
+def test_a_comparison_over_time_is_still_a_line():
+    p = plan(
+        payload(
+            labels=["2024-01-01", "2025-01-01"],
+            series=[{"name": "rap", "values": [1.0, 2.0]}, {"name": "rock", "values": [2.0, 1.0]}],
+            x_label="year",
+        )
+    )
+    assert p["kind"] == "line", "time has an order, so the line means something"
+
+
+def test_a_stack_is_measured_against_the_tallest_bucket():
+    p = plan(week(), {"type": "stacked"})
+    assert p["kind"] == "stacked" and p["percent"] is False
+    tallest = max(sum(s["values"][i] for s in WEEK) for i in range(len(DAYS)))
+    assert p["y"]["max"] >= tallest
+    assert max(s["values"][3] for s in p["series"]) < p["y"]["max"]
+
+
+def test_a_share_fills_every_bucket_to_one_hundred():
+    p = plan(week(), {"type": "share"})
+    assert p["kind"] == "stacked" and p["percent"] is True
+    assert p["y"]["max"] == 100.0 and p["y"]["unit"] == "%"
+    for i in range(len(DAYS)):
+        assert round(sum(s["values"][i] for s in p["series"]), 1) == 100.0
+
+
+def test_a_share_of_nothing_is_nothing_rather_than_a_division():
+    p = plan(
+        payload(
+            labels=["Sat", "Sun"],
+            series=[{"name": "trap", "values": [4.0, 0.0]}, {"name": "emo", "values": [1.0, None]}],
+            x_label="day of week",
+        ),
+        {"type": "share"},
+    )
+    assert [s["values"][0] for s in p["series"]] == [80.0, 20.0]
+    assert [s["values"][1] for s in p["series"]] == [None, None]
+
+
+def test_a_heatmap_shades_every_cell_against_the_largest():
+    p = plan(week(), {"type": "heatmap"})
+    assert p["kind"] == "heatmap" and p["cols"] == DAYS
+    assert [r["name"] for r in p["rows"]] == ["trap", "indie rock", "nu metal"]
+    assert all(len(r["cells"]) == len(DAYS) for r in p["rows"])
+    cells = [c for r in p["rows"] for c in r["cells"]]
+    assert max(c["t"] for c in cells) == 1.0 and min(c["t"] for c in cells) >= 0
+    assert p["peak_label"] == "13.6"
+
+
+def test_a_flat_week_reads_flat_rather_than_being_stretched():
+    """Shading each row against its own peak would invent a pattern in a flat week."""
+    flat = payload(
+        labels=DAYS,
+        series=[{"name": "trap", "values": [10.0] * 7}, {"name": "emo", "values": [1.0] * 7}],
+        x_label="day of week",
+    )
+    p = plan(flat, {"type": "heatmap"})
+    assert {c["t"] for c in p["rows"][1]["cells"]} == {0.1}
+
+
+def test_an_axis_too_long_to_group_keeps_its_line():
+    hours = [f"{h:02d}" for h in range(24)]
+    p = plan(
+        payload(
+            labels=hours,
+            series=[{"name": "trap", "values": [1.0] * 24}],
+            x_label="hour of day",
+        )
+    )
+    assert p["kind"] == "line"
+    assert "grouped" not in p["styles"]["types"] and "heatmap" not in p["styles"]["types"]
+
+
+def test_a_stored_shape_this_chart_cannot_take_falls_back():
+    p = plan(
+        payload(labels=["drake", "kendrick"], values=[2.0, 1.0], x_label="artist"),
+        {"type": "heatmap"},
+    )
+    assert p["kind"] == "hbar"

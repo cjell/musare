@@ -1319,6 +1319,22 @@ details[open] summary .chev{transform:rotate(180deg)}
 .chart-mode button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
 .chart-canvas{display:block;width:100%;margin-top:10px}
 .chart-note{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3);margin-top:6px}
+/* A heatmap: one row per series, one cell per bucket, shaded by the plan. The
+   row label is fixed width so every column lines up with its heading. */
+.chart-heat{font-family:"IBM Plex Mono",monospace;margin-top:4px}
+.hm-row{display:flex;align-items:center;gap:2px;margin-bottom:2px}
+.hm-head{margin-bottom:3px}
+.hm-name{
+  flex:0 0 68px;font-size:9px;color:var(--ink-2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+}
+.hm-col{flex:1 1 0;min-width:0;font-size:9px;color:var(--ink-3);text-align:center}
+.hm-cell{
+  flex:1 1 0;min-width:0;height:22px;border-radius:2px;
+  display:flex;align-items:center;justify-content:center
+}
+.hm-cell i{font-style:normal;font-size:8.5px;color:var(--ink)}
+.hm-key{font-size:9px;color:var(--ink-3);margin-top:5px}
 .chart-acts{display:flex;gap:8px;margin-top:12px}
 .chart-acts .btn{flex:1;height:34px;font-size:12.5px}
 /* Changing a chart in place, under the chart being changed. */
@@ -5785,17 +5801,58 @@ document.addEventListener("click", function(e){
   if(panel) applyStyle(panel.dataset.stScope, panel.dataset.stId, opt.dataset.stKey, opt.dataset.stVal);
 });
 
+/* A heatmap is a grid of cells rather than a canvas drawing: Chart.js has no
+   shape for one, and cells made of elements keep the labels readable and the
+   layout the server's decision - the plan says which cells, in what order, and
+   how dark each one is against the largest. */
+function heatGrid(plan){
+  var css = getComputedStyle(document.querySelector(".phone"));
+  var accent = (plan.color && STYLE_HEX[plan.color]) ||
+    css.getPropertyValue("--accent").trim() || "#E74094";
+  /* Past eight columns a cell is too narrow for its number, and the shade is
+     the reading anyway - the value stays in the tooltip. */
+  var numbered = plan.cols.length <= 8;
+  var head = '<div class="hm-row hm-head"><span class="hm-name"></span>' +
+    plan.tick_labels.map(function(c){ return '<span class="hm-col">' + esc(c) + "</span>"; }).join("") +
+    "</div>";
+  var body = plan.rows.map(function(r){
+    var cells = r.cells.map(function(c, i){
+      var said = c.v === null ? "nothing" : c.label + " " + plan.y.unit;
+      return '<span class="hm-cell" title="' + esc(r.name + ", " + plan.cols[i] + ": " + said) +
+        '" style="background:' + hexAlpha(accent, 0.08 + 0.84 * c.t) + '">' +
+        (numbered ? "<i>" + esc(c.label) + "</i>" : "") + "</span>";
+    }).join("");
+    return '<div class="hm-row"><span class="hm-name" title="' + esc(r.name) + '">' +
+      esc(r.name) + "</span>" + cells + "</div>";
+  }).join("");
+  return '<div class="chart-heat">' + head + body +
+    '<div class="hm-key">darkest is ' + esc(plan.peak_label) + " " + esc(plan.y.unit) + "</div></div>";
+}
+
 function plotChart(cv, plan){
   var old = window.Chart && Chart.getChart(cv);
   if(old) old.destroy();
+  /* A redraw can change shape - a heatmap restyled into bars, a live chart that
+     has numbers now - so whatever the last drawing left beside the canvas goes
+     before this one decides anything. */
+  var sib = cv.nextElementSibling;
+  while(sib && (sib.classList.contains("chart-heat") || sib.classList.contains("chart-empty"))){
+    var after = sib.nextElementSibling;
+    sib.remove();
+    sib = after;
+  }
+  cv.hidden = false;
   if(plan.kind === "table") return;
   /* Nothing in that window yet is an answer, and a blank box does not say it. */
   if(plan.kind === "empty"){
     cv.hidden = true;
-    var sib = cv.nextElementSibling;
-    if(!(sib && sib.classList.contains("chart-empty"))){
-      cv.insertAdjacentHTML("afterend", '<div class="chart-note chart-empty">Nothing to show for this yet.</div>');
-    }
+    cv.insertAdjacentHTML("afterend", '<div class="chart-note chart-empty">Nothing to show for this yet.</div>');
+    return;
+  }
+  /* A heatmap is cells, not a canvas drawing - see heatGrid. */
+  if(plan.kind === "heatmap"){
+    cv.hidden = true;
+    cv.insertAdjacentHTML("afterend", heatGrid(plan));
     return;
   }
   if(!window.Chart){
@@ -5821,7 +5878,41 @@ function plotChart(cv, plan){
     border: { display: false }
   };
   var cfg;
-  if(plan.kind === "bar" || plan.kind === "hbar"){
+  if(plan.kind === "grouped" || plan.kind === "stacked"){
+    /* One group per bucket. Stacked shares the group's width, so the bars sit
+       wider; grouped splits it between the series and needs the gap. */
+    var piled = plan.kind === "stacked";
+    cfg = {
+      type: "bar",
+      data: {
+        labels: plan.labels,
+        datasets: plan.series.map(function(s, i){
+          return {
+            label: s.name,
+            data: s.values,
+            backgroundColor: SWATCHES[i % SWATCHES.length],
+            borderRadius: 2,
+            barPercentage: piled ? 0.72 : 0.94,
+            categoryPercentage: piled ? 0.72 : 0.84
+          };
+        })
+      },
+      options: {
+        scales: {
+          x: {
+            stacked: piled,
+            ticks: {
+              color: ink3, font: font, maxRotation: 0, autoSkip: false,
+              callback: function(v, i){ return plan.tick_labels[i]; }
+            },
+            grid: { display: false },
+            border: { display: false }
+          },
+          y: Object.assign({ stacked: piled }, valueAxis)
+        }
+      }
+    };
+  } else if(plan.kind === "bar" || plan.kind === "hbar"){
     var flat = plan.kind === "hbar";
     var catAxis = {
       ticks: {
