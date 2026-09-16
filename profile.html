@@ -3533,6 +3533,19 @@ var ALL_SHOWS = null;
 var SHOW_FILTER_DEFAULT = { maxMi: 50, fam: "any", days: null, maxFans: null, minFans: null, artists: [], genres: [] };
 var showFilter = Object.assign({}, SHOW_FILTER_DEFAULT);
 
+/* Whether anything is actually narrowing the list, walked from the defaults
+   rather than listed field by field. It was a list, and the genre filter was
+   added to the sheet without being added to it, so "small metal bands near me"
+   applied a filter the funnel said was not there. A field added later cannot
+   go missing from a loop over the defaults. */
+function filterActive(){
+  return Object.keys(SHOW_FILTER_DEFAULT).some(function(k){
+    var base = SHOW_FILTER_DEFAULT[k];
+    if(Array.isArray(base)) return (showFilter[k] || []).length > 0;
+    return showFilter[k] !== base;
+  });
+}
+
 /* Mirrors musicshare/spec/apply.py, which is the tested reference. It is
    duplicated here on purpose: dragging a slider must not wait on a round trip,
    and every show is already in memory. */
@@ -3621,13 +3634,10 @@ function applyShowFilter(){
     ? n + " show" + (n === 1 ? "" : "s") + ", " + mine + " you listen to"
     : "Nothing in range. Try a wider radius.";
   renderFam();
+  renderChips();
   /* Active means "different from the default", not "not the maximum" - the
      feed opens at 50mi, so comparing against 150 lit the icon permanently. */
-  renderChips();
-  $("showsFilter").classList.toggle("on",
-    showFilter.fam !== "any" || showFilter.maxMi !== SHOW_FILTER_DEFAULT.maxMi ||
-    showFilter.days != null || showFilter.maxFans != null ||
-    showFilter.minFans != null || showFilter.artists.length > 0);
+  $("showsFilter").classList.toggle("on", filterActive());
 }
 
 /* ---------- home, from the local history ----------
