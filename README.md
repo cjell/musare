@@ -60,8 +60,7 @@ Kanye, J. Cole and Lil Wayne. A word absent from the list cannot be chosen.
 
 ## Charts you ask for in words
 
-<!-- video: replace the line below by dragging charts.mp4 in here. -->
-[Watch it](docs/demo/charts.mp4)
+https://github.com/user-attachments/assets/9be70e99-cf69-4811-b83d-3e41a4ebce27
 
 "Top 3 artists every year", "rap vs rock over the years", "my favourite genres
 by day of the week". The pipeline is the same one every language feature here
@@ -100,8 +99,7 @@ ago.
 
 ## Shows worth going to
 
-<!-- video: replace the line below by dragging shows.mp4 in here. -->
-[Watch it](docs/demo/shows.mp4)
+https://github.com/user-attachments/assets/26d0aab9-85a0-4d4b-8e5b-afe474fa098d
 
 Live Ticketmaster events joined to my own play history, so the list is not
 "concerts near you" but concerts by people I actually listen to. The same
