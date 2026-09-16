@@ -23,6 +23,7 @@ from musicshare import media as media_mod
 from musicshare import playlists as pl_mod
 from musicshare import regions as regions_mod
 from musicshare import shows as shows_mod
+from musicshare import streak as streak_mod
 from musicshare import taste
 from musicshare.spec import ChartSpec, plot, run_chart, validate, validate_chart
 from musicshare.spec.apply import familiar_enough
@@ -616,6 +617,24 @@ def now() -> dict[str, object]:
         "last": None if now else live_mod.last_played(),
         "state": state,
     }
+
+
+@app.get("/api/streak")
+def streak() -> dict[str, object]:
+    """The listening streak for the profile badge.
+
+    Same contract as /api/now: never an error. A streak that cannot be worked
+    out comes back as null and the page keeps the label it already has.
+    """
+    # Pulled first so a play from the last few minutes counts toward today.
+    # Home's feed does not lose its refresh over this - it checks the newest
+    # play, not whether this particular pull changed anything.
+    live_mod.pull_if_stale()
+    try:
+        return streak_mod.streak()
+    except Exception as e:
+        log.warning("streak unavailable: %s", e)
+        return {"days": None, "since": None}
 
 
 @app.get("/api/map")
