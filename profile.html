@@ -5384,6 +5384,9 @@ function closePlaylist(){
 }
 
 $("playlists").addEventListener("click", function(e){
+  /* Not while the remove button is the thing being clicked - it sits on top of
+     the card, so without this taking a playlist off also opened it. */
+  if(e.target.closest("[data-unpin]")) return;
   var card = e.target.closest("[data-pl]");
   if(card) openPlaylist(parseInt(card.dataset.pl, 10));
 });
@@ -5558,37 +5561,48 @@ function renderShelf(){
   var p = PROFILES[current], self = current === 0;
   var editing = document.body.classList.contains("editing");
   var lp = pinList("playlists"), lAny = self && lp.some(Boolean);
-  var shelf;
-  if(lAny){
-    shelf = lp.filter(Boolean).map(function(q){ return [q.name, q.meta, q.image, q.id]; });
-  } else if(editing && self){
-    /* The stand-in list has to get out of the way while editing, the same as the
-       sample tracks do. Leaving all 210 up meant the slots were appended after
-       them and never reached - six empty squares behind a directory. */
-    shelf = [];
-  } else {
-    shelf = p.playlists;
-  }
-  PL_SHELF = shelf;
 
-  var ph = shelf.map(function(x, i){
+  function tile(x, at, kill){
     var art = x[2]
       ? 'class="art photo" style="background-image:url(' + x[2] + ')"'
       : 'class="art" style="' + artStyle(x[0], p.artHue) + '"';
-    /* The same remove control every other pinned section has. Without it a
-       playlist could be pinned and never taken off, which made the six slots a
-       one-way door. */
-    var kill = (editing && self && lAny) ? unpinBtn("playlists", i) : "";
-    return '<div class="pl' + (kill ? " pinbox" : "") + '" tabindex="0" role="button" data-pl="' + i +
+    return '<div class="pl' + (kill ? " pinbox" : "") + '" tabindex="0" role="button" data-pl="' + at +
            '"><div ' + art + "></div>" + kill +
            '<div class="pn">' + esc(x[0]) + '</div><div class="pm">' + esc(x[1]) + "</div></div>";
-  }).join("");
-  if(editing && self){
-    /* Empty slots only while editing, the same as every other pinned section. */
-    for(var lq = shelf.length; lq < PIN_SLOTS.playlists; lq++){
-      ph += '<div class="pl">' + slotBtn("playlists", lq, "slot-sq") + "</div>";
-    }
   }
+
+  /* Walked slot by slot, like every other pinned section. It used to compact the
+     pins first - filter(Boolean) - and then hand that position to the remove
+     button and to the empty slots after it, so with a gap in the middle the two
+     numberings came apart: removing the second playlist took the first, removing
+     the first did nothing at all, and a playlist pinned to the fourth slot
+     appeared wherever the compacted list happened to put it.
+
+     `shelf` stays the list of what is actually drawn, because that is what
+     data-pl indexes into when a card is opened. */
+  var shelf = [], ph = "";
+  if(lAny || (editing && self)){
+    for(var i = 0; i < PIN_SLOTS.playlists; i++){
+      var q = lp[i];
+      if(q){
+        var x = [q.name, q.meta, q.image, q.id];
+        /* The same remove control every other pinned section has, carrying the
+           slot this playlist actually sits in. */
+        ph += tile(x, shelf.length, editing && self ? unpinBtn("playlists", i) : "");
+        shelf.push(x);
+      } else if(editing && self){
+        /* Empty slots only while editing, in the gaps where they really are - a
+           slot appended after the pins pinned into a different one than it drew. */
+        ph += '<div class="pl">' + slotBtn("playlists", i, "slot-sq") + "</div>";
+      }
+    }
+  } else {
+    /* Nobody has pinned any: the full list stands in, so the section still
+       teaches what it is for. */
+    shelf = p.playlists;
+    ph = shelf.map(function(x, at){ return tile(x, at, ""); }).join("");
+  }
+  PL_SHELF = shelf;
   $("playlists").innerHTML = ph;
   setPlaylists(false);
 }
