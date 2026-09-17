@@ -1488,13 +1488,6 @@ details[open] summary .chev{transform:rotate(180deg)}
   font-family:inherit;font-size:14px;
 }
 .pick-search input:focus{outline:none;border-color:var(--accent)}
-.pick-tabs{display:flex;gap:6px;margin:11px 0 6px}
-.pick-tabs button{
-  font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;
-  padding:6px 11px;border-radius:99px;cursor:pointer;
-  border:1px solid var(--line);background:transparent;color:var(--ink-3);
-}
-.pick-tabs button[aria-pressed="true"]{border-color:var(--accent-line);background:var(--accent-tint);color:var(--accent)}
 .pick-list{overflow-y:auto;scrollbar-width:none;margin:0 -18px;padding:4px 18px 0;flex:1;min-height:120px}
 .pick-list::-webkit-scrollbar{display:none}
 .pick-note{
@@ -2071,11 +2064,6 @@ details[open] summary .chev{transform:rotate(180deg)}
       <div class="pick-sub" id="pickSub">Your most played, or search for anything.</div>
       <div class="pick-search">
         <input id="pickInput" type="search" autocomplete="off" spellcheck="false" placeholder="Search Spotify">
-      </div>
-      <div class="pick-tabs" id="pickTabs">
-        <button type="button" data-k="track" aria-pressed="true">Songs</button>
-        <button type="button" data-k="artist" aria-pressed="false">Artists</button>
-        <button type="button" data-k="album" aria-pressed="false">Albums</button>
       </div>
       <div class="pick-list" id="pickList"></div>
       <div class="sheet-actions">
@@ -6347,19 +6335,17 @@ function runSearch(q){
     .catch(function(){ if(mine === pickSeq) offline(); });
 }
 
+/* The slot decides what is being pinned. There used to be Songs/Artists/Albums
+   tabs in here, and because the slot did not change with them you could open an
+   album slot, switch to Songs, and pin a track into the albums row - in any
+   combination. A row asks for one kind of thing, and the picker is opened from a
+   row, so the kind was never the picker's to choose. */
 function openPicker(kind, idx){
   pickTarget = { kind: kind, idx: idx };
   pickKind = PIN_KIND[kind];
-  [].forEach.call($("pickTabs").children, function(b){
-    b.setAttribute("aria-pressed", b.dataset.k === pickKind ? "true" : "false");
-  });
   $("pickHead").textContent = pickKind === "artist" ? "Pin an artist"
     : pickKind === "album" ? "Pin an album"
     : pickKind === "playlist" ? "Pin a playlist" : "Pin a song";
-  /* The tabs switch between Spotify's catalogue types. A playlist is not one of
-     them - the list is the listener's own, already loaded - so they are hidden
-     rather than left there doing nothing. */
-  $("pickTabs").hidden = pickKind === "playlist";
   $("pickSub").textContent = pickKind === "playlist"
     ? "Your own playlists. Type to narrow them down."
     : "Your most played, or search for anything.";
@@ -6388,17 +6374,6 @@ $("editAppearance").addEventListener("click", openCust);
 $("pickBg").addEventListener("click", closePicker);
 $("pickCancel").addEventListener("click", closePicker);
 
-$("pickTabs").addEventListener("click", function(e){
-  var b = e.target.closest("button[data-k]");
-  if(!b) return;
-  pickKind = b.dataset.k;
-  [].forEach.call($("pickTabs").children, function(x){
-    x.setAttribute("aria-pressed", x === b ? "true" : "false");
-  });
-  var q = $("pickInput").value.trim();
-  if(q) runSearch(q); else loadSeed();
-});
-
 $("pickInput").addEventListener("input", function(){
   clearTimeout(pickTimer);
   var q = this.value.trim();
@@ -6413,6 +6388,9 @@ $("pickList").addEventListener("click", function(e){
   if(!b || !pickTarget) return;
   var item = PICK_CACHE[b.dataset.pick];
   if(!item) return;
+  /* Belt and braces: a row holds one kind of thing, and nothing that reaches
+     here should be another. Cheap insurance against a second way in. */
+  if(item.kind && item.kind !== PIN_KIND[pickTarget.kind]) return;
   setPin(pickTarget.kind, pickTarget.idx, item);
   closePicker();
   renderPins(PROFILES[current]);
