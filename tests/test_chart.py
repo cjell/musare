@@ -280,3 +280,61 @@ def test_newest_period_first_so_truncation_drops_the_oldest():
 def test_every_rankable_thing_runs(series):
     d = run(ChartSpec(dimension="date", grain="year", series=series, per_period=True, limit=2))
     assert d.table, f"{series} produced nothing"
+
+
+# ------------------------------------------------- a live chart's past days
+
+
+def today_hours(back=0):
+    return run(ChartSpec(range="today", dimension="hour_of_day", cumulative=True), back=back)
+
+
+def test_a_finished_day_runs_to_midnight_with_no_now_marker():
+    """Nothing is stored for a past day; the same spec is recomputed over it."""
+    d = today_hours(back=1)
+    assert d.labels[0] == "00" and d.labels[-1] == "23", "a day that is over has all its hours"
+    assert d.partial_last is None, "there is no 'now' in a day that has ended"
+    if d.timeline:
+        assert d.timeline[-1][0] == 24.0, "the total lies flat to the end of the day"
+
+
+def test_today_still_stops_at_the_current_hour():
+    now, before = today_hours(), today_hours(back=1)
+    assert len(now.labels) <= len(before.labels)
+    assert now.partial_last is not None and 0 <= now.partial_last <= 1
+
+
+def test_each_day_back_is_its_own_day():
+    days = [today_hours(back=b) for b in range(1, 4)]
+    totals = [d.values[-1] if d.values else 0 for d in days]
+    assert len(set(totals)) > 1 or all(t == 0 for t in totals), "days should differ, or be empty"
+
+
+def test_a_rolling_window_steps_by_its_own_length():
+    """The seven days before the seven you are looking at, not seven days earlier."""
+    now = run(ChartSpec(range="7d", dimension="hour_of_day"))
+    before = run(ChartSpec(range="7d", dimension="hour_of_day"), back=1)
+    assert now.window and before.window and now.window != before.window
+    assert sum(now.values) != sum(before.values), "different weeks, different totals"
+
+
+@pytest.mark.parametrize(
+    "spec",
+    [
+        ChartSpec(range="all", dimension="hour_of_day"),
+        ChartSpec(range="this_year", dimension="hour_of_day"),
+        ChartSpec(range="12mo", dimension="hour_of_day"),
+        ChartSpec(range="today", dimension="hour_of_day", year=2024),
+    ],
+)
+def test_a_window_with_no_previous_one_ignores_the_offset(spec):
+    """All time has no previous all time, and a named year is already fixed."""
+    assert run(spec, back=3).values == run(spec).values
+    assert run(spec).earlier is False
+
+
+def test_a_window_says_what_it_covers():
+    assert run(ChartSpec(range="today", dimension="hour_of_day")).window == "Today"
+    stepped = run(ChartSpec(range="today", dimension="hour_of_day"), back=1).window
+    assert stepped and stepped != "Today", "a past day names itself"
+    assert " - " in run(ChartSpec(range="30d", dimension="hour_of_day"), back=1).window

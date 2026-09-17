@@ -1371,6 +1371,20 @@ details[open] summary .chev{transform:rotate(180deg)}
   border:1px solid var(--accent-line);background:var(--accent-tint);
   padding:3px 7px;border-radius:99px;
 }
+/* Stepping a live chart of today back through earlier days. */
+.day-nav{
+  display:flex;align-items:center;justify-content:center;gap:12px;margin-top:8px;
+  font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-2);
+}
+.day-nav span{min-width:104px;text-align:center}
+.day-nav button{
+  width:22px;height:22px;border-radius:50%;border:1px solid var(--line-2);
+  background:none;color:var(--ink-2);cursor:pointer;font-family:inherit;
+  font-size:13px;line-height:1;padding:0;
+}
+.day-nav button:hover:not(:disabled){border-color:var(--accent);color:var(--accent)}
+.day-nav button:disabled{opacity:.35;cursor:default}
+.day-nav button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .chart-q{
   font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3);
   margin-top:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
@@ -4410,6 +4424,37 @@ function saveHomePins(list){
   saveCustom();
 }
 
+/* How far back each pinned chart is being read, by pin id. Nothing is stored on
+   the server for this: an earlier window is the same spec recomputed over it, so
+   stepping back is a question rather than a saved picture.
+
+   Only pinned charts get this. A chart you just asked for, or one kept and not
+   pinned anywhere, is a single answer - browsing belongs where a chart lives.
+
+   How far each window may be stepped. Not a technical limit: a step costs one
+   local query and the history runs to 2018. Home is a glance, so the browsing
+   it invites is deliberately shallow. The other ranges - all time, a named
+   year, six months - have no previous window to show, and the server says so. */
+var MAX_BACK = { today: 6, "7d": 4, "30d": 5 };
+var HOME_BACK = {};
+
+function canStepDays(p){
+  return !!(p.spec && MAX_BACK[p.spec.range] && !p.spec.year && isLive(p, "home"));
+}
+
+/* The label comes from the server, which is where the listener's timezone and
+   the newest play are - "Today", "Wed, Sep 16", "Sep 3 - Sep 10". So does
+   `earlier`: an arrow into a window with nothing in it is an arrow that lies. */
+function dayNav(id, back, data, cap){
+  var atStart = back >= cap || !(data && data.earlier);
+  return '<div class="day-nav">' +
+    '<button type="button" data-day="' + esc(id) + '" data-step="1" aria-label="Window before"' +
+    (atStart ? " disabled" : "") + ">&#8249;</button>" +
+    "<span>" + esc((data && data.window) || "") + "</span>" +
+    '<button type="button" data-day="' + esc(id) + '" data-step="-1" aria-label="Window after"' +
+    (back ? "" : " disabled") + ">&#8250;</button></div>";
+}
+
 function renderHomeCharts(){
   var pins = homePins();
   $("homeChartsSec").hidden = !pins.length;
@@ -4418,20 +4463,26 @@ function renderHomeCharts(){
   Promise.all(pins.map(function(p){
     /* A frozen chart is the numbers it was frozen with; only live ones ask. */
     if(!isLive(p, "home") && p.data) return Promise.resolve({ understood: true, empty: false, data: p.data });
-    return runSpec(p.spec);
+    return runSpec(p.spec, canStepDays(p) ? (HOME_BACK[p.id] || 0) : 0);
   })).then(function(results){
     if(seq !== homeChartSeq) return;   /* a newer render has started */
     var html = "", draw = [];
     results.forEach(function(res, i){
       var p = pins[i];
-      if(res && res.data && isLive(p, "home")) LIVE_DATA["home:" + p.id] = res.data;
+      var back = canStepDays(p) ? (HOME_BACK[p.id] || 0) : 0;
+      /* Only today's numbers stand in for this chart elsewhere - Keep and Pin
+         mean the chart, not the day someone happened to be looking at. */
+      if(res && res.data && isLive(p, "home") && !back) LIVE_DATA["home:" + p.id] = res.data;
       var x = '<button class="hc-unpin" type="button" data-home-unpin="' + esc(p.id) +
               '" aria-label="Remove from Home">&#215;</button>';
       if(res && res.understood && res.data && !res.empty){
         html += chartCard(res.data, { unpin: x, key: "home" + i,
-          mode: { live: isLive(p, "home"), since: p.frozenAt, toggle: true, scope: "home", id: p.id },
+          /* A day that has ended is not live and cannot be frozen, so the
+             live/frozen bar gives way to the date being read. */
+          mode: back ? null : { live: isLive(p, "home"), since: p.frozenAt, toggle: true, scope: "home", id: p.id },
           style: { scope: "home", id: p.id, style: p.style },
-          actions: '<div class="chart-q">' + esc(p.q) + "</div>" });
+          actions: (canStepDays(p) ? dayNav(p.id, back, res.data, MAX_BACK[p.spec.range]) : "") +
+            '<div class="chart-q">' + esc(p.q) + "</div>" });
         draw.push([i, res.data]);
         return;
       }
@@ -4453,6 +4504,13 @@ function renderHomeCharts(){
 }
 
 $("homeCharts").addEventListener("click", function(e){
+  var step = e.target.closest("[data-day]");
+  if(step && !step.disabled){
+    var key = step.dataset.day;
+    HOME_BACK[key] = Math.max(0, (HOME_BACK[key] || 0) + (+step.dataset.step));
+    renderHomeCharts();
+    return;
+  }
   var b = e.target.closest("[data-home-unpin]");
   if(!b) return;
   var id = b.dataset.homeUnpin;
@@ -6092,8 +6150,8 @@ function modeBar(m){
   return '<div class="chart-mode">' + label + btn + "</div>";
 }
 
-function runSpec(spec){
-  return fetch("/api/chart/run", {
+function runSpec(spec, back){
+  return fetch("/api/chart/run" + (back ? "?back=" + back : ""), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(spec)

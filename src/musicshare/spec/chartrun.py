@@ -10,6 +10,7 @@ this cannot be talked into running one.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import date, timedelta
 from typing import Any
 
 import duckdb
@@ -17,6 +18,10 @@ import duckdb
 from musicshare import genres as genrelib
 from musicshare.history import connect
 from musicshare.spec.chart import MAX_LINES, ORDERED, ChartSpec
+
+# Month names for a window's label. Shared with the drawing plan rather than
+# written out twice - the same three letters mean the same thing on both.
+from musicshare.spec.plot import MONTHS
 
 # The export stores UTC. A naive timestamp has to be marked as UTC before it can
 # be converted, or DuckDB reads it as already-local and the hours do not move -
@@ -98,13 +103,35 @@ RANGES = {
     "12mo": "interval 12 month",
 }
 
+
 # Today is a calendar day where the listener is, not the last 24 hours: at 9am
 # "today" means since midnight. Unlike the relative ranges it is anchored on the
 # clock rather than on the newest play, because a live chart of today that stops
 # at yesterday's last play is a chart of yesterday.
-TODAY = f"cast({LOCAL_TS} as date) = cast((current_timestamp AT TIME ZONE '{LOCAL}') as date)"
+def _day(back: int = 0) -> str:
+    """One calendar day: today, or `back` days before it.
+
+    A clause rather than a constant because a live chart of today is also the
+    answer for yesterday - the same spec with the day moved. Nothing is stored to
+    make that work: the plays are on disk, so any past day can be recomputed, and
+    a day recomputed after an export replaces its estimates reads *better* than a
+    snapshot taken at the time would.
+    """
+    day = f"cast((current_timestamp AT TIME ZONE '{LOCAL}') as date)"
+    if back:
+        day = f"({day} - interval {int(back)} day)"
+    return f"cast({LOCAL_TS} as date) = {day}"
+
+
+TODAY = _day()
 
 DOW = {1: "Mon", 2: "Tue", 3: "Wed", 4: "Thu", 5: "Fri", 6: "Sat", 7: "Sun"}
+
+# Windows that can be stepped back through, and how long a step is. A rolling
+# window moves by its own length - the seven days before the seven you are
+# looking at - and "today" moves by a day. The month-shaped ranges are left out:
+# a step of "6 months" is not a fixed number of days, and nothing asks for it.
+STEP_DAYS = {"7d": 7, "30d": 30, "90d": 90}
 
 # Cyclical dimensions read in their own order, not by size - a day-of-week chart
 # sorted by volume is unreadable. Same set the schema uses to decide whether a
@@ -156,6 +183,11 @@ class ChartData:
     # hour that has not finished. None whenever the last bucket is not that hour.
     cumulative: bool = False
     partial_last: float | None = None
+    # Which window this is - "Today", "Wed, Sep 16", "Sep 3 - Sep 10" - and
+    # whether anything was played before it, so a caller stepping back through
+    # earlier windows knows when to stop offering.
+    window: str = ""
+    earlier: bool = False
     # A running total of today as it happened, as [hours since midnight, total]
     # pairs, one ramp per play. Empty for every other chart.
     timeline: list[list[float]] = field(default_factory=list)
@@ -230,18 +262,26 @@ def _from(spec: ChartSpec) -> str:
     return "plays p left join artist_genre g on lower(p.artist_name) = g.artist"
 
 
-def _where(spec: ChartSpec, needs_min: bool) -> tuple[str, list[Any]]:
+def _where(spec: ChartSpec, needs_min: bool, back: int = 0) -> tuple[str, list[Any]]:
     clauses, params = ["artist_name is not null"], []
     if needs_min:
         clauses.append(f"ms_played >= {MIN_MS}")
     if spec.year is not None:
         clauses.append(f"year({LOCAL_TS}) = {int(spec.year)}")
     elif spec.range == "today":
-        clauses.append(TODAY)
+        clauses.append(_day(back))
     elif spec.range == "this_year":
         clauses.append(f"year({LOCAL_TS}) = year(current_date)")
     elif spec.range in RANGES:
-        clauses.append(f"played_at >= (select max(played_at) from plays) - {RANGES[spec.range]}")
+        anchor = "(select max(played_at) from plays)"
+        step = STEP_DAYS.get(spec.range)
+        if back and step:
+            # The window before this one: one length further back, and stopping
+            # where the window being stepped away from starts.
+            clauses.append(f"played_at >= {anchor} - interval {(back + 1) * step} day")
+            clauses.append(f"played_at < {anchor} - interval {back * step} day")
+        else:
+            clauses.append(f"played_at >= {anchor} - {RANGES[spec.range]}")
     if spec.artists:
         # The only user-supplied strings that reach the query, and they are bound.
         marks = ", ".join("?" for _ in spec.artists)
@@ -308,6 +348,44 @@ def _axis(spec: ChartSpec) -> tuple[str, str, str, str, list[Any]]:
     return dim_sql, x_label, order, f"limit {int(spec.limit)}", params
 
 
+def _pretty(d: date) -> str:
+    return f"{MONTHS[d.month - 1]} {d.day}"
+
+
+def _window(con: duckdb.DuckDBPyConnection, spec: ChartSpec, back: int) -> tuple[str, bool]:
+    """What this chart covers, in dates, and whether anything was played before it.
+
+    Said here because this is where the listener's timezone lives, and worked out
+    from the history rather than from a cap: an arrow that steps into a window
+    with nothing in it is an arrow that lies. The caller decides how far back it
+    is willing to go; this decides how far back there is anything to see.
+    """
+    if not steppable(spec):
+        return "", False
+    today, newest = con.execute(
+        f"select cast((current_timestamp AT TIME ZONE '{LOCAL}') as date), "
+        f"cast(max({LOCAL_TS}) as date) from plays"
+    ).fetchone()
+    if newest is None:
+        return "", False
+
+    if spec.range == "today":
+        day = today - timedelta(days=back)
+        label = "Today" if back == 0 else f"{DOW[day.isoweekday()]}, {_pretty(day)}"
+        start = day
+    else:
+        step = STEP_DAYS[spec.range]
+        end = newest - timedelta(days=back * step)
+        start = end - timedelta(days=step)
+        label = "Last " + spec.range[:-1] + " days" if back == 0 else ""
+        if back:
+            label = f"{_pretty(start)} - {_pretty(end)}"
+    earlier = con.execute(
+        f"select 1 from plays where cast({LOCAL_TS} as date) < ? limit 1", [start]
+    ).fetchone()
+    return label, earlier is not None
+
+
 def _note(spec: ChartSpec, rated: bool, truncated: bool = False) -> str | None:
     """Whatever the reader needs in order not to misread the chart."""
     bits = []
@@ -322,8 +400,20 @@ def _note(spec: ChartSpec, rated: bool, truncated: bool = False) -> str | None:
     return "; ".join(bits) or None
 
 
-def run(spec: ChartSpec) -> ChartData:
+def steppable(spec: ChartSpec) -> bool:
+    """Whether this chart has earlier windows to show.
+
+    A named year and the open-ended ranges do not: "all time" has no previous
+    all time, and a year is already a fixed window the spec can name itself.
+    """
+    return spec.year is None and (spec.range == "today" or spec.range in STEP_DAYS)
+
+
+def run(spec: ChartSpec, back: int = 0) -> ChartData:
+    """The numbers for a chart. `back` steps to an earlier window - the day
+    before, the seven days before those - for the ranges that have one."""
     spec = effective(spec)
+    back = max(0, int(back)) if steppable(spec) else 0
     if not spec.understood:
         return ChartData(
             [],
@@ -336,7 +426,7 @@ def run(spec: ChartSpec) -> ChartData:
         )
 
     metric_sql, needs_min, y_label = METRICS[spec.metric]
-    where, params = _where(spec, needs_min)
+    where, params = _where(spec, needs_min, back)
     frm = _from(spec)
     dim_sql, x_label, order, limit, dim_params = _axis(spec)
 
@@ -374,11 +464,14 @@ def run(spec: ChartSpec) -> ChartData:
             labels.append(_label(spec, k))
             values.append(round(float(v), 2))
         if spec.dimension == "hour_of_day" and spec.metric not in RATE_METRICS:
-            labels, values = _every_hour(spec, con, labels, values)
+            labels, values = _every_hour(spec, con, labels, values, back)
             if spec.range == "today" and spec.year is None:
-                partial = _into_this_hour(con)
+                # A finished day has no "now": it runs to midnight, and the
+                # marker and the short axis both belong to a day in progress.
+                if back == 0:
+                    partial = _into_this_hour(con)
                 if spec.cumulative and spec.metric in ("hours", "plays"):
-                    timeline = _timeline(spec, con, frm, where, params)
+                    timeline = _timeline(spec, con, frm, where, params, back)
         data = (labels, values, [], sql.strip(), [])
 
     labels, values, series, sql, table = data
@@ -387,6 +480,7 @@ def run(spec: ChartSpec) -> ChartData:
         series = [Line(ln.name, _running(ln.values)) for ln in series]
         y_label = f"total {y_label}"
     total = con.execute(f"select count(*) from {frm} where {where}", params).fetchone()[0]
+    window, earlier = _window(con, spec, back)
 
     return ChartData(
         labels=labels,
@@ -403,6 +497,8 @@ def run(spec: ChartSpec) -> ChartData:
         cumulative=spec.cumulative,
         partial_last=partial,
         timeline=timeline,
+        window=window,
+        earlier=earlier,
     )
 
 
@@ -412,6 +508,7 @@ def _timeline(
     frm: str,
     where: str,
     params: list[Any],
+    back: int = 0,
 ) -> list[list[float]]:
     """Today's running total play by play, instead of hour by hour.
 
@@ -445,7 +542,9 @@ def _timeline(
             points += [[start, total], [end, total + heard]]
             total += heard
         cursor = end
-    points.append([max(float(now), cursor), total])
+    # Today stops at this minute; a day that is over runs flat to midnight,
+    # because the hours after the last play are hours that happened.
+    points.append([24.0 if back else max(float(now), cursor), total])
     return [[round(x, 4), round(y, 3)] for x, y in points]
 
 
@@ -473,7 +572,11 @@ def _running(values: list[float] | list[float | None]) -> list[float]:
 
 
 def _every_hour(
-    spec: ChartSpec, con: duckdb.DuckDBPyConnection, labels: list[str], values: list[float]
+    spec: ChartSpec,
+    con: duckdb.DuckDBPyConnection,
+    labels: list[str],
+    values: list[float],
+    back: int = 0,
 ) -> tuple[list[str], list[float]]:
     """Hours with nothing played as zeros, rather than as missing bars.
 
@@ -484,7 +587,7 @@ def _every_hour(
     """
     have = dict(zip(labels, values, strict=True))
     last = 23
-    if spec.range == "today" and spec.year is None:
+    if spec.range == "today" and spec.year is None and back == 0:
         now = con.execute(f"select hour(current_timestamp AT TIME ZONE '{LOCAL}')").fetchone()
         last = int(now[0])
     hours = [f"{h:02d}" for h in range(last + 1)]

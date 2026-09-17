@@ -360,6 +360,9 @@ def _chart_payload(d: ChartData) -> dict[str, object]:
         "cumulative": d.cumulative,
         "partial_last": d.partial_last,
         "timeline": d.timeline,
+        # Which window this is, and whether there is an earlier one to step to.
+        "window": d.window,
+        "earlier": d.earlier,
         # Empty for an ordinary chart; when present it is the data and
         # `values` is empty. The page branches on which one has content.
         "series": [{"name": ln.name, "values": ln.values} for ln in d.series],
@@ -375,7 +378,10 @@ def _chart_payload(d: ChartData) -> dict[str, object]:
 
 
 @app.post("/api/chart/run")
-def chart_run(spec: ChartSpec) -> dict[str, object]:
+def chart_run(
+    spec: ChartSpec,
+    back: int = Query(0, ge=0, le=3650, description="days back, for a chart of today"),
+) -> dict[str, object]:
     """Re-run a saved chart. No model: the question was read once, when it was
     asked, and this only executes what was understood then.
 
@@ -386,6 +392,12 @@ def chart_run(spec: ChartSpec) -> dict[str, object]:
 
     A spec saved against an older schema either still parses or is refused with a
     422 before it gets here, and the page asks for the question again.
+
+    `back` is how a live chart of today gets a past: the same spec over an
+    earlier day. It is a viewing choice rather than part of the question, so it
+    stays out of ChartSpec - the same reason a style does - and the model's
+    grammar is untouched. Nothing is stored for it; the day is recomputed from
+    the history, which reaches back as far as the history does.
     """
     problems = validate_chart(spec)
     if problems or not spec.understood:
@@ -394,7 +406,7 @@ def chart_run(spec: ChartSpec) -> dict[str, object]:
             "problems": [{"field": p.field, "message": p.message} for p in problems],
         }
     live_mod.pull_if_stale()
-    d = run_chart(spec)
+    d = run_chart(spec, back=back)
     return {"understood": True, "empty": d.empty, "problems": [], "data": _chart_payload(d)}
 
 
