@@ -398,6 +398,10 @@ body{
 .pl-tr .tn{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pl-tr .ta2{font-size:10.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pl-tr .mx{min-width:0;flex:1 1 auto}
+.pl-more{
+  font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3);
+  text-align:center;padding:12px 4px 4px
+}
 
 .moodgif{
   width:44px;height:44px;border-radius:9px;object-fit:cover;flex:0 0 auto;
@@ -5359,21 +5363,36 @@ function openAlbum(i){
     });
 }
 
+var PL_PREVIEW = 200;
+
 function openPlaylist(i){
   /* The shelf, not the profile's full list - what is on screen is whatever the
      pins chose, so an index into the other one opens the wrong playlist. */
   var x = (PL_SHELF && PL_SHELF[i]) || PROFILES[current].playlists[i];
   if(!x || !x[3]) return;            /* a demo card has no id and nothing behind it */
+  /* How many the playlist really holds, from the list the shelf came from. */
+  var whole = ALL_PLAYLISTS.filter(function(p){ return p.id === x[3]; })[0];
+  var total = whole ? whole.tracks : 0;
   openSheet(x[0], x[1], x[2], function(){
-    return fetch("/api/playlists/" + encodeURIComponent(x[3]) + "/tracks?limit=60")
+    /* A preview, not the whole playlist: Spotify hands one over 50 tracks at a
+       time, so a 3,600-song playlist would be 72 requests to open. 200 is the
+       most the server will page through - and the sheet now says when there is
+       more, where it used to stop at 60 without a word. */
+    return fetch("/api/playlists/" + encodeURIComponent(x[3]) + "/tracks?limit=" + PL_PREVIEW)
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(d){
-        return ((d && d.tracks) || []).map(function(t){
+        var rows = (d && d.tracks) || [];
+        var html = rows.map(function(t){
           return '<div class="pl-tr">' +
             (t.image ? '<img src="' + t.image + '" alt="">' : '<img alt="">') +
             '<span class="mx"><span class="tn">' + esc(t.name) + "</span><br>" +
             '<span class="ta2">' + esc(t.artist || "") + "</span></span></div>";
         }).join("");
+        if(rows.length && total > rows.length){
+          html += '<div class="pl-more">The first ' + rows.length + " of " +
+            total.toLocaleString("en-US") + ". The rest are in Spotify.</div>";
+        }
+        return html;
       });
   });
 }
@@ -6295,13 +6314,16 @@ function showPlaylistPicks(q){
     $("pickList").innerHTML = '<div class="pick-note">Playlists need the local server.</div>';
     return;
   }
-  showResults(hits.slice(0, 60).map(function(p){
+  /* All of them. This drew the first 60 and said nothing, which hid 150 of 210
+     playlists from anyone browsing rather than searching. The list is already in
+     memory and the sheet scrolls, so there was never a cost to save. */
+  showResults(hits.map(function(p){
     return {
       id: p.id, kind: "playlist", name: p.name, image: p.image,
       artist_name: p.tracks + (p.tracks === 1 ? " track" : " tracks"),
       meta: p.tracks + (p.tracks === 1 ? " track" : " tracks")
     };
-  }), needle ? "" : "your playlists");
+  }), needle ? "" : ALL_PLAYLISTS.length + " playlists");
 }
 
 function loadSeed(){
