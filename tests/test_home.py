@@ -196,9 +196,11 @@ def test_the_week_strip_reports_both_units():
     both sources. Hours are what a person has a feel for, so the strip carries
     them too - on the estimate live.py derives, not on full track durations."""
     w = home.week_stats()
-    for k in ("plays", "plays_prev", "hours", "hours_prev", "tracks", "new_artists"):
+    for k in ("plays", "plays_prev", "hours", "hours_prev", "tracks", "artists", "artists_prev"):
         assert k in w, f"week strip lost {k}"
     assert w["hours"] >= 0 and w["plays"] >= 0
+    # Every artist counted had a play, and a track to be played by.
+    assert w["artists"] <= w["tracks"] <= w["plays"]
 
 
 def test_a_skipped_play_does_not_move_anything():

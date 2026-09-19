@@ -29,7 +29,7 @@ ART_CACHE = ROOT / "data" / "cache" / "art.json"
 # Bumped whenever what a cached feed means changes - a new field, a different
 # rule for choosing a picture - so an old file is rebuilt rather than served just
 # because no play has happened since.
-CACHE_VERSION = 7
+CACHE_VERSION = 8
 
 MIN_MS = 30_000
 URI_RE = re.compile(r"^spotify:track:([A-Za-z0-9]+)$")
@@ -167,16 +167,6 @@ def week_stats() -> dict[str, Any]:
     by = {b: r for b, *r in rows}
     this_, last = by.get(0, (0, 0, 0, 0)), by.get(1, (0, 0, 0, 0))
 
-    first_time = _q(f"""
-        with bounds as (select max(played_at) as tip from plays)
-        select count(*) from (
-          select artist_name from plays
-          where ms_played >= {MIN_MS} and artist_name is not null
-          group by 1
-          having min(played_at) > (select tip from bounds) - interval 7 day
-        )
-    """)[0][0]
-
     return {
         "plays": this_[0] or 0,
         "plays_prev": last[0] or 0,
@@ -184,7 +174,12 @@ def week_stats() -> dict[str, Any]:
         "hours_prev": round(last[3] or 0, 1),
         "tracks": this_[1] or 0,
         "tracks_prev": last[1] or 0,
-        "new_artists": first_time,
+        # How many different artists, not how many new ones. "New" counted a
+        # first play anywhere in the history, which made it a smaller, noisier
+        # number than the rest of the strip - and Found and kept already says
+        # who is new, with the rule that makes it mean something.
+        "artists": this_[2] or 0,
+        "artists_prev": last[2] or 0,
     }
 
 

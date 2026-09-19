@@ -1565,7 +1565,7 @@ details[open] summary .chev{transform:rotate(180deg)}
           <div class="stat"><span class="n" id="wkHours">14.2</span><span class="l">Hours</span></div>
           <div class="stat"><span class="n" id="wkPlays">612</span><span class="l">Plays</span></div>
           <div class="stat"><span class="n" id="wkTracks">218</span><span class="l">Tracks</span></div>
-          <div class="stat"><span class="n" id="wkNew">11</span><span class="l">New artists</span></div>
+          <div class="stat"><span class="n" id="wkArtists">148</span><span class="l">Artists</span></div>
         </div>
         <div class="gapnote" id="gapNote" hidden>
           <span aria-hidden="true">!</span>
@@ -3681,7 +3681,7 @@ function loadHome(){
     $("wkHours").textContent = w.hours;
     $("wkPlays").textContent = w.plays;
     $("wkTracks").textContent = w.tracks;
-    $("wkNew").textContent = w.new_artists;
+    $("wkArtists").textContent = w.artists;
 
     /* The comparison is the point of the section, so say which way it went
        rather than leaving a bare "vs last". */
