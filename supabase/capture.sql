@@ -4,14 +4,22 @@
 -- plays - 15 captured on a day with hours of listening, a song played ten times
 -- reported twice - while currently-playing was right every time it was asked.
 -- So the history is built here from currently-playing instead: a job asks what
--- is playing every 30 seconds, and a play is written when the track changes,
+-- is playing every 10 seconds, and a play is written when the track changes,
 -- restarts, or stops.
+--
+-- It asked every 30 seconds until Spotify's account export gave something to
+-- measure against: over the nine days both covered, the watcher had missed 19%
+-- of plays on its best day and 82% on its first. A song started and skipped
+-- between two checks is never seen at all, and short plays are most of what
+-- gets skipped. Ten seconds narrows that window without pretending to close
+-- it - a track dropped after three seconds is still invisible, and the export
+-- stays the way to correct the record.
 --
 -- It runs in the database rather than on a laptop because the laptop is not
 -- online when its owner is walking around with headphones in.
 --
 --   listen.watch_step    pure: previous state + one snapshot -> next state, finished play
---   listen.watch_poll    every 30s: ask Spotify, step, write
+--   listen.watch_poll    every 10s: ask Spotify, step, write
 --   listen.recent_rows   pure: a recently-played response -> rows
 --   listen.poll_recent   every 30m: the backup, for anything the watcher missed
 --   listen.add_play      the one place rows are written, and where the two sources dedupe
@@ -237,6 +245,9 @@ declare
   -- Spotify can blink out for a poll between tracks or during a device
   -- handoff. Ending a play on the first empty answer and starting it again on
   -- the next would count one listen twice, so nothing ends until it persists.
+  -- Five missed checks at the ten-second cadence, and it only delays the end
+  -- of a play rather than moving it: the end time comes from when the track
+  -- last moved, not from when the blackout was noticed.
   gone_for  constant interval := interval '50 seconds';
 begin
   if jsonb_typeof(item) = 'object' and coalesce(item->>'uri', '') like 'spotify:track:%' then
@@ -456,9 +467,9 @@ revoke all on all functions in schema listen from public, anon, authenticated;
 
 -- cron.schedule replaces a job of the same name, so re-applying this file
 -- updates the schedule rather than adding a second copy.
-select cron.schedule('listen-watch',  '30 seconds',   'select listen.watch_poll()');
+select cron.schedule('listen-watch',  '10 seconds',   'select listen.watch_poll()');
 select cron.schedule('listen-recent', '*/30 * * * *', 'select listen.poll_recent()');
--- A job every 30 seconds is 2,880 run records a day in pg_cron's own log.
+-- A job every 10 seconds is 8,640 run records a day in pg_cron's own log.
 select cron.schedule('listen-trim-cron-log', '17 4 * * *',
   $$delete from cron.job_run_details where end_time < now() - interval '2 days'$$);
 
