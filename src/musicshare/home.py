@@ -29,7 +29,7 @@ ART_CACHE = ROOT / "data" / "cache" / "art.json"
 # Bumped whenever what a cached feed means changes - a new field, a different
 # rule for choosing a picture - so an old file is rebuilt rather than served just
 # because no play has happened since.
-CACHE_VERSION = 8
+CACHE_VERSION = 9
 
 MIN_MS = 30_000
 URI_RE = re.compile(r"^spotify:track:([A-Za-z0-9]+)$")

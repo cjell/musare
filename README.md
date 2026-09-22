@@ -150,24 +150,38 @@ a discovery has to bring unfamiliar song titles too.
 
 ## Capture
 
-The export is complete and exact up to the day it was generated; everything since
-is captured live, and the two union at read time under one rule - **the export
-wins for every period it covers** - so live rows only survive past its high-water
-mark and a future export silently upgrades them.
+Three sources, each kept in its own files and unioned at read time under one
+rule: **the better-informed source wins for every period it covers.**
 
 ```
-Spotify export     ->  Parquet (raw)   ->  DuckDB (transform)  ->  the app
-   509k plays           8.6 MB              ~0.1s queries
-Supabase capture   ->  Parquet (live)  ^
+Extended export    ->  Parquet (raw)      ->  DuckDB  ->  the app
+   509k plays          8.6 MB, exact          ~0.1s
+Account export     ->  Parquet (account)  ^   12 months, 4 fields per play
+Supabase capture   ->  Parquet (live)     ^   today, and only today
 ```
+
+The extended export is complete and exact to the day it was generated. Spotify's
+*account* export arrives in days rather than weeks and covers a year, but a play
+is only end time, artist, track and ms_played - no track id, no skip flag - so
+ids are recovered by matching artist and title against songs already in the
+history, which covered 87% of them. Capture is last because it is the least
+complete, which I could only prove once the account export gave me the same days
+to compare against: **it missed 19% of plays on its best day and 82% on its
+first.** Everything below a source's high-water mark is its better's, so a future
+export silently upgrades approximate rows with nothing to reconcile by hand.
 
 I started with a poller on recently-played and rebuilt it after measuring what it
 returned: fifteen plays on a day I had listened for hours, one song played ten
 times reported twice. Currently-playing was right every time I asked it. So
-`supabase/capture.sql` asks what is playing every 30 seconds and writes a play
+`supabase/capture.sql` asks what is playing every 10 seconds and writes a play
 when the track changes, restarts or stops, with listening time measured from
 playback progress rather than assumed from the track's length. Recently-played
 stays on every 30 minutes as a backup.
+
+Ten seconds, not thirty, for the reason above: a song started and skipped between
+two checks is never seen at all, and short plays are most of what gets skipped.
+It narrows the window rather than closing it - three seconds of a track is still
+invisible - which is why the export stays the way to correct the record.
 
 It runs in the database - pg_cron, the `http` extension, secrets in Vault -
 because my laptop is not online when I am walking around campus with headphones
