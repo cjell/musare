@@ -212,6 +212,16 @@ body{
   text-transform:uppercase;color:var(--ink-3);margin-top:5px;display:block;
 }
 
+/* Week on week, under each number. Up is the accent and down is muted rather
+   than green and red: listening less than last week is not a failing, and a
+   scorecard is the wrong thing for a screen about your own listening. */
+.trend{
+  font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.06em;
+  color:var(--ink-3);margin-top:4px;display:block;
+}
+.trend.up{color:var(--accent)}
+.trend i{font-style:normal;font-size:8px;margin-right:2px}
+
 /* ---- actions ---- */
 .actions{display:flex;gap:7px;flex:none}
 .btn{
@@ -1562,10 +1572,14 @@ details[open] summary .chev{transform:rotate(180deg)}
       <section class="sec anim">
         <div class="sec-label"><span>This week</span><span class="aux" id="weekAux">vs last</span></div>
         <div class="stats four">
-          <div class="stat"><span class="n" id="wkHours">14.2</span><span class="l">Hours</span></div>
-          <div class="stat"><span class="n" id="wkPlays">612</span><span class="l">Plays</span></div>
-          <div class="stat"><span class="n" id="wkTracks">218</span><span class="l">Tracks</span></div>
-          <div class="stat"><span class="n" id="wkArtists">148</span><span class="l">Artists</span></div>
+          <div class="stat"><span class="n" id="wkHours">14.2</span><span class="l">Hours</span>
+            <span class="trend" id="trHours"></span></div>
+          <div class="stat"><span class="n" id="wkPlays">612</span><span class="l">Plays</span>
+            <span class="trend" id="trPlays"></span></div>
+          <div class="stat"><span class="n" id="wkTracks">218</span><span class="l">Tracks</span>
+            <span class="trend" id="trTracks"></span></div>
+          <div class="stat"><span class="n" id="wkArtists">148</span><span class="l">Artists</span>
+            <span class="trend" id="trArtists"></span></div>
         </div>
         <div class="gapnote" id="gapNote" hidden>
           <span aria-hidden="true">!</span>
@@ -3682,15 +3696,13 @@ function loadHome(){
     $("wkPlays").textContent = w.plays;
     $("wkTracks").textContent = w.tracks;
     $("wkArtists").textContent = w.artists;
-
-    /* The comparison is the point of the section, so say which way it went
-       rather than leaving a bare "vs last". */
-    /* The comparison reads in hours, because that is the number a person has a
-       feel for - "down 22h" lands where "down 567" needs arithmetic. */
-    var delta = Math.round((w.hours - w.hours_prev) * 10) / 10;
-    $("weekAux").textContent = w.hours_prev
-      ? (delta >= 0 ? "up " : "down ") + Math.abs(delta) + "h vs last"
-      : "vs last";
+    trend("trHours", w.hours, w.hours_prev);
+    trend("trPlays", w.plays, w.plays_prev);
+    trend("trTracks", w.tracks, w.tracks_prev);
+    trend("trArtists", w.artists, w.artists_prev);
+    /* Every tile carries its own comparison now, so the header saying the same
+       thing about hours was the same sentence twice. */
+    $("weekAux").textContent = "vs last week";
 
     /* Capture runs in Supabase and a stopped job writes nothing, which on this
        screen reads exactly like not listening. The server knows the difference
@@ -4023,6 +4035,24 @@ function renderActivity(){
   });
 
   $("actList").innerHTML = html;
+}
+
+/* Under this, a week is the same week: 829 plays against 815 is not a trend,
+   and an arrow that flips on noise teaches you to ignore it. */
+var TREND_FLAT = 3;
+
+function trend(id, now, before){
+  var el = $(id);
+  /* Nothing to compare against - a new account, or a week capture did not
+     cover. A percentage off zero is infinity dressed up as a finding. */
+  if(!before){ el.textContent = ""; el.className = "trend"; return; }
+  var pct = Math.round((now - before) / before * 100);
+  var flat = Math.abs(pct) < TREND_FLAT;
+  el.className = "trend" + (flat ? "" : pct > 0 ? " up" : "");
+  el.innerHTML = flat
+    ? "<i>&#8211;</i>level"
+    : "<i>" + (pct > 0 ? "&#9650;" : "&#9660;") + "</i>" + Math.abs(pct) + "%";
+  el.title = before + " last week";
 }
 
 function renderHome(){
