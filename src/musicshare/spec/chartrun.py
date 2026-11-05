@@ -188,6 +188,9 @@ class ChartData:
     # earlier windows knows when to stop offering.
     window: str = ""
     earlier: bool = False
+    # The height to draw to when several windows are meant to be compared - the
+    # tallest any of them reaches. None when nobody asked for a shared scale.
+    scale_peak: float | None = None
     # A running total of today as it happened, as [hours since midnight, total]
     # pairs, one ramp per play. Empty for every other chart.
     timeline: list[list[float]] = field(default_factory=list)
@@ -262,11 +265,17 @@ def _from(spec: ChartSpec) -> str:
     return "plays p left join artist_genre g on lower(p.artist_name) = g.artist"
 
 
-def _where(spec: ChartSpec, needs_min: bool, back: int = 0) -> tuple[str, list[Any]]:
+def _where(
+    spec: ChartSpec, needs_min: bool, back: int = 0, windowed: bool = True
+) -> tuple[str, list[Any]]:
+    """The filters for one chart. `windowed` false leaves out the range itself,
+    for a caller that means to ask about several windows at once."""
     clauses, params = ["artist_name is not null"], []
     if needs_min:
         clauses.append(f"ms_played >= {MIN_MS}")
-    if spec.year is not None:
+    if not windowed:
+        pass
+    elif spec.year is not None:
         clauses.append(f"year({LOCAL_TS}) = {int(spec.year)}")
     elif spec.range == "today":
         clauses.append(_day(back))
@@ -386,6 +395,63 @@ def _window(con: duckdb.DuckDBPyConnection, spec: ChartSpec, back: int) -> tuple
     return label, earlier is not None
 
 
+def _scale_peak(
+    spec: ChartSpec,
+    con: duckdb.DuckDBPyConnection,
+    frm: str,
+    metric_sql: str,
+    windows: int,
+) -> float | None:
+    """The tallest this chart gets across the windows a reader can step through.
+
+    A chart drawn to its own peak is redrawn to the same height every day, so a
+    quiet Tuesday and a loud Monday look identical and only the axis labels
+    differ - which is the opposite of what stepping through days is for. Holding
+    one scale over the whole range makes the comparison the picture.
+
+    Only for charts of the hours of a day, which is what Home pins and what can
+    be stepped. A running total's height is the window's total; anything else is
+    its tallest hour.
+    """
+    if windows < 1 or spec.dimension != "hour_of_day" or spec.series != "none":
+        return None
+    if spec.per_period or spec.metric in RATE_METRICS:
+        return None
+
+    where, params = _where(spec, METRICS[spec.metric][1], windowed=False)
+    if spec.range == "today":
+        bucket = f"cast({LOCAL_TS} as date)"
+        span = f"{bucket} > cast((current_timestamp AT TIME ZONE '{LOCAL}') as date) - {windows}"
+    elif spec.range in STEP_DAYS:
+        step = STEP_DAYS[spec.range]
+        newest = "(select max(played_at) from plays)"
+        bucket = f"cast(date_diff('day', played_at, {newest}) / {step} as integer)"
+        span = f"played_at > {newest} - interval {windows * step} day"
+    else:
+        return None
+
+    # Per bucket per hour first, because a chart's height is an hour's worth -
+    # or, for a running total, everything up to the end of the window. Each hour
+    # is rounded the way run() rounds it before a running total adds them up, so
+    # the shared height is measured in the same units as the line drawn under
+    # it; summing the exact values put it a hundredth below a day it had to fit.
+    inner = "sum(round(v, 2))" if spec.cumulative else "max(round(v, 2))"
+    row = con.execute(
+        f"""
+        select max(tall) from (
+          select {inner} as tall from (
+            select {bucket} as w, hour({LOCAL_TS}) as h, {metric_sql} as v
+            from {frm}
+            where {where} and {span}
+            group by 1, 2
+          ) group by w
+        )
+        """,
+        params,
+    ).fetchone()
+    return round(float(row[0]), 3) if row and row[0] is not None else None
+
+
 def _note(spec: ChartSpec, rated: bool, truncated: bool = False) -> str | None:
     """Whatever the reader needs in order not to misread the chart."""
     bits = []
@@ -409,11 +475,17 @@ def steppable(spec: ChartSpec) -> bool:
     return spec.year is None and (spec.range == "today" or spec.range in STEP_DAYS)
 
 
-def run(spec: ChartSpec, back: int = 0) -> ChartData:
-    """The numbers for a chart. `back` steps to an earlier window - the day
-    before, the seven days before those - for the ranges that have one."""
+def run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
+    """The numbers for a chart.
+
+    `back` steps to an earlier window - the day before, the seven days before
+    those - for the ranges that have one. `scale_over` says how many windows the
+    caller can step through, so every one of them can be drawn to the same
+    height instead of each to its own.
+    """
     spec = effective(spec)
     back = max(0, int(back)) if steppable(spec) else 0
+    scale_over = max(0, int(scale_over)) if steppable(spec) else 0
     if not spec.understood:
         return ChartData(
             [],
@@ -481,6 +553,9 @@ def run(spec: ChartSpec, back: int = 0) -> ChartData:
         y_label = f"total {y_label}"
     total = con.execute(f"select count(*) from {frm} where {where}", params).fetchone()[0]
     window, earlier = _window(con, spec, back)
+    peak = (
+        _scale_peak(spec, con, frm, metric_sql, max(scale_over, back) + 1) if scale_over else None
+    )
 
     return ChartData(
         labels=labels,
@@ -499,6 +574,7 @@ def run(spec: ChartSpec, back: int = 0) -> ChartData:
         timeline=timeline,
         window=window,
         earlier=earlier,
+        scale_peak=peak,
     )
 
 

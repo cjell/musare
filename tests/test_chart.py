@@ -285,8 +285,11 @@ def test_every_rankable_thing_runs(series):
 # ------------------------------------------------- a live chart's past days
 
 
+SPEC_TODAY = ChartSpec(range="today", dimension="hour_of_day", cumulative=True)
+
+
 def today_hours(back=0):
-    return run(ChartSpec(range="today", dimension="hour_of_day", cumulative=True), back=back)
+    return run(SPEC_TODAY, back=back)
 
 
 def test_a_finished_day_runs_to_midnight_with_no_now_marker():
@@ -331,6 +334,18 @@ def test_a_window_with_no_previous_one_ignores_the_offset(spec):
     """All time has no previous all time, and a named year is already fixed."""
     assert run(spec, back=3).values == run(spec).values
     assert run(spec).earlier is False
+
+
+def test_one_height_is_shared_by_every_window_that_can_be_stepped_to():
+    days = [today_hours(back=b) for b in range(0, 4)]
+    peaks = {d.scale_peak for d in [run(SPEC_TODAY, back=b, scale_over=6) for b in range(0, 4)]}
+    assert len(peaks) == 1, "the scale must not move as you step"
+    peak = peaks.pop()
+    assert peak is None or peak >= max((d.values[-1] if d.values else 0) for d in days)
+
+
+def test_no_shared_scale_is_computed_unless_it_is_asked_for():
+    assert run(SPEC_TODAY).scale_peak is None
 
 
 def test_a_window_says_what_it_covers():

@@ -184,17 +184,16 @@ def _clock(hours: float) -> str:
     return f"{minutes // 60 % 24:02d}:{minutes % 60:02d}"
 
 
-def _span(n: int, axis: str, partial: float | None) -> int:
-    """How many hours a chart of today reaches along the bottom.
+def _span(n: int, axis: str) -> int:
+    """How far along the bottom a chart reaches.
 
-    A day still in progress stopped at the current hour, so 4pm did not appear
-    until it was 4pm and the line ran into the right edge. A tenth more, at
-    least an hour, gives it somewhere to go - the same idea as the headroom above
-    the top gridline. Every other chart spans exactly its buckets.
+    A chart of hours always spans the whole day, however little of it has
+    happened. It used to stop at the current hour plus a tenth, which made the
+    axis redraw itself hourly and made two days impossible to compare by eye:
+    yesterday's full day beside a nine-hour morning are different pictures of
+    different widths. Every other chart spans exactly its buckets.
     """
-    if partial is None or axis != "hour of day":
-        return n
-    return min(24, n + max(1, math.ceil(n * (HEADROOM - 1))))
+    return 24 if axis == "hour of day" else n
 
 
 def _hour_ticks(n: int, span: int, labels: list[str], at: list[float]) -> list[dict[str, Any]]:
@@ -341,6 +340,11 @@ def plan(p: dict[str, Any], style: ChartStyle | dict[str, Any] | None = None) ->
     ]
     single = not series
     peak = max((v for ln in lines for v in ln["values"] if v is not None), default=0)
+    # A scale the caller wants held steady across the windows it can step
+    # through, so a quiet Tuesday is visibly quieter than a loud Monday instead
+    # of being redrawn to the same height. Never smaller than this chart's own
+    # peak, which would clip it.
+    peak = max(peak, float(p.get("scale_peak") or 0))
 
     # What this chart can be. Words lie on their side and stay bars, because a line
     # across a list of names implies an order that is not there. A comparison stays
@@ -401,7 +405,7 @@ def plan(p: dict[str, Any], style: ChartStyle | dict[str, Any] | None = None) ->
 
     fill = kind == "area" and single
     n = len(labels)
-    span = _span(n, axis, partial)
+    span = _span(n, axis)
 
     if cumulative and timeline and single:
         # Today, play by play: the points are the listening itself, on the same
@@ -415,7 +419,10 @@ def plan(p: dict[str, Any], style: ChartStyle | dict[str, Any] | None = None) ->
                 "ticks": _hour_ticks(n, span, labels, [float(i) for i in range(n)]),
             },
             "series": [{"name": unit, "points": pts, "labels": [_clock(x) for x, _ in pts]}],
-            "y": {**y_scale(max(y for _, y in pts), divisions), "unit": unit},
+            "y": {
+                **y_scale(max(max(y for _, y in pts), float(p.get("scale_peak") or 0)), divisions),
+                "unit": unit,
+            },
             "legend": False,
             "fill": fill,
             "now": True,

@@ -134,8 +134,9 @@ def test_a_running_total_of_today_starts_at_zero_and_stops_at_now():
     assert pts[0] == [0.0, 0.0]
     assert [pt[0] for pt in pts[1:]] == [1.0, 2.0, 2.25], "each hour's total where the hour ends"
     ticks = p["x"]["ticks"]
-    assert [t["at"] for t in ticks] == [0.0, 1.0, 2.0, 3.0], "labels where hours begin"
-    assert ticks[-1]["label"] == "03" and p["x"]["max"] == 4, "an hour past now is on the axis"
+    assert ticks[0]["at"] == 0.0 and ticks[0]["label"] == "00", "labels where hours begin"
+    assert len(ticks) <= MAX_X_TICKS, "a whole day's hours are thinned to labels that fit"
+    assert p["x"]["max"] == 24, "the axis is the whole day, so two days can be compared"
     assert p["now"] is True and p["series"][0]["labels"][0] == "start"
 
 
@@ -191,7 +192,7 @@ def test_a_running_total_of_today_follows_each_play_and_lies_flat_through_breaks
 
 
 def test_a_day_in_progress_shows_hours_ahead_so_the_line_is_not_against_the_edge():
-    """4pm used to appear only once it was 4pm."""
+    """4pm used to appear only once it was 4pm, and the axis moved every hour."""
     p = plan(
         payload(
             labels=[f"{h:02d}" for h in range(17)],
@@ -203,9 +204,39 @@ def test_a_day_in_progress_shows_hours_ahead_so_the_line_is_not_against_the_edge
             timeline=[[0.0, 0.0], [16.2, 1.0]],
         )
     )
-    assert p["x"]["max"] == 19
+    assert p["x"]["max"] == 24, "a day is a day wide, whatever o'clock it is"
     assert p["series"][0]["points"][-1][0] < 17, "the line still stops at now"
-    assert any(t["label"] == "18" for t in p["x"]["ticks"]) or p["x"]["max"] > 18
+
+
+def test_every_day_is_drawn_the_same_width():
+    """Two days can only be compared by eye if the axes match."""
+    morning = payload(
+        labels=[f"{h:02d}" for h in range(9)],
+        values=[0.2] * 9,
+        x_label="hour of day",
+        chart="line",
+        cumulative=True,
+        partial_last=0.5,
+    )
+    whole = payload(
+        labels=[f"{h:02d}" for h in range(24)],
+        values=[0.2] * 24,
+        x_label="hour of day",
+        chart="line",
+        cumulative=True,
+    )
+    assert plan(morning)["x"]["max"] == plan(whole)["x"]["max"] == 24
+
+
+def test_a_shared_scale_holds_the_top_steady_across_windows():
+    """Drawn to its own peak, a quiet day and a loud one look identical."""
+    quiet = payload(labels=["00", "01"], values=[0.5, 1.0], x_label="hour of day", chart="line")
+    assert plan(quiet)["y"]["max"] < 5
+    held = plan({**quiet, "scale_peak": 8.5})
+    assert held["y"]["max"] >= 8.5
+    assert plan({**quiet, "scale_peak": 0.1})["y"]["max"] == plan(quiet)["y"]["max"], (
+        "a shared scale never clips the chart it is drawing"
+    )
 
 
 def test_a_finished_period_spans_exactly_its_buckets():

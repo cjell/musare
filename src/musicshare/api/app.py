@@ -363,6 +363,7 @@ def _chart_payload(d: ChartData) -> dict[str, object]:
         # Which window this is, and whether there is an earlier one to step to.
         "window": d.window,
         "earlier": d.earlier,
+        "scale_peak": d.scale_peak,
         # Empty for an ordinary chart; when present it is the data and
         # `values` is empty. The page branches on which one has content.
         "series": [{"name": ln.name, "values": ln.values} for ln in d.series],
@@ -381,6 +382,7 @@ def _chart_payload(d: ChartData) -> dict[str, object]:
 def chart_run(
     spec: ChartSpec,
     back: int = Query(0, ge=0, le=3650, description="days back, for a chart of today"),
+    scale_back: int = Query(0, ge=0, le=52, description="windows to hold one scale across"),
 ) -> dict[str, object]:
     """Re-run a saved chart. No model: the question was read once, when it was
     asked, and this only executes what was understood then.
@@ -406,7 +408,7 @@ def chart_run(
             "problems": [{"field": p.field, "message": p.message} for p in problems],
         }
     live_mod.pull_if_stale()
-    d = run_chart(spec, back=back)
+    d = run_chart(spec, back=back, scale_over=scale_back)
     return {"understood": True, "empty": d.empty, "problems": [], "data": _chart_payload(d)}
 
 

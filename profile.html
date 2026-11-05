@@ -4485,7 +4485,8 @@ function renderHomeCharts(){
   Promise.all(pins.map(function(p){
     /* A frozen chart is the numbers it was frozen with; only live ones ask. */
     if(!isLive(p, "home") && p.data) return Promise.resolve({ understood: true, empty: false, data: p.data });
-    return runSpec(p.spec, canStepDays(p) ? (HOME_BACK[p.id] || 0) : 0);
+    var cap = canStepDays(p) ? MAX_BACK[p.spec.range] : 0;
+    return runSpec(p.spec, cap ? (HOME_BACK[p.id] || 0) : 0, cap);
   })).then(function(results){
     if(seq !== homeChartSeq) return;   /* a newer render has started */
     var html = "", draw = [];
@@ -6201,8 +6202,13 @@ function modeBar(m){
   return '<div class="chart-mode">' + label + btn + "</div>";
 }
 
-function runSpec(spec, back){
-  return fetch("/api/chart/run" + (back ? "?back=" + back : ""), {
+/* `scaleBack` asks the server to hold one height across that many windows, so
+   stepping through days compares them instead of redrawing each to fit. */
+function runSpec(spec, back, scaleBack){
+  var q = [];
+  if(back) q.push("back=" + back);
+  if(scaleBack) q.push("scale_back=" + scaleBack);
+  return fetch("/api/chart/run" + (q.length ? "?" + q.join("&") : ""), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(spec)

@@ -22,8 +22,8 @@ def _fake(monkeypatch, data: ChartData | None = None) -> list[str]:
     monkeypatch.setattr(app_mod.live_mod, "pull_if_stale", lambda: calls.append("pull"))
     answer = data or ChartData(["00", "01"], [0.0, 1.5], "hour of day", "hours", "today", "bar")
 
-    def run(spec, back=0):
-        calls.append(f"run:{back}")
+    def run(spec, back=0, scale_over=0):
+        calls.append(f"run:{back}" + (f"/scale:{scale_over}" if scale_over else ""))
         return answer
 
     monkeypatch.setattr(app_mod, "run_chart", run)
