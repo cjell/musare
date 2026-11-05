@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import threading
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -22,6 +23,7 @@ from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
 from musicshare import auth, taste, users
+from musicshare import card as card_mod
 from musicshare import genres as genrelib
 from musicshare import history as history_mod
 from musicshare import home as home_mod
@@ -67,7 +69,14 @@ PUBLIC = ("/health", "/api/auth/", "/api/me")
 # these: a profile is for looking at, and nothing that writes ever reads the
 # parameter - so being able to see a friend's profile can never become being
 # able to change it, whatever a later endpoint forgets to check.
-VIEWABLE = ("/api/profile", "/api/now", "/api/streak", "/api/map", "/api/playlists")
+VIEWABLE = (
+    "/api/profile",
+    "/api/card",
+    "/api/now",
+    "/api/streak",
+    "/api/map",
+    "/api/playlists",
+)
 
 
 def _session_secret() -> str:
@@ -195,6 +204,13 @@ def me(request: Request) -> dict[str, object]:
     return {"signed_in": False, "user": None}
 
 
+@app.get("/api/card", dependencies=[Depends(needs_history)])
+def profile_card() -> dict[str, object]:
+    """The computed facts at the top of a profile - hours, plays, genres - for
+    whoever is being looked at."""
+    return card_mod.card()
+
+
 @app.get("/api/users")
 def everyone() -> dict[str, object]:
     """Everyone with an account - the profiles that can be visited."""
@@ -212,6 +228,7 @@ _client: SpotifyClient | None = None
 # laid out for. A history gains a few plays an hour; nothing here needs to be
 # recomputed more often than someone asks for it fresh.
 _atlas_cache: dict[str, object] = {}
+_atlas_lock = threading.Lock()
 _map_cache: dict[tuple[str, float], dict[str, object]] = {}
 
 
@@ -224,15 +241,26 @@ def spotify() -> SpotifyClient:
 
 
 def _fitted() -> tuple[object, object, object]:
-    """The space, the basemap and the atlas, loaded once."""
-    if not _atlas_cache:
-        from musicshare.embed import load_space
-        from musicshare.project import load_basemap
+    """The space, the basemap and the atlas, loaded once.
 
-        log.info("loading fitted artefacts (once per process)")
-        _atlas_cache["space"] = load_space()
-        _atlas_cache["basemap"] = load_basemap()
-        _atlas_cache["atlas"] = regions_mod.load()
+    Under a lock, and published only when all three exist. It used to fill the
+    cache one entry at a time, so a second map request arriving during the
+    first load saw a non-empty cache and read a basemap that was not there yet.
+    One listener asked for one map at a time and never hit it; several profiles
+    loading at once do.
+    """
+    with _atlas_lock:
+        if not _atlas_cache:
+            from musicshare.embed import load_space
+            from musicshare.project import load_basemap
+
+            log.info("loading fitted artefacts (once per process)")
+            loaded = {
+                "space": load_space(),
+                "basemap": load_basemap(),
+                "atlas": regions_mod.load(),
+            }
+            _atlas_cache.update(loaded)
     return _atlas_cache["space"], _atlas_cache["basemap"], _atlas_cache["atlas"]
 
 
@@ -658,9 +686,13 @@ def delete_media(kind: str, name: str) -> dict[str, object]:
 
 @app.get("/api/playlists")
 def playlists(refresh: bool = False, limit: int = Query(300, ge=1, le=1000)) -> dict[str, object]:
-    """The owner's playlists, with covers and track counts."""
+    """An account's playlists, with covers and track counts."""
     try:
         return {"playlists": pl_mod.mine(refresh=refresh, limit=limit)}
+    except live_mod.NoToken:
+        # Never signed in here, or the token was revoked: an empty shelf, not a
+        # server fault - the profile still has everything else.
+        return {"playlists": [], "note": "no_token"}
     except Exception as e:
         log.error("playlists failed: %s", e)
         raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e

@@ -191,3 +191,28 @@ def test_no_history_is_an_answer_not_a_server_error(accounts, monkeypatch):
     sign_in_as(c, "alice", monkeypatch)
     r = c.get("/api/home")
     assert r.status_code == 409 and r.json()["detail"] == "no_history"
+
+
+def test_a_friends_card_is_computed_from_their_history(accounts, monkeypatch):
+    """The card is one of the things a profile is made of, so it is viewable."""
+    seen: list[str] = []
+    monkeypatch.setattr(history, "has_any", lambda uid=None: True)
+    monkeypatch.setattr(app_mod.card_mod, "card", lambda: seen.append(users.current()) or {})
+    c = TestClient(app_mod.app)
+    sign_in_as(c, "alice", monkeypatch)
+    assert c.get("/api/card?user=bob").status_code == 200
+    assert c.get("/api/card").status_code == 200
+    assert seen == ["bob", "alice"]
+
+
+def test_a_shelf_with_no_token_is_empty_not_a_server_error(accounts, monkeypatch):
+    """A friend who signed in elsewhere, or whose token was revoked."""
+
+    def no_token(**kw):
+        raise app_mod.live_mod.NoToken("no token")
+
+    monkeypatch.setattr(app_mod.pl_mod, "mine", no_token)
+    c = TestClient(app_mod.app)
+    sign_in_as(c, "alice", monkeypatch)
+    r = c.get("/api/playlists?user=bob")
+    assert r.status_code == 200 and r.json() == {"playlists": [], "note": "no_token"}
