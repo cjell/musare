@@ -21,6 +21,8 @@ dependencies = [
   # the spec service
   "fastapi>=0.117",
   "uvicorn[standard]>=0.37",
+  # signs the session cookie - what Starlette's SessionMiddleware requires
+  "itsdangerous>=2.2",
   # data: DuckDB over Parquet locally, psycopg straight to Postgres
   "duckdb>=1.5",
   "pyarrow>=25.0",

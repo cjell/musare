@@ -28,13 +28,14 @@ from typing import Any
 
 import httpx
 
-from musicshare.config import ROOT
+from musicshare import users
 from musicshare.live import access_token, pick_image
 
 log = logging.getLogger(__name__)
 
 API = "https://api.spotify.com/v1"
-CACHE = ROOT / "data" / "cache" / "playlists.json"
+# Each user's own list, fetched with their own token - see users.cache.
+CACHE_NAME = "playlists.json"
 # Playlists change on the order of days, and the list costs five requests to
 # rebuild. An hour keeps it current without paying for it on every page load.
 CACHE_TTL = 3600
@@ -44,12 +45,14 @@ PAGE = 50
 MAX_ITEM_PAGES = 4
 
 
-def _get(path: str, params: dict[str, Any] | None = None) -> dict[str, Any] | None:
+def _get(
+    path: str, params: dict[str, Any] | None = None, uid: str | None = None
+) -> dict[str, Any] | None:
     try:
         r = httpx.get(
             f"{API}{path}",
             params=params or {},
-            headers={"Authorization": f"Bearer {access_token()}"},
+            headers={"Authorization": f"Bearer {access_token(uid)}"},
             timeout=20,
         )
     except httpx.HTTPError as e:
@@ -84,16 +87,19 @@ def _shape(p: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def mine(refresh: bool = False, limit: int | None = None) -> list[dict[str, Any]]:
+def mine(
+    refresh: bool = False, limit: int | None = None, uid: str | None = None
+) -> list[dict[str, Any]]:
     """Every playlist the user owns or follows, newest page first."""
-    if CACHE.exists() and not refresh and time.time() - CACHE.stat().st_mtime < CACHE_TTL:
-        cached = json.loads(CACHE.read_text(encoding="utf-8"))
+    cache_file = users.cache(CACHE_NAME, uid)
+    if cache_file.exists() and not refresh and time.time() - cache_file.stat().st_mtime < CACHE_TTL:
+        cached = json.loads(cache_file.read_text(encoding="utf-8"))
         return cached[:limit] if limit else cached
 
     out: list[dict[str, Any]] = []
     offset = 0
     while True:
-        page = _get("/me/playlists", {"limit": PAGE, "offset": offset})
+        page = _get("/me/playlists", {"limit": PAGE, "offset": offset}, uid)
         if not page:
             break
         # Spotify puts nulls in this list - a playlist that was deleted, or one
@@ -105,13 +111,13 @@ def mine(refresh: bool = False, limit: int | None = None) -> list[dict[str, Any]
             break
 
     if out:
-        CACHE.parent.mkdir(parents=True, exist_ok=True)
-        CACHE.write_text(json.dumps(out, indent=0, ensure_ascii=False), encoding="utf-8")
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps(out, indent=0, ensure_ascii=False), encoding="utf-8")
     log.info("playlists: %d", len(out))
     return out[:limit] if limit else out
 
 
-def tracks(playlist_id: str, limit: int = 100) -> list[dict[str, Any]]:
+def tracks(playlist_id: str, limit: int = 100, uid: str | None = None) -> list[dict[str, Any]]:
     """What is in one playlist.
 
     Uses /items. /tracks answers 403 and answering 403 is what convinced this
@@ -126,7 +132,7 @@ def tracks(playlist_id: str, limit: int = 100) -> list[dict[str, Any]]:
         want = min(PAGE, limit - len(out))
         if want <= 0:
             break
-        page = _get(f"/playlists/{playlist_id}/items", {"limit": want, "offset": offset})
+        page = _get(f"/playlists/{playlist_id}/items", {"limit": want, "offset": offset}, uid)
         if not page:
             break
         rows = page.get("items") or []

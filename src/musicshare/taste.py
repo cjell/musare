@@ -13,13 +13,13 @@ import logging
 import re
 from typing import Any
 
-from musicshare.config import ROOT
+from musicshare import users
 from musicshare.history import connect, has_export
 from musicshare.spotify import SpotifyClient
 
 log = logging.getLogger(__name__)
 
-CACHE = ROOT / "data" / "cache" / "seed.json"
+CACHE_NAME = "seed.json"
 
 # Under 30s of a track is a skip or a mis-tap, not a listen.
 MIN_MS = 30_000
@@ -90,8 +90,9 @@ def build_seed(
     at this size - a few dozen each, cached to disk - and it is why the seed is
     the top slice rather than the whole 8,623-artist history.
     """
-    if CACHE.exists() and not refresh:
-        cached = json.loads(CACHE.read_text(encoding="utf-8"))
+    cache_file = users.cache(CACHE_NAME)
+    if cache_file.exists() and not refresh:
+        cached = json.loads(cache_file.read_text(encoding="utf-8"))
         # A cache written before albums existed would leave that tab empty
         # forever; treat a missing key as stale rather than as an empty list.
         if "albums" in cached:
@@ -129,8 +130,8 @@ def build_seed(
                 albums.append(b)
 
     seed = {"tracks": tracks, "artists": artists, "albums": albums}
-    CACHE.parent.mkdir(parents=True, exist_ok=True)
-    CACHE.write_text(json.dumps(seed, indent=2, ensure_ascii=False), encoding="utf-8")
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(json.dumps(seed, indent=2, ensure_ascii=False), encoding="utf-8")
     log.info(
         "seed cached: %d tracks, %d artists, %d albums", len(tracks), len(artists), len(albums)
     )

@@ -31,6 +31,17 @@ class Settings(BaseSettings):
     # reason rather than from the browser straight to Supabase.
     supabase_service_role_key: str = ""
 
+    # Signs the session cookie, so a visitor cannot write "I am that user" into
+    # it themselves. Unset is fine on a laptop - one is made per run and sessions
+    # just do not survive a restart - and refused where the app is public.
+    session_secret: str = ""
+    # Set where the app is reachable from outside: cookies become Secure and a
+    # missing session secret stops startup instead of being papered over.
+    production: bool = False
+    # Who a call is about when no one is signed in - a script, a test, a REPL.
+    # Empty falls back to the only user on disk; see musicshare.users.
+    default_user: str = ""
+
 
 @lru_cache(maxsize=1)
 def settings() -> Settings:

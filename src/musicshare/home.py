@@ -18,13 +18,16 @@ import logging
 import re
 from typing import Any
 
+from musicshare import users
 from musicshare.config import ROOT
 from musicshare.history import connect
 from musicshare.spotify import SpotifyClient
 
 log = logging.getLogger(__name__)
 
-CACHE = ROOT / "data" / "cache" / "home.json"
+# Per user: a feed is one person's week. Artwork resolved by name is the same
+# picture for everyone, so it stays shared.
+CACHE_NAME = "home.json"
 ART_CACHE = ROOT / "data" / "cache" / "art.json"
 # Bumped whenever what a cached feed means changes - a new field, a different
 # rule for choosing a picture - so an old file is rebuilt rather than served just
@@ -613,9 +616,10 @@ def _cache_usable(cached: dict | None, tip: str | None) -> bool:
 
 def build(refresh: bool = False) -> dict[str, Any]:
     tip = _tip()
-    if CACHE.exists() and not refresh:
+    cache_file = users.cache(CACHE_NAME)
+    if cache_file.exists() and not refresh:
         try:
-            cached = json.loads(CACHE.read_text(encoding="utf-8"))
+            cached = json.loads(cache_file.read_text(encoding="utf-8"))
         except ValueError:
             cached = None
         if _cache_usable(cached, tip):
@@ -655,6 +659,6 @@ def build(refresh: bool = False) -> dict[str, Any]:
         "on_repeat": repeat,
         "through": tip,
     }
-    CACHE.parent.mkdir(parents=True, exist_ok=True)
-    CACHE.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
     return out

@@ -1,6 +1,9 @@
-"""Dev server: Spotify catalog search, plus the mockup served from source.
+"""The server: every endpoint the page calls, plus the page itself.
 
-    ./mscs/python.exe -m uvicorn musicshare.api.app:app --reload --port 8000
+    ./mscs/python.exe -m uvicorn musicshare.api.app:app --reload --port 3000
+
+Port 3000 because that is the address registered with Spotify for signing in
+locally; a sign-in sent from any other port is refused by Spotify, not here.
 
 Search is proxied rather than called from the browser so the client secret
 never reaches the page, and so responses arrive trimmed to what the UI draws:
@@ -11,12 +14,16 @@ from __future__ import annotations
 
 import json
 import logging
+import secrets
 
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
+from starlette.middleware.sessions import SessionMiddleware
 
+from musicshare import auth, taste, users
 from musicshare import genres as genrelib
+from musicshare import history as history_mod
 from musicshare import home as home_mod
 from musicshare import live as live_mod
 from musicshare import media as media_mod
@@ -24,7 +31,7 @@ from musicshare import playlists as pl_mod
 from musicshare import regions as regions_mod
 from musicshare import shows as shows_mod
 from musicshare import streak as streak_mod
-from musicshare import taste
+from musicshare.config import settings
 from musicshare.spec import ChartSpec, plot, run_chart, validate, validate_chart
 from musicshare.spec.apply import familiar_enough
 from musicshare.spec.chartrun import ChartData
@@ -45,7 +52,158 @@ from musicshare.web.render import render
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="MusicShare dev")
+app = FastAPI(title="munity")
+
+# ------------------------------------------------------------- who is asking
+#
+# The session cookie names one account and nothing else; everything that account
+# can reach is decided here, once, rather than remembered by each endpoint.
+
+# Reachable signed out: the health check, the sign-in flow, and the question
+# "am I signed in", which the page asks before anything else.
+PUBLIC = ("/health", "/api/auth/", "/api/me")
+
+# Where another user's data may be read, with ?user=<id>. GET only, and only
+# these: a profile is for looking at, and nothing that writes ever reads the
+# parameter - so being able to see a friend's profile can never become being
+# able to change it, whatever a later endpoint forgets to check.
+VIEWABLE = ("/api/profile", "/api/now", "/api/streak", "/api/map", "/api/playlists")
+
+
+def _session_secret() -> str:
+    s = settings()
+    if s.session_secret:
+        return s.session_secret
+    if s.production:
+        raise RuntimeError("SESSION_SECRET must be set where the app is public")
+    log.warning("SESSION_SECRET is not set - using a random one, so sessions end on restart")
+    return secrets.token_urlsafe(32)
+
+
+@app.middleware("http")
+async def who_is_asking(request: Request, call_next):
+    uid = request.session.get("uid")
+    if uid and not users.exists(uid):
+        # A session for an account that is gone - deleted, or a different disk.
+        request.session.clear()
+        uid = None
+
+    path = request.url.path
+    if (
+        settings().production
+        and path.startswith("/api/")
+        and not uid
+        and not path.startswith(PUBLIC)
+    ):
+        return JSONResponse({"error": "signed_out"}, status_code=401)
+
+    target = uid
+    viewing = request.query_params.get("user")
+    if viewing and request.method == "GET" and path.startswith(VIEWABLE):
+        if not users.exists(viewing):
+            return JSONResponse({"error": "no_such_user"}, status_code=404)
+        target = viewing
+
+    token = users.set_for_request(target)
+    try:
+        return await call_next(request)
+    finally:
+        users.reset(token)
+
+
+# Added after the middleware above so that it wraps it: Starlette runs the last
+# one added first, and the session has to be read before it can be used.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_session_secret(),
+    session_cookie="munity_session",
+    max_age=60 * 60 * 24 * 60,
+    same_site="lax",
+    https_only=settings().production,
+)
+
+
+def needs_history() -> None:
+    """For routes that draw from listening history: say so when there is none.
+
+    A friend who has signed in but not uploaded yet is an ordinary state, not a
+    server error - the page shows them how to upload rather than a broken screen.
+    """
+    if not history_mod.has_any():
+        raise HTTPException(409, "no_history")
+
+
+# ---------------------------------------------------------------- signing in
+
+
+@app.get("/api/auth/login")
+def login(request: Request) -> RedirectResponse:
+    # A random value carried through Spotify and back, so a callback this browser
+    # did not start - someone else's code, pasted into a link - is refused.
+    state = secrets.token_urlsafe(24)
+    request.session["oauth_state"] = state
+    return RedirectResponse(auth.login_url(state))
+
+
+@app.get("/api/auth/callback/spotify")
+def callback(
+    request: Request, code: str = "", state: str = "", error: str = ""
+) -> RedirectResponse:
+    expected = request.session.pop("oauth_state", None)
+    if error or not code:
+        return RedirectResponse("/?login=cancelled")
+    if not expected or not secrets.compare_digest(state, expected):
+        return RedirectResponse("/?login=failed")
+    try:
+        record = auth.sign_in(code)
+    except auth.NotAllowed:
+        return RedirectResponse("/?login=notallowed")
+    except auth.AuthError as e:
+        log.warning("sign-in failed: %s", e)
+        return RedirectResponse("/?login=failed")
+    # A fresh session for a fresh sign-in, so nothing set before it carries over.
+    request.session.clear()
+    request.session["uid"] = record["id"]
+    return RedirectResponse("/")
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request) -> dict[str, object]:
+    request.session.clear()
+    return {"ok": True}
+
+
+@app.get("/api/me")
+def me(request: Request) -> dict[str, object]:
+    """Who the page is for. Read from the session, never from a fallback.
+
+    Signed out on a laptop, the app still runs as the only account on disk so
+    that working on it does not mean signing in after every restart - and says
+    `local` so the page can tell that apart from a real session. Where the app is
+    public there is no such fallback.
+    """
+    uid = request.session.get("uid")
+    if uid and users.exists(uid):
+        return {"signed_in": True, "user": users.public(uid)}
+    if not settings().production:
+        try:
+            local = users.current()
+        except users.NoUser:
+            local = None
+        if local and users.exists(local):
+            return {"signed_in": False, "local": True, "user": users.public(local)}
+    return {"signed_in": False, "user": None}
+
+
+@app.get("/api/users")
+def everyone() -> dict[str, object]:
+    """Everyone with an account - the profiles that can be visited."""
+    return {
+        "users": [
+            {**users.public(u), "has_history": history_mod.has_any(u)} for u in users.all_ids()
+        ]
+    }
+
 
 _client: SpotifyClient | None = None
 # The fitted artefacts are 105MB of vectors and a 414MB projection index. Loading
@@ -54,7 +212,7 @@ _client: SpotifyClient | None = None
 # laid out for. A history gains a few plays an hour; nothing here needs to be
 # recomputed more often than someone asks for it fresh.
 _atlas_cache: dict[str, object] = {}
-_map_cache: dict[float, dict[str, object]] = {}
+_map_cache: dict[tuple[str, float], dict[str, object]] = {}
 
 
 def spotify() -> SpotifyClient:
@@ -99,22 +257,20 @@ def search(
         raise HTTPException(502, str(e)) from e
 
 
-@app.get("/api/seed")
+@app.get("/api/seed", dependencies=[Depends(needs_history)])
 def seed(refresh: bool = False) -> dict[str, object]:
     """The user's own top tracks and artists, with artwork.
 
     The pin picker opens to this, so pinning something you already listen to is
     one tap and search is the escape hatch rather than the entry point.
     """
-    if not taste.has_history():
-        return {"tracks": [], "artists": [], "albums": [], "note": "no play history ingested"}
     try:
         return taste.build_seed(refresh=refresh)
     except SpotifyError as e:
         raise HTTPException(502, str(e)) from e
 
 
-@app.get("/api/shows")
+@app.get("/api/shows", dependencies=[Depends(needs_history)])
 def shows(
     refresh: bool = False,
     familiarity: Familiarity = Familiarity.ANY,
@@ -178,7 +334,7 @@ def shows_spec(
     }
 
 
-@app.get("/api/chart")
+@app.get("/api/chart", dependencies=[Depends(needs_history)])
 def chart(
     q: str = Query(..., min_length=1, max_length=400, description="a question about listening"),
     model: str = CHART_MODEL,
@@ -228,7 +384,7 @@ class ChartChange(BaseModel):
     change: str = Field(min_length=1, max_length=400)
 
 
-@app.post("/api/chart/refine")
+@app.post("/api/chart/refine", dependencies=[Depends(needs_history)])
 def chart_refine(body: ChartChange, model: str = CHART_MODEL) -> dict[str, object]:
     """Change a chart instead of asking a new question.
 
@@ -305,7 +461,7 @@ GALLERY: list[tuple[str, ChartSpec]] = [
 ]
 
 
-@app.get("/api/chart/gallery")
+@app.get("/api/chart/gallery", dependencies=[Depends(needs_history)])
 def chart_gallery() -> dict[str, object]:
     """Every shape a chart can take, drawn from the real history on one page.
 
@@ -378,7 +534,7 @@ def _chart_payload(d: ChartData) -> dict[str, object]:
     return out
 
 
-@app.post("/api/chart/run")
+@app.post("/api/chart/run", dependencies=[Depends(needs_history)])
 def chart_run(
     spec: ChartSpec,
     back: int = Query(0, ge=0, le=3650, description="days back, for a chart of today"),
@@ -412,7 +568,7 @@ def chart_run(
     return {"understood": True, "empty": d.empty, "problems": [], "data": _chart_payload(d)}
 
 
-@app.get("/api/home")
+@app.get("/api/home", dependencies=[Depends(needs_history)])
 def home(refresh: bool = False) -> dict[str, object]:
     """This week, who is climbing and cooling, what is on repeat.
 
@@ -435,9 +591,12 @@ def home(refresh: bool = False) -> dict[str, object]:
     # A capture job that stops writes nothing, which on this screen looks exactly
     # like not listening. Say so instead: a feed that quietly falls behind is
     # worse than one that admits to it.
+    # Only for the account capture actually records. Until capture is per-user,
+    # telling anyone else their capture is behind would be about someone else's.
+    captured = live_mod.capture_user() == users.current()
     data["live"] = {
-        "pulled": bool(pulled),
-        "stalled": bool(pulled and pulled.stalled),
+        "pulled": captured and bool(pulled),
+        "stalled": captured and bool(pulled and pulled.stalled),
     }
     return data
 
@@ -492,7 +651,7 @@ def delete_media(kind: str, name: str) -> dict[str, object]:
     removed = [
         ext
         for ext in ("gif", "png", "jpg", "webp")
-        if media_mod.delete(f"u/{media_mod.LOCAL_OWNER}/{kind}/{name}.{ext}")
+        if media_mod.delete(f"u/{users.storage_owner()}/{kind}/{name}.{ext}")
     ]
     return {"removed": removed}
 
@@ -633,7 +792,7 @@ def now() -> dict[str, object]:
     }
 
 
-@app.get("/api/streak")
+@app.get("/api/streak", dependencies=[Depends(needs_history)])
 def streak() -> dict[str, object]:
     """The listening streak for the profile badge.
 
@@ -651,7 +810,7 @@ def streak() -> dict[str, object]:
         return {"days": None, "since": None}
 
 
-@app.get("/api/map")
+@app.get("/api/map", dependencies=[Depends(needs_history)])
 def taste_map(
     refresh: bool = False,
     view_px: float = Query(360.0, ge=120, le=4000, description="width the client will draw at"),
@@ -663,10 +822,13 @@ def taste_map(
     answer for a 900px desktop frame is wrong for a 360px phone. The client says
     what it has and gets thresholds for that.
     """
+    # The territory is everyone's; the dots on it are one listener's. Keyed by
+    # both, or one person's map would be served to the next to ask.
+    key = (users.current(), view_px)
     if refresh:
-        _map_cache.clear()
-    if view_px in _map_cache:
-        return _map_cache[view_px]
+        _map_cache.pop(key, None)
+    if key in _map_cache:
+        return _map_cache[key]
     try:
         space, basemap, atlas = _fitted()
         from musicshare.project import atlas_map
@@ -678,7 +840,7 @@ def taste_map(
     except Exception as e:
         log.error("map build failed: %s", e)
         raise HTTPException(502, f"{type(e).__name__}: {e}"[:200]) from e
-    _map_cache[view_px] = data
+    _map_cache[key] = data
     return data
 
 

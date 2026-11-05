@@ -12,7 +12,7 @@ import duckdb
 import numpy as np
 import pytest
 
-from musicshare import modes
+from musicshare import modes, users
 from musicshare.embed import Space
 
 SEED = 20260910
@@ -252,7 +252,7 @@ def test_compare_is_calibrated_against_the_baseline(con, space):
 
 
 def test_save_load_round_trip(con, space, tmp_path, monkeypatch):
-    monkeypatch.setattr(modes, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(users, "USERS_DIR", tmp_path)
     p = modes.profile(con=con, space=space)
     modes.save(p, user="tester")
     q = modes.load(user="tester")
@@ -272,7 +272,7 @@ def test_a_profile_fitted_against_another_space_is_flagged(
     con, space, tmp_path, monkeypatch, caplog
 ):
     """A refit changes every vector; stale centres are numbers, not meaning."""
-    monkeypatch.setattr(modes, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(users, "USERS_DIR", tmp_path)
     p = modes.profile(con=con, space=space)
     modes.save(p, user="stale")
     monkeypatch.setattr(
@@ -285,7 +285,7 @@ def test_a_profile_fitted_against_another_space_is_flagged(
 
 def test_a_profile_with_no_stamp_at_all_is_flagged(con, space, tmp_path, monkeypatch, caplog):
     """Unknown provenance is the condition that caused the bug, not an exemption."""
-    monkeypatch.setattr(modes, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(users, "USERS_DIR", tmp_path)
     p = modes.profile(con=con, space=space)
     p.space = None
     modes.save(p, user="unstamped")
@@ -298,7 +298,7 @@ def test_a_profile_with_no_stamp_at_all_is_flagged(con, space, tmp_path, monkeyp
 
 
 def test_a_matching_stamp_is_quiet(con, space, tmp_path, monkeypatch, caplog):
-    monkeypatch.setattr(modes, "OUT_DIR", tmp_path)
+    monkeypatch.setattr(users, "USERS_DIR", tmp_path)
     p = modes.profile(con=con, space=space)
     modes.save(p, user="fresh")
     monkeypatch.setattr(modes, "saved_stamp", lambda: p.space)

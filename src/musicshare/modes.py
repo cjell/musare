@@ -39,6 +39,7 @@ from typing import Any
 import duckdb
 import numpy as np
 
+from musicshare import users
 from musicshare.config import ROOT
 from musicshare.embed import Space, load_space, saved_stamp, stamp
 from musicshare.history import connect
@@ -425,18 +426,19 @@ def compare(a: TasteProfile, b: TasteProfile, recent: bool = False) -> dict[str,
 # ----------------------------------------------------------------- persistence
 
 
-def path_for(user: str = "me") -> Path:
-    return OUT_DIR / f"modes_{user}.json"
+def path_for(user: str | None = None) -> Path:
+    """A listener's saved profile, in their own directory."""
+    return users.path(user) / "modes.json"
 
 
-def save(p: TasteProfile, user: str = "me") -> Path:
+def save(p: TasteProfile, user: str | None = None) -> Path:
     out = path_for(user)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(asdict(p), indent=2, ensure_ascii=False), encoding="utf-8")
     return out
 
 
-def load(user: str = "me") -> TasteProfile:
+def load(user: str | None = None) -> TasteProfile:
     d = json.loads(path_for(user).read_text(encoding="utf-8"))
     p = TasteProfile(**{**d, "modes": [Mode(**m) for m in d["modes"]]})
     current = saved_stamp()

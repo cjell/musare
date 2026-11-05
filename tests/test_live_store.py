@@ -12,7 +12,10 @@ from datetime import UTC, date, datetime, timedelta
 import duckdb
 import pytest
 
-from musicshare import live
+from musicshare import live, users
+
+# The account capture records, in a throwaway users directory per test.
+UID = "capturetester"
 
 
 def row(when: datetime, uri: str = "spotify:track:a") -> dict:
@@ -28,9 +31,11 @@ def row(when: datetime, uri: str = "spotify:track:a") -> dict:
 
 @pytest.fixture
 def store(tmp_path, monkeypatch):
-    d = tmp_path / "live"
-    d.mkdir()
-    monkeypatch.setattr(live, "LIVE_DIR", d)
+    """A real user marked as the captured account, with an empty live store."""
+    monkeypatch.setattr(users, "USERS_DIR", tmp_path / "users")
+    users.save({"id": UID, "captured": True})
+    d = live.live_dir(UID)
+    d.mkdir(parents=True)
     return d
 
 
@@ -47,13 +52,17 @@ def names(store) -> list[str]:
 
 
 def test_a_days_plays_land_in_one_file(store):
-    live._store([row(datetime(2026, 9, 14, 1, 0)), row(datetime(2026, 9, 14, 9, 0), "b")], None)
+    live._store(
+        [row(datetime(2026, 9, 14, 1, 0)), row(datetime(2026, 9, 14, 9, 0), "b")], None, UID
+    )
     assert names(store) == ["live-20260914.parquet"]
     assert rows_in(store / "live-20260914.parquet") == 2
 
 
 def test_plays_spanning_midnight_split_by_the_day_they_happened(store):
-    live._store([row(datetime(2026, 9, 14, 23, 50)), row(datetime(2026, 9, 15, 0, 10), "b")], None)
+    live._store(
+        [row(datetime(2026, 9, 14, 23, 50)), row(datetime(2026, 9, 15, 0, 10), "b")], None, UID
+    )
     assert names(store) == ["live-20260914.parquet", "live-20260915.parquet"]
 
 
@@ -62,8 +71,8 @@ def test_a_pull_replaces_a_day_rather_than_merging_into_it(store):
     same play arrives. Merging would keep the old copy and count the play twice."""
     estimate = row(datetime(2026, 9, 14, 1, 0, 0))
     measured = row(datetime(2026, 9, 14, 1, 0, 4))
-    live._store([estimate], date(2026, 9, 14))
-    live._store([measured], date(2026, 9, 14))
+    live._store([estimate], date(2026, 9, 14), UID)
+    live._store([measured], date(2026, 9, 14), UID)
     got = (
         duckdb.connect()
         .execute(
@@ -75,14 +84,14 @@ def test_a_pull_replaces_a_day_rather_than_merging_into_it(store):
 
 
 def test_a_day_the_database_no_longer_holds_is_removed(store):
-    live._store([row(datetime(2026, 9, 14, 1, 0))], None)
-    assert live._store([], date(2026, 9, 14)) is True
+    live._store([row(datetime(2026, 9, 14, 1, 0))], None, UID)
+    assert live._store([], date(2026, 9, 14), UID) is True
     assert names(store) == []
 
 
 def test_days_before_the_reread_window_are_left_alone(store):
-    live._store([row(datetime(2026, 9, 10, 12, 0))], None)
-    live._store([row(datetime(2026, 9, 14, 12, 0), "b")], date(2026, 9, 13))
+    live._store([row(datetime(2026, 9, 10, 12, 0))], None, UID)
+    live._store([row(datetime(2026, 9, 14, 12, 0), "b")], date(2026, 9, 13), UID)
     assert names(store) == ["live-20260910.parquet", "live-20260914.parquet"]
 
 
@@ -90,15 +99,15 @@ def test_an_identical_pull_changes_nothing(store):
     """Every page load pulls; rewriting unchanged files each time would also
     throw away the feed cache for no reason."""
     rows = [row(datetime(2026, 9, 14, 1, 0))]
-    assert live._store(rows, None) is True
-    assert live._store(rows, None) is False
+    assert live._store(rows, None, UID) is True
+    assert live._store(rows, None, UID) is False
 
 
 def test_a_day_with_no_album_names_still_reads_beside_the_others(store):
     """Inferred types made an all-null column type null in one file and string
     in the next, and a glob over both refuses to read."""
     bare = {**row(datetime(2026, 9, 14, 1, 0)), "album_name": None}
-    live._store([bare, row(datetime(2026, 9, 15, 1, 0), "b")], None)
+    live._store([bare, row(datetime(2026, 9, 15, 1, 0), "b")], None, UID)
     n = (
         duckdb.connect()
         .execute(f"select count(*) from read_parquet('{(store / '*.parquet').as_posix()}')")
@@ -116,9 +125,13 @@ def _export_ending(tmp_path, when: datetime) -> str:
 
 
 def test_prune_deletes_only_what_the_export_covers(store, tmp_path, monkeypatch):
-    live._store([row(datetime(2026, 9, 10, 12, 0)), row(datetime(2026, 9, 20, 12, 0), "b")], None)
-    monkeypatch.setattr(live, "EXPORT_GLOB", _export_ending(tmp_path, datetime(2026, 9, 15)))
-    monkeypatch.setattr(live, "has_export", lambda: True)
+    live._store(
+        [row(datetime(2026, 9, 10, 12, 0)), row(datetime(2026, 9, 20, 12, 0), "b")], None, UID
+    )
+    monkeypatch.setattr(
+        live, "export_glob", lambda uid=None: _export_ending(tmp_path, datetime(2026, 9, 15))
+    )
+    monkeypatch.setattr(live, "has_export", lambda uid=None: True)
 
     assert live.prune() == 1
     assert names(store) == ["live-20260920.parquet"]
@@ -126,8 +139,8 @@ def test_prune_deletes_only_what_the_export_covers(store, tmp_path, monkeypatch)
 
 def test_prune_keeps_everything_when_there_is_no_export(store, monkeypatch):
     """Nothing else local holds these rows, so a missing export means keep them all."""
-    live._store([row(datetime(2020, 1, 1, 12, 0))], None)
-    monkeypatch.setattr(live, "has_export", lambda: False)
+    live._store([row(datetime(2020, 1, 1, 12, 0))], None, UID)
+    monkeypatch.setattr(live, "has_export", lambda uid=None: False)
     assert live.prune() == 0
     assert len(names(store)) == 1
 
@@ -135,10 +148,12 @@ def test_prune_keeps_everything_when_there_is_no_export(store, monkeypatch):
 def test_prune_does_not_delete_by_file_count(store, tmp_path, monkeypatch):
     """The bug this replaced: a flat keep-the-newest-twelve rule would have
     thrown away a day's plays every time the app was opened."""
-    live._store([row(datetime(2026, 9, day, 12, 0), f"t{day}") for day in range(1, 21)], None)
+    live._store([row(datetime(2026, 9, day, 12, 0), f"t{day}") for day in range(1, 21)], None, UID)
     assert len(names(store)) == 20
-    monkeypatch.setattr(live, "EXPORT_GLOB", _export_ending(tmp_path, datetime(2026, 8, 1)))
-    monkeypatch.setattr(live, "has_export", lambda: True)
+    monkeypatch.setattr(
+        live, "export_glob", lambda uid=None: _export_ending(tmp_path, datetime(2026, 8, 1))
+    )
+    monkeypatch.setattr(live, "has_export", lambda uid=None: True)
     assert live.prune() == 0
     assert len(names(store)) == 20
 

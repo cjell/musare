@@ -31,7 +31,8 @@ import duckdb
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from musicshare.history import ACCOUNT_DIR, EXPORT_GLOB, LIVE_GLOB, has_export, has_live
+from musicshare import history, users
+from musicshare.history import has_export, has_live
 
 SRC_GLOB = "StreamingHistory_music_*.json"
 
@@ -39,14 +40,20 @@ SRC_GLOB = "StreamingHistory_music_*.json"
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("account_dir", type=Path, help=f"folder holding {SRC_GLOB}")
-    ap.add_argument("--out", type=Path, default=ACCOUNT_DIR)
+    ap.add_argument("--user", help="whose history this is; defaults to the only account")
+    ap.add_argument("--out", type=Path, help="where to write it; defaults to that user's store")
     args = ap.parse_args()
+    uid = args.user or users.current()
+    EXPORT_GLOB = history.export_glob(uid)
+    LIVE_GLOB = history.live_glob(uid)
+    if args.out is None:
+        args.out = history.account_dir(uid)
 
     files = sorted(args.account_dir.glob(SRC_GLOB))
     if not files:
         print(f"No {SRC_GLOB} under {args.account_dir}", file=sys.stderr)
         return 1
-    if not has_export():
+    if not has_export(uid):
         print("Ingest the extended export first - it decides what this can add.", file=sys.stderr)
         return 1
 
@@ -70,7 +77,7 @@ def main() -> int:
     # superseded as a source of plays. They are the same songs, and the watcher
     # saw a uri for each one it did see - which lifted recovery from 76% to 87%.
     seen = [f"select track_uri, track_name, artist_name from read_parquet('{EXPORT_GLOB}')"]
-    if has_live():
+    if has_live(uid):
         seen.append(f"select track_uri, track_name, artist_name from read_parquet('{LIVE_GLOB}')")
     con.execute(f"""
         create view known as

@@ -24,14 +24,16 @@ from typing import Any
 
 import httpx
 
-from musicshare import genres
+from musicshare import genres, users
 from musicshare.config import ROOT, settings
 from musicshare.history import connect
 
 log = logging.getLogger(__name__)
 
 API = "https://app.ticketmaster.com/discovery/v2/events.json"
-CACHE = ROOT / "data" / "cache" / "shows.json"
+# Per user, because a show list is joined to one person's listening. Fan
+# counts describe artists, not listeners, and stay shared.
+CACHE_NAME = "shows.json"
 CACHE_TTL = 6 * 3600
 
 # Chapel Hill. Ticketmaster wants a geohash; five characters is a few km, which
@@ -285,8 +287,9 @@ def genre_of(artist: str) -> str | None:
 
 def build(refresh: bool = False, **kw) -> list[dict[str, Any]]:
     """Normalised upcoming shows, each carrying how much you play that artist."""
-    if CACHE.exists() and not refresh and time.time() - CACHE.stat().st_mtime < CACHE_TTL:
-        cached = json.loads(CACHE.read_text(encoding="utf-8"))
+    cache_file = users.cache(CACHE_NAME)
+    if cache_file.exists() and not refresh and time.time() - cache_file.stat().st_mtime < CACHE_TTL:
+        cached = json.loads(cache_file.read_text(encoding="utf-8"))
         # A cache written before levels existed would leave every show out of
         # "Listen regularly" until it expired, six hours later.
         if all("familiarity" in s for s in cached):
@@ -320,8 +323,8 @@ def build(refresh: bool = False, **kw) -> list[dict[str, Any]]:
         s["month"] = _month(s["date"])
         s["day"] = s["date"][8:10]
 
-    CACHE.parent.mkdir(parents=True, exist_ok=True)
-    CACHE.write_text(json.dumps(shows, indent=2, ensure_ascii=False), encoding="utf-8")
+    cache_file.parent.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(json.dumps(shows, indent=2, ensure_ascii=False), encoding="utf-8")
     log.info(
         "cached %d shows, %d matching your history", len(shows), sum(1 for s in shows if s["yours"])
     )

@@ -28,7 +28,7 @@ import logging
 import time
 from pathlib import Path
 
-from musicshare import modes, regions
+from musicshare import modes, regions, users
 from musicshare.embed import build_space, save_space
 from musicshare.project import fit_basemap, save_basemap
 from musicshare.shows import FANS_CACHE
@@ -94,11 +94,16 @@ def main() -> None:
     # them hard enough to fail, so a forgotten refit shows up as a map that is
     # subtly wrong rather than as an error - which is exactly what happened the
     # first time this script was run.
-    stale = sorted(regions.OUT_DIR.glob("modes_*.json"))
-    for path in stale:
-        user = path.stem.removeprefix("modes_")
+    #
+    # Each one is refit from its own listener's history. This used to call
+    # profile() with no user, which read the one history there was - so with
+    # more than one account every profile would have been refit as the same
+    # person.
+    stale = [u for u in users.all_ids() if modes.path_for(u).exists()]
+    for user in stale:
         log.info("5/5 refitting profile %r against the new space", user)
-        p = modes.profile(space=space)
+        with users.as_user(user):
+            p = modes.profile(space=space)
         # A refit produces fresh modes with no names, so they need naming again -
         # forgetting this leaves a profile showing tag labels like "rnb, pop"
         # where it used to say "alternative r&b".

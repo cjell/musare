@@ -12,9 +12,33 @@ import duckdb
 import numpy as np
 import pytest
 
+from musicshare import users
 from musicshare.embed import Space
 
 SEED = 20260910
+
+# Captured before any test can monkeypatch it, so the check below always looks at
+# the real directory rather than whatever a test pointed the module at.
+REAL_USERS = users.USERS_DIR
+
+
+def _accounts() -> set[str]:
+    return {p.name for p in REAL_USERS.iterdir() if p.is_dir()} if REAL_USERS.exists() else set()
+
+
+@pytest.fixture(autouse=True)
+def _no_accounts_written_to_real_data():
+    """Tests read the real history; none may add an account to it.
+
+    Four test profiles once landed in data/users/ beside the real one, because a
+    test redirected a directory the code had stopped writing to. That made "the
+    only user on disk" ambiguous, and every history-backed test skipped. A test
+    that writes users has to point users.USERS_DIR at a temporary directory.
+    """
+    before = _accounts()
+    yield
+    leaked = _accounts() - before
+    assert not leaked, f"a test created accounts in the real data dir: {sorted(leaked)}"
 
 # Three genres on orthogonal axes, so which cluster is which is never in doubt.
 GENRES = {

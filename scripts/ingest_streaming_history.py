@@ -19,8 +19,9 @@ from pathlib import Path
 
 import duckdb
 
-ROOT = Path(__file__).resolve().parent.parent
-OUT = ROOT / "data" / "raw" / "plays"
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from musicshare import history, users
 
 # Present on every row, and every one of them is useful downstream.
 KEEP = [
@@ -44,8 +45,11 @@ KEEP = [
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("export_dir", type=Path, help="folder holding Streaming_History_Audio_*.json")
-    ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--user", help="whose history this is; defaults to the only account")
+    ap.add_argument("--out", type=Path, help="where to write it; defaults to that user's store")
     args = ap.parse_args()
+    if args.out is None:
+        args.out = history.export_dir(args.user or users.current())
 
     src = args.export_dir / "Streaming_History_Audio_*.json"
     if not list(args.export_dir.glob("Streaming_History_Audio_*.json")):

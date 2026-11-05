@@ -29,6 +29,7 @@ from dataclasses import dataclass
 
 import httpx
 
+from musicshare import users
 from musicshare.config import settings
 
 log = logging.getLogger(__name__)
@@ -40,7 +41,8 @@ BUCKET = "media"
 DATA_BUCKET = "data"
 
 # Until there are accounts. See the note above about the path shape.
-LOCAL_OWNER = "me"
+# Who storage paths belong to is decided per call - users.storage_owner() - so
+# one person's upload can never land under another's key.
 
 # The bucket enforces this too, which is the copy that matters - a limit only
 # the client respects is not a limit. This one exists so an oversized file is
@@ -99,7 +101,7 @@ def _base() -> tuple[str, dict[str, str]]:
     return s.supabase_url.rstrip("/"), {"apikey": key, "Authorization": f"Bearer {key}"}
 
 
-def put(data: bytes, kind: str, name: str, owner: str = LOCAL_OWNER) -> Stored:
+def put(data: bytes, kind: str, name: str, owner: str | None = None) -> Stored:
     """Store one picture and return where it now lives.
 
     The path is deterministic - one object per slot - so replacing a state
@@ -107,6 +109,7 @@ def put(data: bytes, kind: str, name: str, owner: str = LOCAL_OWNER) -> Stored:
     caching problem for a tidiness one, and the caching problem is solved by
     the version marker the caller gets back on the URL.
     """
+    owner = owner or users.storage_owner()
     if not data:
         raise MediaError("that file is empty")
     if len(data) > MAX_BYTES:
@@ -137,8 +140,9 @@ def put(data: bytes, kind: str, name: str, owner: str = LOCAL_OWNER) -> Stored:
     return Stored(url=url, path=path, content_type=ctype, bytes=len(data))
 
 
-def put_doc(name: str, doc: dict, owner: str = LOCAL_OWNER) -> str:
+def put_doc(name: str, doc: dict, owner: str | None = None) -> str:
     """Store one JSON document. Overwrites; there is one per owner per name."""
+    owner = owner or users.storage_owner()
     for part in (name, owner):
         if not SAFE_NAME.match(part):
             raise MediaError(f"invalid path segment: {part!r}")
@@ -155,12 +159,13 @@ def put_doc(name: str, doc: dict, owner: str = LOCAL_OWNER) -> str:
     return path
 
 
-def get_doc(name: str, owner: str = LOCAL_OWNER) -> dict | None:
+def get_doc(name: str, owner: str | None = None) -> dict | None:
     """Read one JSON document back. None when it has never been written.
 
     A 404 is an ordinary answer here - a profile that has not been saved yet is
     not an error - so it is the one status that does not raise.
     """
+    owner = owner or users.storage_owner()
     for part in (name, owner):
         if not SAFE_NAME.match(part):
             raise MediaError(f"invalid path segment: {part!r}")
@@ -192,8 +197,9 @@ def delete(path: str) -> bool:
     return r.status_code < 300
 
 
-def delete_doc(name: str, owner: str = LOCAL_OWNER) -> bool:
+def delete_doc(name: str, owner: str | None = None) -> bool:
     """Remove one JSON document."""
+    owner = owner or users.storage_owner()
     base, headers = _base()
     r = httpx.request(
         "DELETE",

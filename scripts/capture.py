@@ -62,10 +62,17 @@ def _put_secret(con, name: str, value: str) -> None:
 
 def install() -> int:
     s = settings()
-    if not live.TOKENS.exists():
-        print(f"  no Spotify login at {live.TOKENS} - run scripts/oauth_probe.py --login first")
+    # Capture records one account until it is per-user: the one marked on its
+    # record as captured (see scripts/migrate_owner.py).
+    who = live.capture_user()
+    if not who:
+        print("  no account is marked as the captured one - run scripts/migrate_owner.py")
         return 1
-    refresh = json.loads(live.TOKENS.read_text(encoding="utf-8")).get("refresh_token")
+    tokens = live.token_path(who)
+    if not tokens.exists():
+        print(f"  no Spotify login at {tokens} - sign in with Spotify first")
+        return 1
+    refresh = json.loads(tokens.read_text(encoding="utf-8")).get("refresh_token")
     if not (s.spotify_client_id and s.spotify_client_secret and refresh):
         print("  SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET and a refresh token are all needed")
         return 1

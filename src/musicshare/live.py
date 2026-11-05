@@ -23,18 +23,39 @@ import logging
 import time
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import duckdb
 import httpx
 
-from musicshare.config import ROOT, settings
-from musicshare.history import EXPORT_GLOB, LIVE_DIR, connect, has_export, has_live
+from musicshare import users
+from musicshare.config import settings
+from musicshare.history import connect, export_glob, has_export, has_live, live_dir
 
 log = logging.getLogger(__name__)
 
-TOKENS = ROOT / "data" / "cache" / "spotify_user_token.json"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
+
+
+def token_path(uid: str | None = None) -> Path:
+    """Where a user's Spotify refresh token is kept, written when they sign in."""
+    return users.path(uid) / "token.json"
+
+
+def capture_user() -> str | None:
+    """The one account Supabase capture records, until capture is per-user.
+
+    The watcher still holds a single refresh token and writes plays with no user
+    on them, so every pulled row belongs to that one account. Pulling into
+    whoever happens to be asking would copy one person's listening into
+    another's history; this names the account instead, from its own record.
+    """
+    for uid in users.all_ids():
+        if (users.load(uid) or {}).get("captured"):
+            return uid
+    return None
+
 
 # A page may cost a database round trip this often. The watcher writes at most
 # every 30 seconds, so pulling more often only reads the same rows again.
@@ -92,15 +113,16 @@ class NoCapture(RuntimeError):
     pass
 
 
-def access_token() -> str:
-    """Refresh the stored token. Spotify's access tokens last an hour.
+def access_token(uid: str | None = None) -> str:
+    """Refresh a user's stored token. Spotify's access tokens last an hour.
 
-    Only the now-playing status row uses this now. Capture has its own copy of
-    the refresh token in Supabase Vault.
+    For now-playing and playlists. Capture has its own copy of the refresh token
+    in Supabase Vault.
     """
-    if not TOKENS.exists():
-        raise NoToken(f"no token at {TOKENS} - run scripts/oauth_probe.py --login")
-    tok = json.loads(TOKENS.read_text(encoding="utf-8"))
+    tokens = token_path(uid)
+    if not tokens.exists():
+        raise NoToken(f"no token at {tokens} - sign in with Spotify again")
+    tok = json.loads(tokens.read_text(encoding="utf-8"))
     if "refresh_token" not in tok:
         raise NoToken("stored token has no refresh_token - sign in again")
 
@@ -117,7 +139,7 @@ def access_token() -> str:
     fresh = r.json()
     # A refresh response may omit refresh_token; keep the one that still works.
     tok.update({k: v for k, v in fresh.items() if v})
-    TOKENS.write_text(json.dumps(tok, indent=2), encoding="utf-8")
+    tokens.write_text(json.dumps(tok, indent=2), encoding="utf-8")
     return tok["access_token"]
 
 
@@ -168,17 +190,18 @@ def _naive_utc(ts: datetime) -> datetime:
     return ts.astimezone(UTC).replace(tzinfo=None) if ts.tzinfo else ts
 
 
-def local_rows(after: datetime | None = None) -> list[dict[str, Any]]:
+def local_rows(after: datetime | None = None, uid: str | None = None) -> list[dict[str, Any]]:
     """Live rows held locally, past the export and past `after` if given."""
-    if not has_live():
+    uid = uid or capture_user()
+    if not uid or not has_live(uid):
         return []
     where = []
-    if has_export():
-        where.append(f"played_at > (select max(played_at) from read_parquet('{EXPORT_GLOB}'))")
+    if has_export(uid):
+        where.append(f"played_at > (select max(played_at) from read_parquet('{export_glob(uid)}'))")
     if after:
         where.append(f"played_at > timestamp '{after:%Y-%m-%d %H:%M:%S}'")
     sql = (
-        f"select {', '.join(COLUMNS)} from read_parquet('{(LIVE_DIR / '*.parquet').as_posix()}')"
+        f"select {', '.join(COLUMNS)} from read_parquet('{(live_dir(uid) / '*.parquet').as_posix()}')"
         + (f" where {' and '.join(where)}" if where else "")
         + " order by played_at"
     )
@@ -186,24 +209,26 @@ def local_rows(after: datetime | None = None) -> list[dict[str, Any]]:
     return [dict(zip(COLUMNS, r, strict=True)) for r in cur.fetchall()]
 
 
-def _first_day() -> date | None:
+def _first_day(uid: str) -> date | None:
     """The earliest day a pull re-reads - see REREAD. None means all of it."""
     con = duckdb.connect()
     marks = []
-    if has_live():
+    if has_live(uid):
         newest = con.execute(
-            f"select max(played_at) from read_parquet('{(LIVE_DIR / '*.parquet').as_posix()}')"
+            f"select max(played_at) from read_parquet('{(live_dir(uid) / '*.parquet').as_posix()}')"
         ).fetchone()[0]
         if newest:
             marks.append(newest - REREAD)
-    if has_export():
-        tip = con.execute(f"select max(played_at) from read_parquet('{EXPORT_GLOB}')").fetchone()[0]
+    if has_export(uid):
+        tip = con.execute(
+            f"select max(played_at) from read_parquet('{export_glob(uid)}')"
+        ).fetchone()[0]
         if tip:
             marks.append(tip)
     return max(marks).date() if marks else None
 
 
-def _store(rows: list[dict[str, Any]], first_day: date | None) -> bool:
+def _store(rows: list[dict[str, Any]], first_day: date | None, uid: str) -> bool:
     """Make every local day from `first_day` on hold exactly these rows.
 
     Replaced, never merged. The database is the record and a local day file is
@@ -213,7 +238,8 @@ def _store(rows: list[dict[str, Any]], first_day: date | None) -> bool:
 
     Days before `first_day` are not touched. Returns whether anything changed.
     """
-    LIVE_DIR.mkdir(parents=True, exist_ok=True)
+    folder = live_dir(uid)
+    folder.mkdir(parents=True, exist_ok=True)
     by_day: dict[str, list[dict[str, Any]]] = {}
     for r in rows:
         by_day.setdefault(r["played_at"].strftime("%Y%m%d"), []).append(r)
@@ -221,14 +247,14 @@ def _store(rows: list[dict[str, Any]], first_day: date | None) -> bool:
     floor = first_day.strftime("%Y%m%d") if first_day else ""
     held = {
         p.stem.removeprefix("live-"): p
-        for p in LIVE_DIR.glob("live-*.parquet")
+        for p in folder.glob("live-*.parquet")
         if p.stem.removeprefix("live-") >= floor
     }
 
     con = duckdb.connect()
     changed = False
     for day in sorted(set(by_day) | set(held)):
-        path = LIVE_DIR / f"live-{day}.parquet"
+        path = folder / f"live-{day}.parquet"
         want = sorted(
             (tuple(r[c] for c in COLUMNS) for r in by_day.get(day, [])), key=lambda t: t[0]
         )
@@ -271,9 +297,15 @@ def _as_arrow(rows: list[dict]):
     return pa.Table.from_pylist(rows, schema=schema)
 
 
-def pull() -> PullResult:
-    """Copy what the watcher has recorded into the local store."""
-    first = _first_day()
+def pull() -> PullResult | None:
+    """Copy what the watcher has recorded into the captured account's store.
+
+    None when no account is marked as the one capture records.
+    """
+    uid = capture_user()
+    if not uid:
+        return None
+    first = _first_day(uid)
     with cloud() as con:
         cur = con.execute(
             f"""
@@ -287,7 +319,7 @@ def pull() -> PullResult:
         watch = watch_status(con)
     for r in rows:
         r["played_at"] = _naive_utc(r["played_at"])
-    changed = _store(rows, first)
+    changed = _store(rows, first, uid)
     newest = rows[-1]["played_at"] if rows else None
     return PullResult(len(rows), changed, newest, watch)
 
@@ -309,6 +341,8 @@ def pull_if_stale(every: timedelta = PULL_EVERY) -> PullResult | None:
         result = pull()
     except Exception as e:  # no database is a degraded feed, not an error page
         log.warning("capture pull skipped: %s", e)
+        return None
+    if result is None:
         return None
     _last_pull = (time.monotonic(), result)
     if result.changed:
@@ -339,12 +373,17 @@ def prune() -> int:
     play is at or before that mark contributes nothing and can go. Everything
     else stays however old it is. The database keeps its copy either way.
     """
-    files = sorted(LIVE_DIR.glob("live-*.parquet"))
-    if not files or not has_export():
+    uid = capture_user()
+    if not uid:
+        return 0
+    files = sorted(live_dir(uid).glob("live-*.parquet"))
+    if not files or not has_export(uid):
         return 0
 
     con = duckdb.connect()
-    tip = con.execute(f"select max(played_at) from read_parquet('{EXPORT_GLOB}')").fetchone()[0]
+    tip = con.execute(f"select max(played_at) from read_parquet('{export_glob(uid)}')").fetchone()[
+        0
+    ]
     if tip is None:
         return 0
 
@@ -366,10 +405,11 @@ NOW = "https://api.spotify.com/v1/me/player/currently-playing"
 # seconds does not become a request per second, short enough that the answer is
 # still true - a status that lags a minute behind is worse than no status.
 NOW_TTL = 5.0
-_now_cache: tuple[float, dict | None] | None = None
+# Per user: one person's status must never be served from another's cache.
+_now_cache: dict[str, tuple[float, dict | None]] = {}
 
 
-def now_playing(ttl: float = NOW_TTL) -> dict[str, Any] | None:
+def now_playing(uid: str | None = None, ttl: float = NOW_TTL) -> dict[str, Any] | None:
     """The track playing right now, or None when nothing is.
 
     None covers three different situations on purpose - nothing playing, the
@@ -381,14 +421,15 @@ def now_playing(ttl: float = NOW_TTL) -> dict[str, Any] | None:
     "Permissions missing", which is what it did here for months: the scope was
     never requested, so the feature looked impossible rather than unasked for.
     """
-    global _now_cache
-    if _now_cache and time.monotonic() - _now_cache[0] < ttl:
-        return _now_cache[1]
+    uid = uid or users.current()
+    hit = _now_cache.get(uid)
+    if hit and time.monotonic() - hit[0] < ttl:
+        return hit[1]
 
     try:
         r = httpx.get(
             NOW,
-            headers={"Authorization": f"Bearer {access_token()}"},
+            headers={"Authorization": f"Bearer {access_token(uid)}"},
             timeout=10,
         )
     except (httpx.HTTPError, NoToken) as e:
@@ -418,7 +459,7 @@ def now_playing(ttl: float = NOW_TTL) -> dict[str, Any] | None:
     elif r.status_code not in (200, 204):
         log.warning("now playing: HTTP %s %s", r.status_code, r.text[:120])
 
-    _now_cache = (time.monotonic(), out)
+    _now_cache[uid] = (time.monotonic(), out)
     return out
 
 
