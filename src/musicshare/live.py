@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 import time
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
@@ -325,6 +326,7 @@ def pull() -> PullResult | None:
 
 
 _last_pull: tuple[float, PullResult] | None = None
+_pulling = threading.Lock()
 
 
 def pull_if_stale(every: timedelta = PULL_EVERY) -> PullResult | None:
@@ -337,6 +339,20 @@ def pull_if_stale(every: timedelta = PULL_EVERY) -> PullResult | None:
     global _last_pull
     if _last_pull and time.monotonic() - _last_pull[0] < every.total_seconds():
         return replace(_last_pull[1], changed=False)
+    # One pull at a time. Two requests arriving together both found no recent
+    # pull and both wrote the same day file, and on Windows the second could not
+    # open it. Whoever finds a pull already running gets the last result rather
+    # than waiting on it - a feed a minute old is fine, a stalled page is not.
+    if not _pulling.acquire(blocking=False):
+        return replace(_last_pull[1], changed=False) if _last_pull else None
+    try:
+        return _pull_now()
+    finally:
+        _pulling.release()
+
+
+def _pull_now() -> PullResult | None:
+    global _last_pull
     try:
         result = pull()
     except Exception as e:  # no database is a degraded feed, not an error page

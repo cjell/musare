@@ -256,3 +256,26 @@ def test_a_cover_with_no_dimensions_is_used_as_is():
 def test_no_images_is_none_rather_than_an_error():
     assert live.pick_image([], 240) is None
     assert live.pick_image(None, 240) is None
+
+
+def test_a_pull_already_running_is_not_started_twice(monkeypatch):
+    """Two requests at once used to both pull and collide writing one day file."""
+    import threading
+
+    started, release, calls = threading.Event(), threading.Event(), []
+
+    def slow_pull():
+        calls.append(1)
+        started.set()
+        release.wait(5)
+        return result(timedelta(seconds=10))
+
+    monkeypatch.setattr(live, "pull", slow_pull)
+    monkeypatch.setattr(live, "_last_pull", None)
+    first = threading.Thread(target=live.pull_if_stale)
+    first.start()
+    assert started.wait(5)
+    assert live.pull_if_stale() is None, "the second caller gets the last result, not a new pull"
+    release.set()
+    first.join(5)
+    assert calls == [1]
