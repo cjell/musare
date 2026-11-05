@@ -16,12 +16,16 @@ project works at all: a taste map, a weekly feed and eight years of charts need
 a history that already exists, and mine does.
 
 The taste map, the feed, the charts, the show search, the live status row and
-every ranking are computed from that history. What is *not* real is anything
-between people - match percentages, "9 going", "11 listen here" - because there
-is one user. Two sample profiles (Devin, Jules) exist so the social shape is
-legible, and they are labelled *Sample profile* in the app with every number on
-them invented. **The single-listener features are real; the between-people
-features are not yet measurable.**
+every number on a profile are computed from that history.
+
+It now runs for a small group of friends too: each signs in with Spotify, gets
+their own history, profile and map, and can look at everyone else's - read-only,
+enforced in one place on the server rather than by each endpoint remembering.
+What it does **not** show is anything between people that has not been measured
+yet. Two invented sample profiles, match percentages, "9 going" and a made-up
+activity feed used to stand in for a social graph that did not exist; with real
+people here they were removed rather than shown with real names on invented
+numbers, and each comes back only once it is counted from accounts that exist.
 
 ---
 
@@ -269,11 +273,14 @@ of the feature.
       genres.py          artist -> region -> state, the 1.5MB serving table
       home.py            the weekly feed: movers, discoveries, back in rotation
       live.py            pulls captured plays down; now-playing; the live store
-      history.py         one view over the export and the live rows
+      history.py         one view over the three sources, per account
+      users.py           who a request is about, and where their data lives
+      auth.py            signing in with Spotify, which is also how an account joins
+      card.py            the computed facts at the top of a profile
       media.py           uploads and the profile document
       shows.py           Ticketmaster events joined to local play history
-      api/app.py         the server
-    supabase/capture.sql the 30-second watcher, the backup, dedupe
+      api/app.py         the server, and who can read and write what
+    supabase/capture.sql the 10-second watcher, the backup, dedupe
     evals/cases/         golden sets and held-out sets
     profile.html         the interaction design, single file, no build step
 

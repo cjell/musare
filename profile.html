@@ -234,6 +234,22 @@ body{
 .btn-primary:hover{opacity:.88}
 .btn-ghost{width:34px;background:transparent;border-color:var(--line-2);color:var(--ink-2)}
 .btn-ghost:hover{color:var(--ink);border-color:var(--ink-3)}
+.btn-word{width:auto;padding:0 13px;font-size:12px}
+
+/* ---- signing in ---- */
+/* Fixed to the viewport, not the phone frame: the frame is many screens tall, so
+   centring in it put the button halfway down a long column. */
+.signin{
+  position:fixed;inset:0;z-index:200;display:flex;align-items:center;justify-content:center;
+  padding:32px;text-align:center;background:#0B0A0F;
+}
+.signin[hidden]{display:none}
+.signin-in{max-width:280px}
+.signin .wordmark{font-size:30px;margin-bottom:10px}
+.signin-lead{color:var(--ink-2);font-size:13.5px;line-height:1.5;margin:0 0 22px}
+.signin-go{display:inline-flex;align-items:center;justify-content:center;height:40px;
+  padding:0 20px;text-decoration:none;font-size:13.5px}
+.signin-note{color:var(--ink-2);font-size:12px;line-height:1.5;margin:18px 0 0}
 
 /* ---- section rhythm ---- */
 .sec{margin-top:34px}
@@ -1537,14 +1553,20 @@ details[open] summary .chev{transform:rotate(180deg)}
 .pick-group:first-child{margin-top:4px}
 </style>
 
-<div class="demo">
-  <span class="lab">Same skeleton &middot; three people</span>
-  <button type="button" data-p="0" aria-pressed="true">cjell</button>
-  <button type="button" data-p="1" aria-pressed="false">Devin</button>
-  <button type="button" data-p="2" aria-pressed="false">Jules</button>
+<div class="demo" id="people">
+  <span class="lab">People</span>
 </div>
 
 <div class="phone" id="phone">
+  <!-- Signed out where the app is public. Everything else waits behind it. -->
+  <div class="signin" id="signin" hidden>
+    <div class="signin-in">
+      <div class="wordmark">munity</div>
+      <p class="signin-lead">Your taste, measured from what you actually play.</p>
+      <a class="btn btn-primary signin-go" href="/api/auth/login">Log in with Spotify</a>
+      <p class="signin-note" id="signinNote" hidden></p>
+    </div>
+  </div>
   <div class="screen" id="screenHome">
     <div class="home-top solo">
       <div class="home-bar">
@@ -1666,6 +1688,11 @@ details[open] summary .chev{transform:rotate(180deg)}
 
     <div class="pad" id="tabCommunity">
       <section class="sec anim a1">
+        <div class="sec-label"><span>People here</span><span class="aux" id="peopleAux"></span></div>
+        <div class="plist" id="peopleList"></div>
+      </section>
+
+      <section class="sec anim a1">
         <div class="sec-label"><span>Closest to your taste</span><span class="aux">Updated today</span></div>
         <div class="plist" id="closeList"></div>
       </section>
@@ -1770,9 +1797,7 @@ details[open] summary .chev{transform:rotate(180deg)}
         <div class="avatar" id="avatar"><span id="initials">CM</span></div>
         <div class="actions" id="actionsSelf" hidden>
           <button class="btn btn-primary" type="button" id="editBtn">Edit profile</button>
-          <button class="btn btn-ghost" aria-label="Share profile">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7"/><path d="M16 6l-4-4-4 4"/><path d="M12 2v13"/></svg>
-          </button>
+          <button class="btn btn-ghost btn-word" type="button" id="signOut" hidden>Sign out</button>
         </div>
         <div class="actions" id="actionsOther">
           <button class="btn btn-primary">Follow</button>
@@ -1803,9 +1828,9 @@ details[open] summary .chev{transform:rotate(180deg)}
     </header>
 
     <div class="stats">
-      <div class="stat"><span class="n" id="s1">1,247</span><span class="l">Followers</span></div>
-      <div class="stat"><span class="n" id="s2">389</span><span class="l">Following</span></div>
-      <div class="stat"><span class="n" id="s3">87</span><span class="l">Taste score</span></div>
+      <div class="stat"><span class="n" id="s1">&ndash;</span><span class="l">Hours</span></div>
+      <div class="stat"><span class="n" id="s2">&ndash;</span><span class="l">Plays</span></div>
+      <div class="stat"><span class="n" id="s3">&ndash;</span><span class="l">Artists</span></div>
     </div>
 
     <section class="sec anim a1">
@@ -2197,124 +2222,63 @@ details[open] summary .chev{transform:rotate(180deg)}
 (function(){
 "use strict";
 
-var PROFILES = [
-  {
-    name:"cjell meow", handle:"@cjellok", initials:"CM",
-    accent:"#E74094", accentRGB:"231,64,148",
-    gen:"#9B8CFF", genRGB:"155,140,255",
-    bannerHues:[292,318,196,268], avatarHues:[262,330], artHue:24,
-    bio:"this is a bio about me and about the things that I do and whatnot and what I enjoy probably",
-    aux:{tracks:"my picks",artists:"My Favs"},
-    stats:["1,247","389","87"],
-    /* Every badge here is true of the real history (2026-09-15): 14,262 hours and
-       509,773 plays since 2018-08-11, a longest run of 812 consecutive days with a
-       play, and 61 genres with 5+ hours in the last year. The ranking badges that
-       used to lead were against other users, and there are none yet.
-       The streak is the current run, not that longest one, and loadStreak
-       replaces its label from the server - 469 is only what shows without one. */
-    badges:[
-      {t:"mile",l:"14,000+ hrs"},
-      {t:"mile",l:"500k plays"},
-      {t:"mile",l:"469-day streak",live:"streak"},
-      {t:"mile",l:"61 genres this year"},
-      {t:"mile",l:"Since 2018"},
-      {t:"id",l:"UNC '27"},
-      {t:"id",l:"Makes music"}
-    ],
-    artists:[["Four Tet","412 plays"],["Yaeji","388 plays"],["Floating Points","341 plays"],["Overmono","297 plays"],["Nala Sinephro","264 plays"],["DJ Python","240 plays"],["Loraine James","218 plays"],["Skee Mask","195 plays"]],
-    tracks:[["Two Thousand and Seventeen","Four Tet","184"],["So Vain","Yaeji","171"],["Del Oro","DJ Python","158"],["Is U","Overmono","149"],["Space 1.8","Nala Sinephro","137"]],
-    ug:{name:"Priori",sub:"You\u2019re 1 of 3 people at UNC listening.",foot:"Bottom 0.4% listener popularity \u00B7 your rarest artist this month"},
-    playlists:[["3am on franklin st","48 tracks"],["ambient, 4th floor davis","112 tracks"],["bpm too high for morning","61 tracks"],["songs i heard at nightlight","37 tracks"],["headphones on the quad","29 tracks"],["nothing over 100bpm","55 tracks"],["sunrise, still out","26 tracks"],["texture only","64 tracks"],["the one i send people","19 tracks"]],
-    frame:"fr-thin",
-    map:{l:"Ambient",r:"Club",t:"Instrumental",b:"Vocal",gap:"0.34",
-         count:"2,140 tracks plotted",note:"0.34 apart \u00B7 closer than 82% of UNC",seed:20260902,
-         clusters:[[.20,.34,.09,44,"ambient jazz"],[.42,.62,.10,58,"dub techno"],[.66,.40,.11,64,"UK garage"],[.83,.66,.08,34,"footwork"]],
-         you:[.52,.50],viewer:[.66,.39]},
-    sim:{pct:68,rank:"Top 6% of your matches",
-         cap:"You overlap hard on the club end and barely at all on ambient.",
-         shared:["Four Tet","Overmono","DJ Python"],
-         sameShows:["Four Tet","Overmono","Yaeji"],
-         note:"Four Tet is #1 for both of you \u00B7 2 shared deep cuts: Priori, Skee Mask"},
-    /* From listening, weighted to now: deep house leads the last 90 days, nu metal
-       and shoegaze the last year, indie rock and dream pop run through both, and
-       trap is the all-time pillar at 2,681 hours. */
-    genres:["deep house","indie rock","dream pop","nu metal","shoegaze","trap"],
-    makes:"soundcloud.com/cjellok"
-  },
-  {
-    name:"Devin Ruiz", handle:"@dvnruiz", initials:"DR",
-    accent:"#4FD6C0", accentRGB:"79,214,192",
-    gen:"#7FA9FF", genRGB:"127,169,255",
-    bannerHues:[172,196,148,214], avatarHues:[168,200], artHue:160,
-    bio:"Sample profile. Every number here is invented - the computed ones on this app come from one real listener's 509k plays.",
-    aux:{tracks:"what i'd play you",artists:"the ones that stuck"},
-    stats:["842","511","79"],
-    badges:[
-      {t:"demo",l:"Sample profile"},
-      {t:"rank",l:"#1 Shoegaze \u00B7 UNC"},
-      {t:"rank",l:"#7 Trending"},
-      {t:"mile",l:"6,200 hrs"},
-      {t:"mile",l:"Since 2014"},
-      {t:"mile",l:"88 deep cuts"},
-      {t:"mile",l:"24 shows"},
-      {t:"mile",l:"Saw Wednesday at 40 cap"},
-      {t:"id",l:"UNC '27"}
-    ],
-    artists:[["Slowdive","366 plays"],["Duster","331 plays"],["Alvvays","302 plays"],["Beach House","288 plays"],["Wednesday","259 plays"],["My Bloody Valentine","231 plays"],["Cindy Lee","204 plays"],["Hotline TNT","182 plays"]],
-    tracks:[["Sugar for the Pill","Slowdive","212"],["Constellations","Duster","198"],["Bull Believer","Wednesday","176"],["Archie, Marry Me","Alvvays","160"],["Space Song","Beach House","151"]],
-    ug:{name:"Cindy Lee",sub:"You\u2019re 1 of 6 people at UNC listening.",foot:"Bottom 1.1% listener popularity \u00B7 your rarest artist this month"},
-    playlists:[["carrboro drive home","63 tracks"],["loud but sad","94 tracks"],["cat\u2019s cradle openers","41 tracks"],["tape hiss","77 tracks"],["dorm ceiling","58 tracks"],["for the drive back","46 tracks"],["cassette rips","52 tracks"],["november","38 tracks"],["guitars that sound like synths","61 tracks"]],
-    frame:"fr-double",
-    map:{l:"Ambient",r:"Noise",t:"Polished",b:"Lo-fi",gap:"0.61",
-         count:"3,410 tracks plotted",note:"0.61 apart \u00B7 closer than 45% of UNC",seed:771144,
-         clusters:[[.28,.32,.10,52,"dream pop"],[.22,.66,.09,44,"slowcore"],[.56,.46,.12,62,"shoegaze"],[.82,.64,.08,32,"noise rock"]],
-         you:[.44,.44],viewer:[.70,.66]},
-    sim:{pct:41,rank:"Top 40% of your matches",
-         cap:"Different ends of the map, but you meet in the middle on dream pop.",
-         shared:["Beach House","Alvvays"],
-         sameShows:["Alvvays"],
-         note:"Beach House is top 5 for both of you \u00B7 1 shared deep cut: Cindy Lee"},
-    genres:["shoegaze","slowcore","dream pop","noise rock","jangle","4AD"],
-    makes:"bandcamp.com/dvnruiz"
-  },
-  {
-    name:"Jules Amari", handle:"@julesamari", initials:"JA",
-    accent:"#FF4D6D", accentRGB:"255,77,109",
-    gen:"#E8B84B", genRGB:"232,184,75",
-    bannerHues:[350, 22, 8, 38], avatarHues:[348, 18], artHue:344,
-    bio:"Sample profile. Every number here is invented - the computed ones on this app come from one real listener's 509k plays.",
-    aux:{tracks:"if you ask me",artists:"the foundation"},
-    stats:["2,038","297","93"],
-    badges:[
-      {t:"demo",l:"Sample profile"},
-      {t:"rank",l:"#2 Jazz \u00B7 UNC"},
-      {t:"rank",l:"#4 Trending"},
-      {t:"mile",l:"14,800 hrs"},
-      {t:"mile",l:"Since 2012"},
-      {t:"mile",l:"1.2k deep cuts"},
-      {t:"mile",l:"61 shows"},
-      {t:"mile",l:"Pinhook regular"},
-      {t:"id",l:"UNC '26"},
-      {t:"id",l:"Makes music"}
-    ],
-    artists:[["MF DOOM","488 plays"],["Alice Coltrane","402 plays"],["Madlib","377 plays"],["Yussef Dayes","344 plays"],["Sault","310 plays"],["Pharoah Sanders","286 plays"],["Knxwledge","251 plays"],["Kassa Overall","218 plays"]],
-    tracks:[["Accordion","MF DOOM","241"],["Journey in Satchidananda","Alice Coltrane","203"],["Wings","Yussef Dayes","188"],["Wildflowers","Sault","174"],["Astral Traveling","Pharoah Sanders","162"]],
-    ug:{name:"Sam Gendel",sub:"You\u2019re 1 of 4 people at UNC listening.",foot:"Bottom 0.7% listener popularity \u00B7 your rarest artist this month"},
-    playlists:[["sunday morning, no lyrics","85 tracks"],["drum breaks only","120 tracks"],["records from nice price","52 tracks"],["practice room loops","44 tracks"],["basement tapes","67 tracks"],["horns only","39 tracks"],["for the kit","48 tracks"],["late night wxyc","57 tracks"],["stuff my dad played","31 tracks"]],
-    frame:"fr-thick",
-    map:{l:"Acoustic",r:"Electronic",t:"Instrumental",b:"Vocal",gap:"0.47",
-         count:"5,120 tracks plotted",note:"0.47 apart \u00B7 closer than 63% of UNC",seed:5150808,
-         clusters:[[.20,.38,.10,60,"spiritual jazz"],[.36,.68,.09,46,"soul"],[.62,.36,.11,58,"boom bap"],[.80,.62,.08,32,"broken beat"]],
-         you:[.40,.46],viewer:[.60,.34]},
-    sim:{pct:55,rank:"Top 18% of your matches",
-         cap:"Your electronic side and their sampling side land in the same place.",
-         shared:["Madlib","Sault","Knxwledge"],
-         sameShows:["Sault","MIKE"],
-         note:"You overlap most on boom bap \u00B7 3 shared deep cuts"},
-    genres:["spiritual jazz","boom bap","broken beat","soul","library music","free jazz"],
-    makes:"soundcloud.com/julesamari"
-  }
-];
+/* ---------- accounts ----------
+   Everyone here is a real account: you, and the friends who have signed in.
+   Profiles used to be three hand-written objects - this listener plus two
+   invented people - and every field on one is now either the person's own
+   (their saved profile document) or computed from their history (/api/card),
+   with a neutral default until it arrives.
+
+   Profile 0 is always you. The rest are everyone else, oldest account first. */
+var ME = null, SIGNED_IN = false, LOCAL_ONLY = false;
+/* Per account, by id: the computed card, the map, now playing, the streak. */
+var DATA = {};
+
+function initialsOf(name){
+  var parts = String(name || "?").trim().split(/\s+/);
+  return ((parts[0] || "?")[0] + ((parts[1] || "")[0] || "")).toUpperCase();
+}
+
+/* A neutral profile for an account, coloured from its id so two people never
+   arrive looking identical before either has chosen anything. */
+function profileFor(u){
+  var seed = seedOf(u.id || "x");
+  var accent = SWATCHES[seed % SWATCHES.length];
+  var genRGB = genFrom(accent).join(","), h = seed % 360;
+  return {
+    id: u.id, name: u.name || u.id, image: u.image || null,
+    handle: "@" + String(u.name || u.id).toLowerCase().replace(/[^a-z0-9._]+/g, ""),
+    initials: initialsOf(u.name || u.id),
+    accent: accent, accentRGB: hexRGB(accent).join(","),
+    gen: "rgb(" + genRGB + ")", genRGB: genRGB,
+    bannerHues: [h, (h + 26) % 360, (h + 264) % 360, (h + 336) % 360],
+    avatarHues: [h, (h + 68) % 360], artHue: (h + 120) % 360,
+    bio: "",
+    aux: { tracks: "tracks", artists: "artists" },
+    stats: ["\u2013", "\u2013", "\u2013"],
+    badges: [], genres: [], artists: [], tracks: [], playlists: [],
+    frame: "fr-thin", makes: "", sim: null, ug: null,
+    map: { l: "", r: "", t: "", b: "", count: "", note: "", seed: seed, clusters: [] }
+  };
+}
+
+/* Filled once SWATCHES exists - see the placeholder after loadLocal(). */
+var PROFILES = [];
+
+function uidOf(i){ return PROFILES[i] && PROFILES[i].id; }
+
+/* The same endpoint, about someone else. The server only honours ?user= on the
+   handful of read-only endpoints a profile is made of. */
+function asUser(url, i){
+  if(i === undefined) i = current;
+  if(i === 0 || !ME) return url;
+  return url + (url.indexOf("?") >= 0 ? "&" : "?") + "user=" + encodeURIComponent(uidOf(i));
+}
+
+function data(i){
+  var uid = uidOf(i === undefined ? current : i);
+  return DATA[uid] || (DATA[uid] = {});
+}
 
 /* Home is app-wide, not campus-scoped: at launch the whole community IS the
    campus, so a filter would do no work. `p` maps a row to a full profile, so
@@ -2357,17 +2321,7 @@ var HOME = {
   ],
   /* real Triangle venues: a fake show at a real room reads true, and it is
      the listen/going counts that make this section impossible to copy */
-  shows:[
-    {w:0,m:"nov",d:"14", dist:"1.4 mi", price:"$28", doors:"8:00 pm", friends:[1,3,5], dow:"fri",a:"Overmono",         v:"Cat\u2019s Cradle \u00B7 Carrboro",    listen:23, going:4,  av:[[262,330],[168,200],[348,18]]},
-    {w:1,m:"nov",d:"18", dist:"9.2 mi", price:"$22", doors:"8:30 pm", friends:[0,2,4,6], dow:"tue",a:"Nourished by Time",v:"Motorco Music Hall \u00B7 Durham",     listen:19, going:6,  av:[[196,286],[276,32],[142,208]]},
-    {w:1,m:"nov",d:"21", dist:"1.4 mi", price:"$18", doors:"8:00 pm", friends:[3,4,5,6], dow:"fri",a:"Wednesday",        v:"Cradle Back Room \u00B7 Carrboro",     listen:31, going:9,  av:[[196,286],[142,208],[14,320]]},
-    {w:2,m:"nov",d:"29", dist:"0.6 mi", price:"$20", doors:"9:00 pm", friends:[1,6], dow:"sat",a:"Jane Remover",     v:"Local 506 \u00B7 Chapel Hill",         listen:12, going:3,  av:[[168,200],[14,320]]},
-    {w:3,m:"dec",d:"02", dist:"9.2 mi", price:"$32", doors:"9:00 pm", friends:[2,5], dow:"tue",a:"Yaeji",            v:"Motorco Music Hall \u00B7 Durham",     listen:18, going:3,  av:[[348,18],[276,32]]},
-    {w:3,m:"dec",d:"06", dist:"9.8 mi", price:"$24", doors:"9:00 pm", friends:[0,3,4,5], dow:"sat",a:"Loraine James",    v:"The Pinhook \u00B7 Durham",            listen:16, going:7,  av:[[262,330],[196,286],[168,200]]},
-    {w:4,m:"dec",d:"09", dist:"0.6 mi", price:"$26", doors:"8:30 pm", friends:[1,4], dow:"tue",a:"Kelly Lee Owens",  v:"Local 506 \u00B7 Chapel Hill",         listen:11, going:2,  av:[[262,330],[142,208]]},
-    {w:4,m:"dec",d:"13", dist:"9.8 mi", price:"$25", doors:"8:00 pm", friends:[2,3,6], dow:"sat",a:"MIKE",             v:"The Pinhook \u00B7 Durham",            listen:14, going:5,  av:[[14,320],[276,32],[196,286]]},
-    {w:5,m:"dec",d:"19", dist:"26 mi", price:"$45", doors:"8:00 pm", friends:[0,1,2,4], dow:"fri",a:"Four Tet",         v:"The Ritz \u00B7 Raleigh",              listen:41, going:12, av:[[262,330],[168,200],[348,18]]}
-  ],
+  shows:[],
   /* Home's default tab is about you, because your own listening is the only
      thing that changes every day and is never empty at any user count. */
   you:{
@@ -2505,12 +2459,6 @@ function bokeh(cv, hues, seed, density){
    region carries the smallest zoom at which its label was measured to fit, so
    this filters on a number instead of running collision tests every frame. */
 var MAPDATA = null;
-/* Whether /api/map has answered, either way. Until it has, the owner's map is
-   left blank rather than filled with the generated one: drawing invented data
-   and swapping it for real data a moment later teaches the reader that the
-   picture is decorative. A blank frame for a second says "loading"; a fake map
-   that changes says nothing good. */
-var MAP_TRIED = false;
 /* Whether the map highlights the recent window. Off shows every artist at one
    weight, which is the honest fallback when a history has no recent plays. */
 var MAP_RECENT = true;
@@ -2811,11 +2759,54 @@ var PL_COLLAPSED = 6;
    localStorage. Every viewer customizes their own copy, so testing this costs
    nobody a photo upload. */
 var SWATCHES = ["#E74094","#FF9D2E","#4FD6C0","#7FA9FF","#C08BFF","#FFD84D"];
-var STORE = "musicshare-custom-v1";
+/* CUSTOM[i] is profile i's saved document. Only CUSTOM[0], yours, is ever
+   written; anyone else's is fetched to be looked at. The local copy is kept per
+   account, so two people signing in on one computer never share one. */
 var CUSTOM = {};
+var LEGACY_STORE = "musicshare-custom-v1";
+function storeKey(){ return "munity-custom-v2:" + (ME ? ME.id : "local"); }
 
-try { CUSTOM = JSON.parse(localStorage.getItem(STORE) || "{}") || {}; }
-catch(e){ CUSTOM = {}; }
+/* What this page said about its first listener before profiles were documents:
+   the bio, section labels, identity badges and link were written into the page
+   rather than saved, so removing the hand-written profile would have deleted
+   them. Carried into that listener's own document once, by toDoc() below, and
+   only for the document shape that predates accounts - nobody else's. */
+var LEGACY_OWNER = {
+  bio: "this is a bio about me and about the things that I do and whatnot and what I enjoy probably",
+  aux: { tracks: "my picks", artists: "My Favs" },
+  idBadges: ["UNC '27", "Makes music"],
+  makes: "soundcloud.com/cjellok"
+};
+
+/* One person's document, whatever shape it was stored in. Before accounts, the
+   whole page saved as one object keyed by profile position - {"0": yours, ...} -
+   and that is what the original listener's server copy still is. */
+function toDoc(stored){
+  if(!stored || typeof stored !== "object") return {};
+  if(stored["0"] && typeof stored["0"] === "object"){
+    var doc = Object.assign({}, stored["0"]);
+    if(stored.savedAt && !doc.savedAt) doc.savedAt = stored.savedAt;
+    Object.keys(LEGACY_OWNER).forEach(function(k){
+      if(doc[k] === undefined) doc[k] = LEGACY_OWNER[k];
+    });
+    return doc;
+  }
+  return stored;
+}
+
+/* This account's local copy. The pre-account copy under LEGACY_STORE is never
+   adopted: it belongs to whoever first used this browser, and a friend signing
+   in here would otherwise take it as their own and save it to their account.
+   Everything in it is already on the server, which is the record. */
+function loadLocal(){
+  var raw = null;
+  try { raw = JSON.parse(localStorage.getItem(storeKey()) || "null"); } catch(e){}
+  CUSTOM[0] = toDoc(raw);
+}
+
+/* Until the server says who you are, profile 0 is a placeholder, so the page can
+   draw immediately rather than wait on a request. */
+PROFILES = [profileFor({ id: "you", name: "You" })];
 
 /* Reconcile with the server once, at startup. Three cases and only the third
    needs a rule: the server has something and this browser does not, so adopt
@@ -2844,7 +2835,8 @@ function isInline(v){ return typeof v === "string" && v.slice(0, 5) === "data:";
 
 function migrateInline(){
   var jobs = [];
-  Object.keys(CUSTOM).forEach(function(pid){
+  /* Only your own document can hold an upload this page made. */
+  ["0"].forEach(function(pid){
     var c = CUSTOM[pid];
     if(!c || typeof c !== "object") return;
 
@@ -2864,7 +2856,7 @@ function migrateInline(){
   });
   if(!jobs.length) return Promise.resolve(false);
   return Promise.all(jobs).then(function(){
-    try { localStorage.setItem(STORE, JSON.stringify(CUSTOM)); } catch(e){}
+    try { localStorage.setItem(storeKey(), JSON.stringify(CUSTOM[0])); } catch(e){}
     return true;
   }).catch(function(){ return false; });
 }
@@ -2873,30 +2865,37 @@ function syncCustom(){
   return fetch("/api/profile")
     .then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
-      var remote = d && d.profile;
-      var mine = Object.keys(CUSTOM).filter(function(k){ return k !== "savedAt"; }).length;
+      var stored = d && d.profile;
+      var remote = stored ? toDoc(stored) : null;
+      var mine = CUSTOM[0] || {};
+      var have = Object.keys(mine).filter(function(k){ return k !== "savedAt"; }).length;
+      /* A document still in the pre-account shape is rewritten in the new one,
+         so the conversion happens once rather than on every load. */
+      var reshape = !!(stored && stored["0"]);
 
       if(!remote){
-        if(mine) pushCustom();
+        if(have) pushCustom();
         return false;
       }
-      if(!mine){                       /* nothing here to lose - take theirs */
-        CUSTOM = remote;
-        try { localStorage.setItem(STORE, JSON.stringify(CUSTOM)); } catch(e){}
+      if(!have){                       /* nothing here to lose - take theirs */
+        CUSTOM[0] = remote;
+        try { localStorage.setItem(storeKey(), JSON.stringify(remote)); } catch(e){}
+        if(reshape) pushCustom();
         return true;
       }
       /* Content saved before this browser started stamping has no savedAt, and
          treating that as zero makes it lose to anything on the server - which
          is precisely the profile someone spent an evening building. Unstamped
          local content wins and gets stamped on its way up. */
-      if(!CUSTOM.savedAt){ pushCustom(); return false; }
+      if(!mine.savedAt){ pushCustom(); return false; }
 
-      if((remote.savedAt || 0) > CUSTOM.savedAt){
-        CUSTOM = remote;
-        try { localStorage.setItem(STORE, JSON.stringify(CUSTOM)); } catch(e){}
+      if((remote.savedAt || 0) > mine.savedAt){
+        CUSTOM[0] = remote;
+        try { localStorage.setItem(storeKey(), JSON.stringify(remote)); } catch(e){}
+        if(reshape) pushCustom();
         return true;
       }
-      if(CUSTOM.savedAt > (remote.savedAt || 0)) pushCustom();
+      if(mine.savedAt > (remote.savedAt || 0) || reshape) pushCustom();
       return false;
     })
     .catch(function(){ return false; });
@@ -2920,7 +2919,8 @@ function pushCustom(){
     fetch("/api/profile", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(CUSTOM)
+      /* Yours and only yours - the server writes whoever is signed in anyway. */
+      body: JSON.stringify(CUSTOM[0] || {})
     }).catch(function(){ /* no server: the local copy is still the truth */ });
   }, 600);
 }
@@ -2930,9 +2930,10 @@ function saveCustom(){
      right - the session still works and the stake is low. For an uploaded image
      it is not: the user watches it appear, believes it is saved, and finds it
      gone. Callers that can lose real work check the answer. */
-  CUSTOM.savedAt = Date.now();
+  var mine = CUSTOM[0] || (CUSTOM[0] = {});
+  mine.savedAt = Date.now();
   var ok;
-  try { localStorage.setItem(STORE, JSON.stringify(CUSTOM)); ok = true; }
+  try { localStorage.setItem(storeKey(), JSON.stringify(mine)); ok = true; }
   catch(e){ ok = false; }
   pushCustom();
   return ok;
@@ -3042,6 +3043,9 @@ function render(i){
   var p = PROFILES[i];
   current = i;
   var c = CUSTOM[i] || {};
+  /* Whatever has arrived for this account so far; the rest fills in as it does. */
+  useMap(i);
+  useNow(i);
 
   var accent = c.accent || p.accent;
   var accentRGB = hexRGB(accent).join(",");
@@ -3073,6 +3077,12 @@ function render(i){
   }
 
   $("initials").textContent = p.initials;
+  /* No photo chosen: the account's own Spotify picture, before a gradient. */
+  if(!c.avatar && p.image){
+    av.classList.add("has-photo");
+    $("initials").hidden = true;
+    av.style.background = "url(" + p.image + ") center/cover no-repeat, #221B32";
+  }
   $("name").textContent = c.name || p.name;
   $("handle").textContent = p.handle;
   $("bio").textContent = c.bio || p.bio;
@@ -3080,6 +3090,9 @@ function render(i){
   $("s2").textContent = p.stats[1];
   $("s3").textContent = p.stats[2];
 
+  /* Computed from listening (see applyCard), plus the identity badges a person
+     writes about themselves, which live in their document. */
+  p.badges = (data(i).badges || []).concat((c.idBadges || []).map(function(l){ return { t: "id", l: l }; }));
   $("topGenres").innerHTML = p.genres.slice(0, 3).map(function(g, i){
     return '<button type="button" class="gen' + (i === 0 ? " gen-1" : "") + '">' + g + "</button>";
   }).join("");
@@ -3094,8 +3107,9 @@ function render(i){
 
   /* user-written, system-styled: the words are theirs, the treatment is fixed
      so the label rhythm survives whatever anyone types */
-  $("trackAux").textContent = p.aux.tracks;
-  $("artistAux").textContent = p.aux.artists;
+  var aux = c.aux || p.aux;
+  $("trackAux").textContent = aux.tracks;
+  $("artistAux").textContent = aux.artists;
 
   $("artists").className = "agrid " + (c.frame || p.frame);
   /* Tracks, artists and albums are drawn from pins first and the sample data
@@ -3110,11 +3124,18 @@ function render(i){
   var editing = document.body.classList.contains("editing");
   $("editBar").hidden = !(self && editing);
   $("actionsSelf").hidden = !self || editing;
-  $("actionsOther").hidden = self;
-  $("simSection").hidden = self;      /* you can't match with yourself */
-  $("reachSection").hidden = !self;   /* and nobody else sees your reach */
+  /* Following and messaging do not exist yet, and a Follow button that does
+     nothing on a real friend's profile is the same kind of thing as an
+     invented number. Shown again when there is something behind them. */
+  $("actionsOther").hidden = true;
+  $("signOut").hidden = !SIGNED_IN;
+  /* you can't match with yourself, and there is no real match to show yet */
+  $("simSection").hidden = self || !p.sim;
+  /* Followers, views and saves were invented - there are no follows yet. */
+  $("reachSection").hidden = true;
 
   var first = p.name.split(" ")[0];
+  if(p.sim){
   $("simLabel").textContent = "You & " + first;
   $("simRank").textContent = p.sim.rank;
   $("simPct").textContent = p.sim.pct + "%";
@@ -3133,23 +3154,24 @@ function render(i){
     : "");
 
   $("simNote").textContent = p.sim.note;
+  }
 
   renderShelf();
 
-  if(MAPDATA && self){
+  if(MAPDATA){
     $("mapAux").textContent = MAP_ARTISTS + " artists plotted";
     $("mapNote").textContent = MAP_YOURS + " of " + MAPDATA.regions.length + " regions";
   } else {
-    $("mapAux").textContent = p.map.count;
-    var top = p.map.clusters.slice().sort(function(a,b){ return b[3] - a[3]; })[0][4];
-    $("mapNote").textContent = self ? ("Your centre \u00B7 dense in " + top) : p.map.note;
+    /* No map for this account yet - no history uploaded, or still loading. */
+    $("mapAux").textContent = data(i).noHistory ? "No history yet" : "";
+    $("mapNote").textContent = "";
   }
   $("axL").textContent = p.map.l;
   $("axR").textContent = p.map.r;
 
   $("moreLabel").textContent = "More about " + p.name.split(" ")[0];
   $("genres").innerHTML = p.genres.map(function(g){ return '<span class="chip">' + g + "</span>"; }).join("");
-  $("makesLink").textContent = p.makes;
+  $("makesLink").textContent = c.makes || p.makes;
 
   paintNow();
   paintMood();
@@ -3167,12 +3189,13 @@ function paint(){
      banner tints the whole page rather than one strip of it */
   if(c.banner) wallFromImage(c.banner);
   else bokeh($("wall"), p.bannerHues, p.map.seed + 7, 16);
-  /* Real data only exists for the profile owner; the other three are demos. */
-  var realHere = !!MAPDATA && current === 0;
+  /* Real data exists for every account that has history; MAPDATA is the map of
+     whoever is being looked at. */
+  var realHere = !!MAPDATA;
   $("tasteMapBtn").classList.toggle("real", realHere);
   if(realHere){
     realMap($("tastemap"), false);
-  } else if(current === 0 && !MAP_TRIED){
+  } else if(!data().mapTried){
     blankMap($("tastemap"));            /* waiting, not pretending */
   } else {
     tasteMap($("tastemap"), p.map, p._accent, p._accentRGB, p._genRGB, false, "");
@@ -3198,7 +3221,7 @@ function wallFromImage(src){
 
 function paintFull(){
   var p = PROFILES[current];
-  var realHere = !!MAPDATA && current === 0;
+  var realHere = !!MAPDATA;
   $("mapZoom").hidden = !realHere;
   $("mapFull").classList.toggle("real", realHere);
   if(realHere){
@@ -3322,7 +3345,7 @@ function closeMap(focusBack){
     /* Dragging the map is not dragging the sheet. Without this, panning left or
        right also hauled the whole dialog downward, and the sheet's pointer
        capture swallowed the release the map was waiting for. */
-    if(e.target.id === "mapFullCanvas" && MAPDATA && current === 0) return;
+    if(e.target.id === "mapFullCanvas" && MAPDATA) return;
     startY = e.clientY; dy = 0;
     mf.classList.remove("snap");
     mf.setPointerCapture(e.pointerId);
@@ -3344,6 +3367,59 @@ function closeMap(focusBack){
   mf.addEventListener("pointerup", end);
   mf.addEventListener("pointercancel", end);
 })();
+
+/* Who you are and who else is here. Signed out on the public app, `user` is
+   null and the sign-in screen takes over; on a laptop the server answers as the
+   only account on disk, and says `local` so the two are never confused. */
+function loadAccounts(){
+  return fetch("/api/me").then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(me){
+      ME = me && me.user ? me.user : null;
+      SIGNED_IN = !!(me && me.signed_in);
+      LOCAL_ONLY = !!(me && me.local);
+      if(!ME) return null;
+      return fetch("/api/users").then(function(r){ return r.ok ? r.json() : null; });
+    })
+    .then(function(list){
+      if(!ME) return;
+      var others = ((list && list.users) || []).filter(function(u){ return u.id !== ME.id; });
+      PROFILES = [profileFor(ME)].concat(others.map(profileFor));
+      loadLocal();
+      renderPeople();
+    })
+    .catch(function(){});
+}
+
+/* Signed out where the app is public: the one screen there is. What went wrong
+   with a sign-in arrives as ?login=, and is said in words a person can act on. */
+var LOGIN_SAYS = {
+  notallowed: "This Spotify account isn\u2019t on the list yet. Ask whoever invited you " +
+              "to add the email on your Spotify account, then try again.",
+  failed: "Signing in didn\u2019t finish. Try again.",
+  cancelled: "Signing in was cancelled."
+};
+
+function showSignIn(){
+  var why = new URLSearchParams(location.search).get("login");
+  var say = LOGIN_SAYS[why];
+  $("signinNote").hidden = !say;
+  if(say) $("signinNote").textContent = say;
+  $("signin").hidden = false;
+  $("people").hidden = true;
+  document.body.style.overflow = "hidden";
+}
+
+$("signOut").addEventListener("click", function(){
+  fetch("/api/auth/logout", { method: "POST" })
+    .finally(function(){ location.href = "/"; });
+});
+
+function renderPeople(){
+  $("people").innerHTML = '<span class="lab">People</span>' + PROFILES.map(function(p, i){
+    return '<button type="button" data-p="' + i + '" aria-pressed="' + (i === current) + '">' +
+      esc(i === 0 ? "You" : p.name.split(" ")[0]) + "</button>";
+  }).join("");
+}
 
 document.querySelector(".demo").addEventListener("click", function(e){
   var b = e.target.closest("button[data-p]");
@@ -3376,6 +3452,7 @@ var goingSet = {};       /* survives the re-render a toggle causes */
    Derived deterministically from the show so the same faces appear in the row's
    avatar stack and in the list, and never shuffle between renders. */
 function attendees(s){
+  if(!s.going) return [];
   if(s._att) return s._att;
   var seed = 0, k = s.a + s.d;
   for(var c = 0; c < k.length; c++) seed = (seed * 31 + k.charCodeAt(c)) >>> 0;
@@ -3459,6 +3536,7 @@ function famOk(s, want){
    beside it, so scrolling reads as moving through a calendar. */
 function renderTimeline(){
   var html = "", lastMonth = null;
+  if(!HOME.shows.length) html = '<div class="emptynote">' + SHOWS_EMPTY + "</div>";
   HOME.shows.slice(0, shownShows).forEach(function(s){
     if(s.m !== lastMonth){
       html += '<div class="vt-month"><b>' + s.m + "</b><i></i></div>";
@@ -3481,8 +3559,10 @@ function renderTimeline(){
           '<div class="vt-sub"><span class="vt-ven">' + esc(s.v) + "</span>" +
             (s.dist ? '<span class="vt-mi">' + esc(s.dist) + "</span>" : "") +
             (FAM_LABEL[s.fam] ? '<span class="vt-fam">' + FAM_LABEL[s.fam] + "</span>" : "") + "</div>" +
-          '<div class="vt-go"><span class="stack">' + stack + "</span>" +
-            '<span class="sgo"><b data-going>' + (s.going + (on ? 1 : 0)) + "</b> going \u00B7 " + s.listen + " listen here</span></div>" +
+          (s.going || s.listen
+            ? '<div class="vt-go"><span class="stack">' + stack + "</span>" +
+              '<span class="sgo"><b data-going>' + (s.going + (on ? 1 : 0)) + "</b> going \u00B7 " + s.listen + " listen here</span></div>"
+            : "") +
           '<button class="sbtn vt-btn" type="button" data-k="' + key + '" aria-pressed="' + on + '">' +
             (on ? "Going \u2713" : "Going") + "</button>" +
         "</div>" +
@@ -3541,10 +3621,11 @@ function apiShow(x){
     dist: x.distance_mi != null ? x.distance_mi + " mi" : "",
     price: x.price_min ? "$" + x.price_min + (x.price_max && x.price_max !== x.price_min ? "-" + x.price_max : "") : "",
     doors: x.time ? fmtDoors(x.time) : "",
-    friends: friends, going: going, av: av,
-    /* "N listen here" is the one social number the local history can ground:
-       it stands in for the campus until there is a campus. */
-    listen: x.your_plays ? Math.min(99, Math.round(x.your_plays / 4) + 3) : 3 + Math.floor(rnd() * 20),
+    /* Who is going, and how many people here play the artist, were generated -
+       random faces from invented people on real gigs. Zero until each is
+       counted from the accounts that exist; the row then says nothing. */
+    friends: [], going: 0, av: [],
+    listen: 0,
     img: x.image,
     hours: x.your_hours,
     yours: x.yours,
@@ -3754,6 +3835,7 @@ function homePolling(){
 }
 
 var showsLoaded = false;
+var SHOWS_EMPTY = "Loading shows...";
 function loadShows(){
   if(showsLoaded) return;
   showsLoaded = true;
@@ -3765,12 +3847,13 @@ function loadShows(){
     ALL_SHOWS = d.shows.map(apiShow);
     applyShowFilter();
   }).catch(function(){
-    /* No server (the published Artifact). Keep the generated shows and let the
-       filter work on those instead, so the control is never inert. */
-    ALL_SHOWS = HOME.shows.map(function(s){
-      if(s.mi == null) s.mi = parseFloat(s.dist);
-      return s;
-    });
+    /* Invented shows used to stand in here, for a published copy with no server.
+       With real people on the app that would put made-up gigs in front of them,
+       so a failure says what it is instead. */
+    SHOWS_EMPTY = data(0).noHistory
+      ? "Shows are matched to what you play - upload your listening history to see them."
+      : "Shows could not be loaded right now.";
+    ALL_SHOWS = [];
     applyShowFilter();
   });
 }
@@ -3999,42 +4082,10 @@ function renderYou(){
 var actFilter = "all";
 
 function renderActivity(){
-  var list = HOME.activity.filter(function(e){ return actFilter === "all" || e.f; });
-  var html = "", group = null;
-
-  list.forEach(function(e){
-    if(e.g !== group){ html += '<div class="k act-group">' + e.g + "</div>"; group = e.g; }
-    var q = PEOPLE[e.p], name = "<b>" + q.n + "</b>";
-    var text, thumb, sub = e.ago + (e.v ? " \u00B7 " + e.v : "");
-
-    if(e.k === "show"){
-      text = name + " is going to <b>" + e.x + "</b>";
-      thumb = '<span class="act-th circle"><span class="art" style="' + artStyle(e.x, 200) + '"></span></span>';
-    } else if(e.k === "was"){
-      text = name + " was at <b>" + e.x + "</b>";
-      thumb = '<span class="act-th circle"><span class="art" style="' + artStyle(e.x, 200) + '"></span></span>';
-    } else if(e.k === "playlist"){
-      text = name + " made <b>" + e.x + "</b>";
-      thumb = '<span class="act-th"><span class="art" style="' + artStyle(e.x, 280) + '"></span></span>';
-    } else if(e.k === "artist"){
-      text = name + " added <b>" + e.x + "</b> to their top 8";
-      thumb = '<span class="act-th circle"><span class="art" style="' + artStyle(e.x, 200) + '"></span></span>';
-    } else if(e.k === "rank"){
-      text = name + " hit <b>" + e.x + "</b>";
-      thumb = '<span class="act-th chip">#' + e.n + "</span>";
-    } else {
-      var w = PEOPLE[e.who];
-      text = name + " followed <b>" + e.x + "</b>";
-      thumb = '<span class="act-th circle"><span class="art" style="background:' + avatarCSS(w.h) + '"></span></span>';
-    }
-
-    html += '<div class="act" tabindex="0" role="button" data-p="' + q.p + '">' +
-      '<span class="pav"><span style="background:' + avatarCSS(q.h) + '">' + q.i + "</span></span>" +
-      '<span class="act-m"><span class="act-t">' + text + '</span>' +
-      '<span class="act-s">' + sub + "</span></span>" + thumb + "</div>";
-  });
-
-  $("actList").innerHTML = html;
+  /* There is no record of what anyone here has done yet - the feed this drew
+     was written by hand. Until there is, say so rather than invent one. */
+  $("actList").innerHTML = '<div class="emptynote">When the people here go to a show or ' +
+    "make a playlist, it shows up here. Nothing yet.</div>";
 }
 
 /* Under this, a week is the same week: 829 plays against 815 is not a trend,
@@ -4055,14 +4106,37 @@ function trend(id, now, before){
   el.title = before + " last week";
 }
 
+/* Everyone with an account, as a row that opens their profile. */
+function accountRow(p, i){
+  var av = p.image
+    ? '<span style="background:url(' + p.image + ') center/cover no-repeat,#221B32"></span>'
+    : '<span style="background:' + avatarCSS(p.avatarHues) + '">' + esc(p.initials) + "</span>";
+  var sub = p.genres.length ? p.genres.slice(0, 2).join(" \u00B7 ")
+          : (i === 0 ? "you" : "joined");
+  return '<button class="prow" type="button" data-p="' + i + '">' +
+    '<span class="pav">' + av + "</span>" +
+    '<span class="pmeta"><span class="pname">' + esc(i === 0 ? p.name + " (you)" : p.name) + "</span>" +
+    '<span class="psub">' + esc(sub) + "</span></span></button>";
+}
+
+function renderCommunity(){
+  $("peopleList").innerHTML = PROFILES.map(accountRow).join("");
+  $("peopleAux").textContent = PROFILES.length + (PROFILES.length === 1 ? " person" : " people");
+  /* Matches, rankings and who-is-going were written by hand for a social graph
+     that did not exist. Hidden rather than shown with real names on invented
+     numbers, until each one is computed from people who are actually here. */
+  ["closeList", "riseList", "climbList", "goingList"].forEach(function(id){
+    var sec = $(id).closest("section");
+    if(sec) sec.hidden = true;
+  });
+}
+
 function renderHome(){
   renderYou();
   renderActivity();
-  $("closeList").innerHTML = HOME.close.map(personRow).join("");
-  $("climbList").innerHTML = HOME.climb.map(personRow).join("");
+  renderCommunity();
 
   renderTimeline();
-  $("goingList").innerHTML = HOME.matchesGoing.map(personRow).join("");
 
   $("riseList").innerHTML = HOME.rise.map(function(a){
     return '<div class="rise" tabindex="0" role="button">' +
@@ -4245,7 +4319,7 @@ function paintYou(){
     realMap($("movemap"), false);
     $("mvNote").textContent = MAP_ARTISTS.toLocaleString() + " artists \u00B7 " +
       MAP_YOURS + " regions";
-  } else if(!MAP_TRIED){
+  } else if(!data(0).mapTried){
     btn.classList.remove("real");
     blankMap($("movemap"));
     $("mvNote").textContent = "Loading your map...";
@@ -4314,6 +4388,8 @@ function showScreen(which){
 function openProfile(i){
   render(i);
   showScreen("profile");
+  if(i !== 0) loadAccount(i);
+  renderPeople();
 }
 
 document.addEventListener("click", function(e){
@@ -4358,7 +4434,10 @@ function searchMode(on){
   $("tabGlobal").hidden = community;
 }
 
-function runSearch(){
+/* Named apart from the pin picker's runSearch further down. Both were called
+   runSearch, and a later function declaration replaces an earlier one, so this
+   box had been running the picker's catalogue search instead of finding people. */
+function runPeopleSearch(){
   var q = $("searchInput").value.trim().toLowerCase();
   var showing = q.length > 0;
   $("searchResults").hidden = !showing;
@@ -4366,27 +4445,21 @@ function runSearch(){
   $("tabCommunity").hidden = true;
   $("tabGlobal").hidden = true;
 
-  var hits = PEOPLE.map(function(q2, i){ return {q:q2, i:i}; })
-    .filter(function(r){ return r.q.n.toLowerCase().indexOf(q) !== -1; });
+  var hits = PROFILES.map(function(prof, i){ return { p: prof, i: i }; })
+    .filter(function(r){ return r.p.name.toLowerCase().indexOf(q) !== -1; });
 
   if(!hits.length){
     $("searchList").innerHTML = '<div class="search-empty">No one here by that name.</div>';
     return;
   }
 
-  $("searchList").innerHTML = hits.map(function(r){
-    var prof = PROFILES[r.q.p];
-    return '<button class="prow" type="button" data-p="' + r.q.p + '">' +
-      '<span class="pav"><span style="background:' + avatarCSS(r.q.h) + '">' + r.q.i + "</span></span>" +
-      '<span class="pmeta"><span class="pname">' + r.q.n + "</span>" +
-      '<span class="psub">' + prof.genres.slice(0, 2).join(" \u00B7 ") + "</span></span>" +
-      '<span class="pnum"><b>' + (40 + (r.i * 7) % 45) + "%</b><s>match</s></span></button>";
-  }).join("");
+  /* No match percentage: it was a formula on the row number, not a measurement. */
+  $("searchList").innerHTML = hits.map(function(r){ return accountRow(r.p, r.i); }).join("");
 }
 
 $("discoverSearch").addEventListener("click", function(){ searchMode(true); });
 $("searchCancel").addEventListener("click", function(){ searchMode(false); });
-$("searchInput").addEventListener("input", runSearch);
+$("searchInput").addEventListener("input", runPeopleSearch);
 $("tabShows").addEventListener("click", function(){ showScreen("shows"); });
 $("tabActivity").addEventListener("click", function(){ showScreen("activity"); });
 
@@ -5060,30 +5133,39 @@ var MAP_ARTISTS = 0, MAP_YOURS = 0;
    generated map is what is on screen - which is why this repaints rather than
    waiting: a blank square while 400KB loads is worse than a placeholder that is
    replaced. */
-function loadMap(){
+/* The map of whoever is being looked at. The territory is everyone's; the dots
+   on it are one listener's, so each account's is fetched and kept separately. */
+function useMap(i){
+  var d = data(i).map || null;
+  MAPDATA = d;
+  MAP_ARTISTS = d ? d.artists.length : 0;
+  MAP_YOURS = d ? d.regions.filter(function(r){ return r.yours; }).length : 0;
+}
+
+function loadMap(i){
+  if(i === undefined) i = 0;
   var cv = $("tastemap");
   var px = Math.round((cv && cv.clientWidth) || 360);
-  $("mapAux").textContent = "Loading...";
-  fetch("/api/map?view_px=" + px).then(function(r){
+  var slot = data(i);
+  if(i === current) $("mapAux").textContent = "Loading...";
+  fetch(asUser("/api/map?view_px=" + px, i)).then(function(r){
+    if(r.status === 409){ slot.noHistory = true; return null; }
     if(!r.ok) throw new Error(r.status);
     return r.json();
   }).then(function(d){
-    MAP_TRIED = true;
-    if(!d || !d.artists || !d.artists.length){ render(current); return; }
-    MAPDATA = d;
-    MAP_ARTISTS = d.artists.length;
-    MAP_YOURS = d.regions.filter(function(r){ return r.yours; }).length;
-    $("mvTitle").textContent = "Your taste map";
-    $("mvAux").textContent = "All time";
-    render(current);
-    if(!$("screenHome").hidden) paintYou();
+    slot.mapTried = true;
+    if(d && d.artists && d.artists.length) slot.map = d;
+    if(i === 0 && slot.map){
+      $("mvTitle").textContent = "Your taste map";
+      $("mvAux").textContent = "All time";
+    }
+    if(i === current) render(current);
+    if(i === 0 && !$("screenHome").hidden) paintYou();
   }).catch(function(){
-    /* No server, or nothing fitted yet - the published Artifact has neither. The
-       generated map is the right fallback there, so this is the one path that
-       still draws it. */
-    MAP_TRIED = true;
-    render(current);
-    if(!$("screenHome").hidden) paintYou();
+    /* No server, or nothing fitted yet - the published Artifact has neither. */
+    slot.mapTried = true;
+    if(i === current) render(current);
+    if(i === 0 && !$("screenHome").hidden) paintYou();
   });
 }
 
@@ -5091,14 +5173,14 @@ $("mzIn").addEventListener("click", function(){ mapZoomBy(1.7); });
 $("mzOut").addEventListener("click", function(){ mapZoomBy(1 / 1.7); });
 
 $("mapFullCanvas").addEventListener("wheel", function(e){
-  if(!MAPDATA || current !== 0) return;
+  if(!MAPDATA) return;
   e.preventDefault();
   mapZoomBy(e.deltaY < 0 ? 1.16 : 1 / 1.16);
 }, { passive: false });
 
 var mapDrag = null;
 $("mapFullCanvas").addEventListener("pointerdown", function(e){
-  if(!MAPDATA || current !== 0) return;
+  if(!MAPDATA) return;
   mapDrag = { x: e.clientX, y: e.clientY };
 });
 /* On the window, not the canvas. A release outside the canvas - or one consumed
@@ -5153,7 +5235,7 @@ function moodArt(state){
 
 function paintMood(){
   var img = $("moodGif");
-  var art = current === 0 ? moodArt(MOOD_STATE) : null;
+  var art = moodArt(MOOD_STATE);
   if(art){ img.src = art; img.hidden = false; }
   else { img.removeAttribute("src"); img.hidden = true; }
 }
@@ -5215,10 +5297,8 @@ $("moodGrid").addEventListener("change", function(e){
 
 function paintNow(){
   var row = $("nowRow");
-  /* The row only ever hides on someone else's profile, where there is no player
-     to report on. On the owner's it always says something: playing, paused, or
-     not listening. */
-  if(current !== 0){ row.hidden = true; return; }
+  /* Every account has a player to report on - their token is theirs - so the
+     row always says something: playing, paused, or not listening. */
   row.hidden = false;
 
   var art = $("nowArt");
@@ -5250,43 +5330,89 @@ function loadNow(){
      hidden - and skipping the first fetch left the status blank until a
      visibility change that may never come. What a hidden tab should not do is
      keep asking every twenty seconds, which is nowPolling's job. */
-  fetch("/api/now").then(function(r){ return r.ok ? r.json() : null; })
+  var i = current, slot = data(i);
+  fetch(asUser("/api/now", i)).then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
-      NOW = d && d.now ? d.now : null;
-      if(d && d.last) LASTPLAY = d.last;
-      MOOD_STATE = (d && d.state) || "sleeping";
+      slot.now = d && d.now ? d.now : null;
+      if(d && d.last) slot.last = d.last;
+      slot.state = (d && d.state) || "sleeping";
+      if(i !== current) return;   /* moved to another profile while this was out */
+      useNow(i);
       paintNow();
       paintMood();
     })
-    .catch(function(){ NOW = null; paintNow(); });
+    .catch(function(){
+      slot.now = null;
+      if(i === current){ useNow(i); paintNow(); }
+    });
 }
 
-/* The one badge that moves by the day, so it is asked for rather than written
-   down. Only the owner's profile has it; the sample profiles are made up.
-   A broken streak takes the badge off rather than bragging about zero, and it
-   goes back in the same slot once a new run starts. */
-var STREAK_BADGES = PROFILES[0].badges;
-var STREAK_AT = STREAK_BADGES.findIndex(function(x){ return x.live === "streak"; });
-var STREAK_BADGE = STREAK_BADGES[STREAK_AT];
+/* What is playing for whoever is being looked at - everyone's token is theirs. */
+function useNow(i){
+  var slot = data(i);
+  NOW = slot.now || null;
+  LASTPLAY = slot.last || null;
+  MOOD_STATE = slot.state || "sleeping";
+}
 
-function loadStreak(){
-  if(!STREAK_BADGE) return;
-  fetch("/api/streak").then(function(r){ return r.ok ? r.json() : null; })
+/* The facts at the top of a profile, measured from that person's history. They
+   used to be written into the page for one listener; now they are the same
+   measurements made for anyone. The streak is the one that moves by the day, and
+   a broken one comes off rather than bragging about zero. */
+function loadCard(i){
+  if(i === undefined) i = current;
+  var slot = data(i);
+  Promise.all([
+    fetch(asUser("/api/card", i)).then(function(r){
+      if(r.status === 409) slot.noHistory = true;
+      return r.ok ? r.json() : null;
+    }),
+    fetch(asUser("/api/streak", i)).then(function(r){ return r.ok ? r.json() : null; })
+  ]).then(function(res){
+    applyCard(i, res[0], res[1]);
+    if(i === current) render(current);
+  }).catch(function(){});
+}
+
+function applyCard(i, card, streak){
+  var p = PROFILES[i], b = [];
+  if(card){
+    p.stats = [Math.round(card.hours).toLocaleString(), card.plays.toLocaleString(),
+               card.artists.toLocaleString()];
+    p.genres = card.genres || [];
+    if(card.hours >= 1000) b.push({ t: "mile", l: (Math.floor(card.hours / 1000) * 1000).toLocaleString() + "+ hrs" });
+    else if(card.hours >= 1) b.push({ t: "mile", l: Math.round(card.hours) + " hrs" });
+    /* Plays that reached 30 seconds - the rule every screen counts by. */
+    if(card.plays >= 1000) b.push({ t: "mile", l: Math.floor(card.plays / 1000) + "k plays" });
+  }
+  if(streak && streak.days > 0)
+    b.push({ t: "mile", l: streak.days.toLocaleString() + "-day streak", live: "streak" });
+  if(card && card.genres_year) b.push({ t: "mile", l: card.genres_year + " genres this year" });
+  if(card && card.since) b.push({ t: "mile", l: "Since " + card.since });
+  data(i).badges = b;
+}
+
+/* A friend's saved profile: theirs to write, yours to look at. */
+function loadDoc(i){
+  fetch(asUser("/api/profile", i)).then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
-      if(!d || d.days == null) return;
-      var at = STREAK_BADGES.indexOf(STREAK_BADGE);
-      var label = d.days.toLocaleString() + "-day streak";
-      if(d.days === 0){
-        if(at < 0) return;
-        STREAK_BADGES.splice(at, 1);
-      } else {
-        if(at >= 0 && STREAK_BADGE.l === label) return;
-        STREAK_BADGE.l = label;
-        if(at < 0) STREAK_BADGES.splice(STREAK_AT, 0, STREAK_BADGE);
-      }
-      if(current === 0) render(0);
-    })
-    .catch(function(){});
+      CUSTOM[i] = toDoc(d && d.profile);
+      if(i === current) render(current);
+    }).catch(function(){});
+}
+
+/* Everything a profile is made of, for one account. Fetched when the profile is
+   opened, and again only once it is a minute old - now-playing is the one part
+   that is worth asking for every time. */
+function loadAccount(i){
+  var slot = data(i);
+  if(slot.loadedAt && Date.now() - slot.loadedAt < 60000){ loadNow(); return; }
+  slot.loadedAt = Date.now();
+  loadDoc(i);
+  loadCard(i);
+  loadPlaylists(i);
+  loadMap(i);
+  loadNow();
 }
 
 function nowPolling(on){
@@ -5300,7 +5426,7 @@ function nowPolling(on){
 
 document.addEventListener("visibilitychange", function(){
   if(document.hidden) nowPolling(false);
-  else { loadNow(); loadStreak(); nowPolling(true); }
+  else { loadNow(); loadCard(); nowPolling(true); }
 });
 
 /* Real playlists, for the owner only. Spotify allows a listener their own
@@ -5332,16 +5458,20 @@ function refreshPlaylistPins(live){
   return changed;
 }
 
-function loadPlaylists(){
-  fetch("/api/playlists").then(function(r){ return r.ok ? r.json() : null; })
+function loadPlaylists(i){
+  if(i === undefined) i = 0;
+  fetch(asUser("/api/playlists", i)).then(function(r){ return r.ok ? r.json() : null; })
     .then(function(d){
       if(!d || !d.playlists || !d.playlists.length) return;
-      ALL_PLAYLISTS = d.playlists;
-      PROFILES[0].playlists = d.playlists.map(function(p){
+      /* The picker offers only your own playlists to pin. */
+      if(i === 0){
+        ALL_PLAYLISTS = d.playlists;
+        refreshPlaylistPins(d.playlists);
+      }
+      PROFILES[i].playlists = d.playlists.map(function(p){
         return [p.name, p.tracks + (p.tracks === 1 ? " track" : " tracks"), p.image, p.id];
       });
-      refreshPlaylistPins(d.playlists);
-      if(current === 0) render(0);
+      if(i === current) render(current);
     }).catch(function(){});
 }
 
@@ -5409,7 +5539,7 @@ function openPlaylist(i){
        time, so a 3,600-song playlist would be 72 requests to open. 200 is the
        most the server will page through - and the sheet now says when there is
        more, where it used to stop at 60 without a word. */
-    return fetch("/api/playlists/" + encodeURIComponent(x[3]) + "/tracks?limit=" + PL_PREVIEW)
+    return fetch(asUser("/api/playlists/" + encodeURIComponent(x[3]) + "/tracks?limit=" + PL_PREVIEW))
       .then(function(r){ return r.ok ? r.json() : null; })
       .then(function(d){
         var rows = (d && d.tracks) || [];
@@ -6504,30 +6634,42 @@ document.addEventListener("keydown", function(e){
   else if(document.body.classList.contains("editing")) setEditing(false);
 });
 
+loadLocal();
 renderHome();
 render(0);
-loadMap();
-loadNow();
-loadStreak();
-nowPolling(true);
-homePolling();
-loadPlaylists();
 showScreen("home");
-if(location.hash === "#chart-gallery") showChartGallery();
 
-/* After the first paint, not before it: the local copy is almost always the
-   right one and waiting on a request to draw anything would trade a correct
-   screen now for the same screen later. When the server turns out to hold
-   something newer, this repaints. */
-migrateInline().then(function(moved){
-  if(moved) render(current);
-  return syncCustom();
-}).then(function(adopted){
-  if(!adopted) return;
-  render(current);
-  renderHomeCharts();
-  paintMood();
-  if(!$("custWrap").hidden) syncSheet();
+/* Who is signed in decides whose everything this is, so it is asked first. The
+   page above is a placeholder for the time that takes. */
+loadAccounts().then(function(){
+  if(!ME){ showSignIn(); return; }
+  /* A sign-in that just finished, or failed while a session survived it: either
+     way the message has been seen, so a reload should not say it again. */
+  if(location.search.indexOf("login=") >= 0) history.replaceState(null, "", location.pathname);
+  renderHome();
+  render(0);
+  loadMap(0);
+  loadNow();
+  loadCard(0);
+  nowPolling(true);
+  homePolling();
+  loadPlaylists(0);
+  if(location.hash === "#chart-gallery") showChartGallery();
+
+  /* After the first paint, not before it: the local copy is almost always the
+     right one and waiting on a request to draw anything would trade a correct
+     screen now for the same screen later. When the server turns out to hold
+     something newer, this repaints. */
+  return migrateInline().then(function(moved){
+    if(moved) render(current);
+    return syncCustom();
+  }).then(function(adopted){
+    if(!adopted) return;
+    render(current);
+    renderHomeCharts();
+    paintMood();
+    if(!$("custWrap").hidden) syncSheet();
+  });
 });
 
 
