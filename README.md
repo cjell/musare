@@ -192,6 +192,11 @@ because my laptop is not online when I am walking around campus with headphones
 in. The decision logic is one pure function, so every transition (a skip, a
 repeat, a pause, a one-poll dropout) is tested by handing it two snapshots.
 
+Every account is captured the same way. Signing in hands the database that
+account's refresh token, kept in Vault under its own name, and each poll walks
+the accounts one at a time - so one revoked token is an error on that account's
+status row, not a gap in everyone's history.
+
 ---
 
 ## How I measure the language features

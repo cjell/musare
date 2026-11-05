@@ -1,9 +1,14 @@
 """The live side of listening history: what Supabase captured, and what is on now.
 
 Plays since the export are recorded inside Supabase by `supabase/capture.sql`,
-which asks Spotify what is playing every 30 seconds and writes a play when the
-track changes. This module copies those rows into local Parquet beside the
-export, so every query in the app stays a DuckDB read over files.
+which asks Spotify what is playing for every enrolled account every 10 seconds
+and writes a play when the track changes. This module copies each account's rows
+into its own local Parquet beside its export, so every query in the app stays a
+DuckDB read over files.
+
+An account is enrolled when it signs in: the refresh token that sign-in produced
+goes into Supabase's Vault under that account's id, and from then on the
+database captures it whether or not anyone has the app open.
 
 It used to poll recently-played from this machine instead. That had two faults,
 and the second was fatal: it only ran while the laptop was awake and online,
@@ -44,24 +49,24 @@ def token_path(uid: str | None = None) -> Path:
     return users.path(uid) / "token.json"
 
 
-def capture_user() -> str | None:
-    """The one account Supabase capture records, until capture is per-user.
+def captured(uid: str | None) -> bool:
+    """Whether Supabase capture records this account.
 
-    The watcher still holds a single refresh token and writes plays with no user
-    on them, so every pulled row belongs to that one account. Pulling into
-    whoever happens to be asking would copy one person's listening into
-    another's history; this names the account instead, from its own record.
+    Set on the account's record when enrolment succeeds, so an account whose
+    enrolment failed - no database configured, the database unreachable - is
+    never pulled for, and its page does not report a capture that is not there.
     """
-    for uid in users.all_ids():
-        if (users.load(uid) or {}).get("captured"):
-            return uid
-    return None
+    return bool(uid) and bool((users.load(uid) or {}).get("captured"))
 
 
-# A page may cost a database round trip this often. The watcher writes at most
-# every 30 seconds, so pulling more often only reads the same rows again.
+def captured_users() -> list[str]:
+    return [uid for uid in users.all_ids() if captured(uid)]
+
+
+# A page may cost a database round trip this often, per account. A song is
+# minutes long, so pulling more often mostly reads the same rows again.
 PULL_EVERY = timedelta(seconds=60)
-# The watcher polls every 30 seconds; not succeeding for this long is ten
+# The watcher polls every 10 seconds; not succeeding for this long is thirty
 # missed polls, which is a stopped job rather than a slow one.
 STALE_AFTER = timedelta(minutes=5)
 # How far behind the newest local play a pull re-reads. Rows can change after
@@ -177,10 +182,12 @@ class PullResult:
         return ok is None or datetime.now(UTC) - ok > STALE_AFTER
 
 
-def watch_status(con, job: str = "watch") -> dict[str, Any] | None:
+def watch_status(con, job: str = "watch", uid: str = "") -> dict[str, Any] | None:
+    """How one job is doing for one account. '' is a job about no account, like the keepalive."""
     row = con.execute(
-        "select last_run_at, last_ok_at, last_error, runs, added from listen.status where job = %s",
-        [job],
+        "select last_run_at, last_ok_at, last_error, runs, added from listen.status"
+        " where job = %s and user_id = %s",
+        [job, uid],
     ).fetchone()
     if not row:
         return None
@@ -189,25 +196,6 @@ def watch_status(con, job: str = "watch") -> dict[str, Any] | None:
 
 def _naive_utc(ts: datetime) -> datetime:
     return ts.astimezone(UTC).replace(tzinfo=None) if ts.tzinfo else ts
-
-
-def local_rows(after: datetime | None = None, uid: str | None = None) -> list[dict[str, Any]]:
-    """Live rows held locally, past the export and past `after` if given."""
-    uid = uid or capture_user()
-    if not uid or not has_live(uid):
-        return []
-    where = []
-    if has_export(uid):
-        where.append(f"played_at > (select max(played_at) from read_parquet('{export_glob(uid)}'))")
-    if after:
-        where.append(f"played_at > timestamp '{after:%Y-%m-%d %H:%M:%S}'")
-    sql = (
-        f"select {', '.join(COLUMNS)} from read_parquet('{(live_dir(uid) / '*.parquet').as_posix()}')"
-        + (f" where {' and '.join(where)}" if where else "")
-        + " order by played_at"
-    )
-    cur = duckdb.connect().execute(sql)
-    return [dict(zip(COLUMNS, r, strict=True)) for r in cur.fetchall()]
 
 
 def _first_day(uid: str) -> date | None:
@@ -298,26 +286,43 @@ def _as_arrow(rows: list[dict]):
     return pa.Table.from_pylist(rows, schema=schema)
 
 
-def pull() -> PullResult | None:
-    """Copy what the watcher has recorded into the captured account's store.
+def enroll(uid: str, refresh_token: str) -> bool:
+    """Start capturing an account, or hand capture a newer token for it.
 
-    None when no account is marked as the one capture records.
+    Best-effort, because signing in must not fail over it: without a database
+    the app still works from the uploaded history, and the next sign-in tries
+    again. Only a success marks the account as captured.
     """
-    uid = capture_user()
-    if not uid:
+    try:
+        with cloud() as con:
+            con.execute("select listen.enroll(%s, %s)", [uid, refresh_token])
+    except Exception as e:
+        log.warning("capture enrolment for %s failed: %s", uid, type(e).__name__)
+        return False
+    users.save({"id": uid, "captured": True})
+    return True
+
+
+def pull(uid: str | None = None) -> PullResult | None:
+    """Copy what the watcher has recorded for one account into its store.
+
+    None when capture does not record that account.
+    """
+    uid = uid or users.current()
+    if not captured(uid):
         return None
     first = _first_day(uid)
     with cloud() as con:
         cur = con.execute(
             f"""
             select {", ".join(COLUMNS)} from listen.plays
-            where %s::date is null or played_at >= %s::date
+            where user_id = %s and (%s::date is null or played_at >= %s::date)
             order by played_at
             """,
-            [first, first],
+            [uid, first, first],
         )
         rows = [dict(zip(COLUMNS, r, strict=True)) for r in cur.fetchall()]
-        watch = watch_status(con)
+        watch = watch_status(con, "watch", uid)
     for r in rows:
         r["played_at"] = _naive_utc(r["played_at"])
     changed = _store(rows, first, uid)
@@ -325,47 +330,57 @@ def pull() -> PullResult | None:
     return PullResult(len(rows), changed, newest, watch)
 
 
-_last_pull: tuple[float, PullResult] | None = None
-_pulling = threading.Lock()
+# Per account: one person's pull says nothing about whether another's is fresh.
+_last_pull: dict[str, tuple[float, PullResult]] = {}
+_pulling: dict[str, threading.Lock] = {}
+_locks = threading.Lock()
 
 
-def pull_if_stale(every: timedelta = PULL_EVERY) -> PullResult | None:
-    """Pull at most once per `every`; in between, the last result unchanged.
+def pull_if_stale(uid: str | None = None, every: timedelta = PULL_EVERY) -> PullResult | None:
+    """Pull an account at most once per `every`; in between, its last result unchanged.
 
-    None only when capture cannot be reached at all. A feed that cannot refresh
-    is a feed showing older numbers, not a page that fails - the export and the
-    rows already pulled are still underneath it.
+    None when capture does not record the account or cannot be reached at all.
+    A feed that cannot refresh is a feed showing older numbers, not a page that
+    fails - the export and the rows already pulled are still underneath it.
     """
-    global _last_pull
-    if _last_pull and time.monotonic() - _last_pull[0] < every.total_seconds():
-        return replace(_last_pull[1], changed=False)
-    # One pull at a time. Two requests arriving together both found no recent
-    # pull and both wrote the same day file, and on Windows the second could not
-    # open it. Whoever finds a pull already running gets the last result rather
-    # than waiting on it - a feed a minute old is fine, a stalled page is not.
-    if not _pulling.acquire(blocking=False):
-        return replace(_last_pull[1], changed=False) if _last_pull else None
     try:
-        return _pull_now()
+        uid = uid or users.current()
+    except users.NoUser:
+        return None
+    last = _last_pull.get(uid)
+    if last and time.monotonic() - last[0] < every.total_seconds():
+        return replace(last[1], changed=False)
+    # One pull per account at a time. Two requests arriving together both found
+    # no recent pull and both wrote the same day file, and on Windows the second
+    # could not open it. Whoever finds a pull already running gets the last
+    # result rather than waiting on it - a feed a minute old is fine, a stalled
+    # page is not.
+    with _locks:
+        lock = _pulling.setdefault(uid, threading.Lock())
+    if not lock.acquire(blocking=False):
+        return replace(last[1], changed=False) if last else None
+    try:
+        return _pull_now(uid)
     finally:
-        _pulling.release()
+        lock.release()
 
 
-def _pull_now() -> PullResult | None:
-    global _last_pull
+def _pull_now(uid: str) -> PullResult | None:
     try:
-        result = pull()
+        result = pull(uid)
     except Exception as e:  # no database is a degraded feed, not an error page
         log.warning("capture pull skipped: %s", e)
         return None
     if result is None:
         return None
-    _last_pull = (time.monotonic(), result)
+    _last_pull[uid] = (time.monotonic(), result)
     if result.changed:
-        prune()
+        prune(uid)
     if result.stalled:
         log.warning(
-            "capture watcher has not succeeded since %s", (result.watch or {}).get("last_ok_at")
+            "capture for %s has not succeeded since %s",
+            uid,
+            (result.watch or {}).get("last_ok_at"),
         )
     return result
 
@@ -377,7 +392,7 @@ def coverage() -> dict[str, object]:
     return {"total": n, "first": lo, "last": hi, "by_source": by_source}
 
 
-def prune() -> int:
+def prune(uid: str | None = None) -> int:
     """Delete live files the export has caught up with, and only those.
 
     This used to keep a flat twelve files and delete the rest, on the assumption
@@ -389,9 +404,7 @@ def prune() -> int:
     play is at or before that mark contributes nothing and can go. Everything
     else stays however old it is. The database keeps its copy either way.
     """
-    uid = capture_user()
-    if not uid:
-        return 0
+    uid = uid or users.current()
     files = sorted(live_dir(uid).glob("live-*.parquet"))
     if not files or not has_export(uid):
         return 0

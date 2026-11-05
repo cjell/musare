@@ -23,6 +23,12 @@
 --   listen.recent_rows   pure: a recently-played response -> rows
 --   listen.poll_recent   every 30m: the backup, for anything the watcher missed
 --   listen.add_play      the one place rows are written, and where the two sources dedupe
+--   listen.enroll        an account joins capture: its refresh token into Vault
+--
+-- Every account in listen.accounts is captured, each with its own refresh token
+-- in Vault, its own watcher state and its own rows. One account's failure - a
+-- revoked token, a Spotify error - is recorded against that account and does
+-- not stop the others.
 --
 -- Applied by `scripts/capture.py install`. Safe to apply repeatedly.
 
@@ -34,7 +40,23 @@ create schema if not exists listen;
 -- database's own jobs and a direct connection with the owner's password read it.
 revoke all on schema listen from public, anon, authenticated;
 
+-- Hold both jobs off while this file runs. A poll takes the token table, then
+-- the watcher's state; the migration below alters them the other way round, and
+-- the first time it ran beside a live poll Postgres found the two waiting on each
+-- other and cancelled one. These are the locks the jobs themselves take, so a
+-- running poll is waited for and the next one skips. They last until commit.
+select pg_advisory_xact_lock(hashtext('listen.watch_poll'));
+select pg_advisory_xact_lock(hashtext('listen.poll_recent'));
+
+-- Who is captured. An account is added when it signs in to the app.
+create table if not exists listen.accounts (
+  user_id  text primary key,
+  active   boolean not null default true,
+  added_at timestamptz not null default now()
+);
+
 create table if not exists listen.plays (
+  user_id     text        not null,
   -- When the play ENDED, which is the convention the export and recently-played
   -- both use, so all three sources sort and dedupe on the same instant.
   played_at   timestamptz not null,
@@ -46,42 +68,119 @@ create table if not exists listen.plays (
   ms_played   integer     not null,
   source      text        not null check (source in ('watch', 'recent')),
   recorded_at timestamptz not null default now(),
-  primary key (source, track_uri, played_at)
+  primary key (user_id, source, track_uri, played_at)
 );
-create index if not exists plays_played_at on listen.plays (played_at);
 
--- One row. What was playing at the last poll, as jsonb because it is only ever
+-- What was playing at each account's last poll, as jsonb because it is only ever
 -- read and written whole by watch_step.
 create table if not exists listen.watch_state (
-  id         boolean primary key default true check (id),
+  user_id    text primary key,
   state      jsonb,
   updated_at timestamptz not null default now()
 );
-insert into listen.watch_state (id) values (true) on conflict do nothing;
 
--- The hour-long access token. The refresh token that mints it is in Vault.
+-- Each account's hour-long access token. The refresh token that mints it is in
+-- Vault, under spotify_refresh_token:<user id>.
 create table if not exists listen.token (
-  id           boolean primary key default true check (id),
+  user_id      text primary key,
   access_token text,
   expires_at   timestamptz
 );
-insert into listen.token (id) values (true) on conflict do nothing;
 
--- Whether each job is running and succeeding. A job that stops writes nothing,
--- which looks exactly like a quiet afternoon unless something records the checks.
+-- Whether each job is running and succeeding, per account - '' for a job that is
+-- not about one, like the keepalive. A job that stops writes nothing, which
+-- looks exactly like a quiet afternoon unless something records the checks.
 create table if not exists listen.status (
-  job         text primary key,
+  job         text not null,
+  user_id     text not null default '',
   last_run_at timestamptz,
   last_ok_at  timestamptz,
   last_error  text,
   runs        bigint not null default 0,
-  added       bigint not null default 0
+  added       bigint not null default 0,
+  primary key (job, user_id)
 );
+
+-- A database from before accounts held one listener's capture: plays with no
+-- user on them, a single watcher state, a single token, one refresh token under
+-- a name with no user in it. All of it belongs to the account the installer
+-- names in the setting listen.owner, and is given to it here - once, because
+-- each step checks for the old shape before touching anything.
+do $migrate$
+declare
+  owner text := nullif(current_setting('listen.owner', true), '');
+  legacy boolean;
+begin
+  select exists (
+    select 1 from information_schema.columns
+     where table_schema = 'listen' and table_name = 'plays' and column_name = 'user_id'
+  ) into legacy;
+  legacy := not legacy;
+  if legacy and owner is null then
+    raise exception 'this database predates accounts - run scripts/capture.py install, which says whose its plays are';
+  end if;
+
+  if legacy then
+    alter table listen.plays add column user_id text;
+    update listen.plays set user_id = owner;
+    alter table listen.plays alter column user_id set not null;
+    alter table listen.plays drop constraint plays_pkey;
+    alter table listen.plays add primary key (user_id, source, track_uri, played_at);
+  end if;
+
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'listen' and table_name = 'watch_state' and column_name = 'id') then
+    alter table listen.watch_state add column user_id text;
+    update listen.watch_state set user_id = owner;
+    alter table listen.watch_state drop constraint watch_state_pkey;
+    alter table listen.watch_state drop column id;
+    alter table listen.watch_state alter column user_id set not null;
+    alter table listen.watch_state add primary key (user_id);
+  end if;
+
+  if exists (select 1 from information_schema.columns
+              where table_schema = 'listen' and table_name = 'token' and column_name = 'id') then
+    alter table listen.token add column user_id text;
+    update listen.token set user_id = owner;
+    alter table listen.token drop constraint token_pkey;
+    alter table listen.token drop column id;
+    alter table listen.token alter column user_id set not null;
+    alter table listen.token add primary key (user_id);
+  end if;
+
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'listen' and table_name = 'status' and column_name = 'user_id') then
+    alter table listen.status add column user_id text not null default '';
+    update listen.status set user_id = owner where job in ('watch', 'recent');
+    alter table listen.status drop constraint status_pkey;
+    alter table listen.status add primary key (job, user_id);
+  end if;
+
+  if owner is not null then
+    insert into listen.accounts (user_id) values (owner) on conflict do nothing;
+    if exists (select 1 from vault.secrets where name = 'spotify_refresh_token')
+       and not exists (select 1 from vault.secrets where name = 'spotify_refresh_token:' || owner) then
+      perform vault.create_secret(
+        (select decrypted_secret from vault.decrypted_secrets where name = 'spotify_refresh_token'),
+        'spotify_refresh_token:' || owner);
+    end if;
+  end if;
+end $migrate$;
+
+drop index if exists listen.plays_played_at;
+create index if not exists plays_user_played_at on listen.plays (user_id, played_at);
+
+-- The functions below take the account they act for. These are the versions
+-- that did not, which would otherwise linger as overloads.
+drop function if exists listen.access_token();
+drop function if exists listen.spotify_get(text);
+drop function if exists listen.add_play(jsonb, text);
+drop function if exists listen._record(text, boolean, text, integer);
 
 
 -- ------------------------------------------------------------------ spotify
 
-create or replace function listen.access_token() returns text
+create or replace function listen.access_token(uid text) returns text
 language plpgsql security definer set search_path = '' as $$
 declare
   cached  record;
@@ -91,16 +190,20 @@ declare
   resp    extensions.http_response;
   body    jsonb;
 begin
-  select access_token, expires_at into cached from listen.token where id;
+  select access_token, expires_at into cached from listen.token where user_id = uid;
   if cached.access_token is not null and cached.expires_at > now() + interval '60 seconds' then
     return cached.access_token;
   end if;
 
   select decrypted_secret into cid     from vault.decrypted_secrets where name = 'spotify_client_id';
   select decrypted_secret into csecret from vault.decrypted_secrets where name = 'spotify_client_secret';
-  select decrypted_secret into refresh from vault.decrypted_secrets where name = 'spotify_refresh_token';
-  if cid is null or csecret is null or refresh is null then
-    raise exception 'spotify secrets are missing from vault - run scripts/capture.py install';
+  select decrypted_secret into refresh from vault.decrypted_secrets
+   where name = 'spotify_refresh_token:' || uid;
+  if cid is null or csecret is null then
+    raise exception 'spotify client secrets are missing from vault - run scripts/capture.py install';
+  end if;
+  if refresh is null then
+    raise exception 'no refresh token for % - they need to sign in again', uid;
   end if;
 
   perform extensions.http_set_curlopt('CURLOPT_TIMEOUT_MS', '10000');
@@ -119,22 +222,23 @@ begin
   end if;
 
   body := resp.content::jsonb;
-  update listen.token
-     set access_token = body->>'access_token',
-         expires_at   = now() + make_interval(secs => coalesce((body->>'expires_in')::int, 3600))
-   where id;
+  insert into listen.token (user_id, access_token, expires_at)
+  values (uid, body->>'access_token',
+          now() + make_interval(secs => coalesce((body->>'expires_in')::int, 3600)))
+  on conflict (user_id) do update
+     set access_token = excluded.access_token, expires_at = excluded.expires_at;
   -- Spotify may rotate the refresh token. Keeping the old one would work until
   -- the day it does not, and then every job fails at once.
   if coalesce(body->>'refresh_token', '') not in ('', refresh) then
     perform vault.update_secret(
-      (select id from vault.secrets where name = 'spotify_refresh_token'),
+      (select id from vault.secrets where name = 'spotify_refresh_token:' || uid),
       body->>'refresh_token');
   end if;
   return body->>'access_token';
 end $$;
 
 
-create or replace function listen.spotify_get(url text) returns extensions.http_response
+create or replace function listen.spotify_get(url text, uid text) returns extensions.http_response
 language plpgsql security definer set search_path = '' as $$
 declare
   resp extensions.http_response;
@@ -142,13 +246,13 @@ begin
   perform extensions.http_set_curlopt('CURLOPT_TIMEOUT_MS', '10000');
   resp := extensions.http(row(
     'GET'::extensions.http_method, url,
-    array[extensions.http_header('Authorization', 'Bearer ' || listen.access_token())],
+    array[extensions.http_header('Authorization', 'Bearer ' || listen.access_token(uid))],
     null, null
   )::extensions.http_request);
   if resp.status = 401 then
     -- Revoked or expired early. Forget it so the next poll refreshes instead of
     -- failing with the same token until the hour is up.
-    update listen.token set access_token = null, expires_at = null where id;
+    update listen.token set access_token = null, expires_at = null where user_id = uid;
   end if;
   return resp;
 end $$;
@@ -178,7 +282,7 @@ $$;
 -- seconds is wide of that and still safe for repeats - recently-played never
 -- lists a play under about 30 seconds, so two real plays of one song cannot
 -- both appear in it this close together.
-create or replace function listen.add_play(p jsonb, src text) returns integer
+create or replace function listen.add_play(p jsonb, src text, uid text) returns integer
 language plpgsql security definer set search_path = '' as $$
 declare
   at     timestamptz := (p->>'played_at')::timestamptz;
@@ -187,10 +291,11 @@ declare
   artist text        := p->>'artist_name';
   n      integer;
 begin
-  -- The watcher measured this play; the backup only estimated it.
+  -- The watcher measured this play; the backup only estimated it. Only ever
+  -- compared within one account: two people can play the same song at once.
   if src = 'recent' and exists (
     select 1 from listen.plays w
-     where w.source = 'watch'
+     where w.user_id = uid and w.source = 'watch'
        and w.played_at between at - interval '30 seconds' and at + interval '30 seconds'
        and listen._same_track(w.track_uri, w.track_name, w.artist_name, uri, name, artist)
   ) then
@@ -198,16 +303,16 @@ begin
   end if;
 
   insert into listen.plays
-    (played_at, track_uri, track_name, artist_name, album_name, duration_ms, ms_played, source)
+    (user_id, played_at, track_uri, track_name, artist_name, album_name, duration_ms, ms_played, source)
   values
-    (at, uri, p->>'track_name', p->>'artist_name', p->>'album_name',
+    (uid, at, uri, p->>'track_name', p->>'artist_name', p->>'album_name',
      (p->>'duration_ms')::int, (p->>'ms_played')::int, src)
   on conflict do nothing;
   get diagnostics n = row_count;
 
   if n > 0 and src = 'watch' then
     delete from listen.plays r
-     where r.source = 'recent'
+     where r.user_id = uid and r.source = 'recent'
        and r.played_at between at - interval '30 seconds' and at + interval '30 seconds'
        and listen._same_track(r.track_uri, r.track_name, r.artist_name, uri, name, artist);
   end if;
@@ -345,7 +450,8 @@ language sql stable set search_path = '' as $$
 $$;
 
 
-create or replace function listen.watch_poll() returns void
+-- One account's poll: ask what is playing for them, step their state, write.
+create or replace function listen.watch_one(uid text) returns void
 language plpgsql security definer set search_path = '' as $$
 declare
   resp  extensions.http_response;
@@ -354,36 +460,53 @@ declare
   step  jsonb;
   added integer := 0;
 begin
-  if not pg_try_advisory_xact_lock(hashtext('listen.watch_poll')) then
-    return;  -- the previous poll is still running
-  end if;
-
   begin
-    resp := listen.spotify_get('https://api.spotify.com/v1/me/player/currently-playing');
+    resp := listen.spotify_get('https://api.spotify.com/v1/me/player/currently-playing', uid);
   exception when others then
-    perform listen._record('watch', false, sqlerrm, 0);
+    perform listen._record('watch', uid, false, sqlerrm, 0);
     return;
   end;
 
   -- An error is not "nothing playing". Reading it as silence would end the
   -- current play early and count it again when the next poll sees it.
   if resp.status not in (200, 204) then
-    perform listen._record('watch', false,
+    perform listen._record('watch', uid, false,
       format('currently-playing: HTTP %s %s', resp.status, left(resp.content, 160)), 0);
     return;
   end if;
   snap := case when resp.status = 200 then nullif(btrim(resp.content), '')::jsonb end;
 
-  select state into prev from listen.watch_state where id for update;
+  select state into prev from listen.watch_state where user_id = uid for update;
   -- The request took real time; the transaction's now() is from before it.
   step := listen.watch_step(prev, snap, clock_timestamp());
-  update listen.watch_state
-     set state = nullif(step->'state', 'null'::jsonb), updated_at = now()
-   where id;
+  insert into listen.watch_state (user_id, state, updated_at)
+  values (uid, nullif(step->'state', 'null'::jsonb), now())
+  on conflict (user_id) do update set state = excluded.state, updated_at = excluded.updated_at;
   if jsonb_typeof(step->'play') = 'object' then
-    added := listen.add_play(step->'play', 'watch');
+    added := listen.add_play(step->'play', 'watch', uid);
   end if;
-  perform listen._record('watch', true, null, added);
+  perform listen._record('watch', uid, true, null, added);
+end $$;
+
+
+-- Every active account, one after another. Each runs in its own subtransaction,
+-- so an account whose poll fails outright - not just with an HTTP error, which
+-- watch_one records itself - is rolled back and recorded alone.
+create or replace function listen.watch_poll() returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  a record;
+begin
+  if not pg_try_advisory_xact_lock(hashtext('listen.watch_poll')) then
+    return;  -- the previous poll is still running
+  end if;
+  for a in select user_id from listen.accounts where active order by user_id loop
+    begin
+      perform listen.watch_one(a.user_id);
+    exception when others then
+      perform listen._record('watch', a.user_id, false, sqlerrm, 0);
+    end;
+  end loop;
 end $$;
 
 
@@ -418,45 +541,82 @@ language sql stable set search_path = '' as $$
 $$;
 
 
-create or replace function listen.poll_recent() returns void
+create or replace function listen.recent_one(uid text) returns void
 language plpgsql security definer set search_path = '' as $$
 declare
   resp  extensions.http_response;
   r     record;
   added integer := 0;
 begin
-  if not pg_try_advisory_xact_lock(hashtext('listen.poll_recent')) then
-    return;
-  end if;
   begin
-    resp := listen.spotify_get('https://api.spotify.com/v1/me/player/recently-played?limit=50');
+    resp := listen.spotify_get('https://api.spotify.com/v1/me/player/recently-played?limit=50', uid);
   exception when others then
-    perform listen._record('recent', false, sqlerrm, 0);
+    perform listen._record('recent', uid, false, sqlerrm, 0);
     return;
   end;
   if resp.status <> 200 then
-    perform listen._record('recent', false,
+    perform listen._record('recent', uid, false,
       format('recently-played: HTTP %s %s', resp.status, left(resp.content, 160)), 0);
     return;
   end if;
   for r in select * from listen.recent_rows(resp.content::jsonb) loop
-    added := added + listen.add_play(to_jsonb(r), 'recent');
+    added := added + listen.add_play(to_jsonb(r), 'recent', uid);
   end loop;
-  perform listen._record('recent', true, null, added);
+  perform listen._record('recent', uid, true, null, added);
 end $$;
 
 
-create or replace function listen._record(which text, ok boolean, err text, n integer) returns void
+create or replace function listen.poll_recent() returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  a record;
+begin
+  if not pg_try_advisory_xact_lock(hashtext('listen.poll_recent')) then
+    return;
+  end if;
+  for a in select user_id from listen.accounts where active order by user_id loop
+    begin
+      perform listen.recent_one(a.user_id);
+    exception when others then
+      perform listen._record('recent', a.user_id, false, sqlerrm, 0);
+    end;
+  end loop;
+end $$;
+
+
+create or replace function listen._record(which text, uid text, ok boolean, err text, n integer)
+returns void
 language sql security definer set search_path = '' as $$
-  insert into listen.status as st (job, last_run_at, last_ok_at, last_error, runs, added)
-  values (which, now(), case when ok then now() end, left(err, 300), 1, n)
-  on conflict (job) do update set
+  insert into listen.status as st (job, user_id, last_run_at, last_ok_at, last_error, runs, added)
+  values (which, uid, now(), case when ok then now() end, left(err, 300), 1, n)
+  on conflict (job, user_id) do update set
     last_run_at = excluded.last_run_at,
     last_ok_at  = coalesce(excluded.last_ok_at, st.last_ok_at),
     last_error  = excluded.last_error,
     runs        = st.runs + 1,
     added       = st.added + excluded.added
 $$;
+
+
+-- An account joins capture. Called by the app when someone signs in, with the
+-- refresh token Spotify just issued, so there is no separate step to enrol.
+-- Signing in again replaces the token, and the cached access token minted from
+-- the old one is forgotten rather than trusted.
+create or replace function listen.enroll(uid text, refresh text) returns void
+language plpgsql security definer set search_path = '' as $$
+declare
+  sid uuid;
+begin
+  select id into sid from vault.secrets where name = 'spotify_refresh_token:' || uid;
+  if sid is null then
+    perform vault.create_secret(refresh, 'spotify_refresh_token:' || uid);
+  else
+    perform vault.update_secret(sid, refresh);
+  end if;
+  insert into listen.accounts (user_id) values (uid)
+  on conflict (user_id) do update set active = true;
+  delete from listen.token where user_id = uid;
+end $$;
 
 
 revoke all on all tables    in schema listen from public, anon, authenticated;
@@ -489,7 +649,7 @@ select cron.schedule('listen-trim-cron-log', '17 4 * * *',
 create or replace function public.keepalive() returns timestamptz
 language plpgsql security definer set search_path = '' as $$
 begin
-  perform listen._record('keepalive', true, null, 0);
+  perform listen._record('keepalive', '', true, null, 0);
   return now();
 end $$;
 revoke all on function public.keepalive() from public;

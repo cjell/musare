@@ -1,11 +1,15 @@
-"""The listening watcher that runs inside Supabase: install it, check it, pull from it.
+"""The listening capture that runs inside Supabase: install it, check it, pull from it.
 
-    python scripts/capture.py install   # secrets into Vault, schema and jobs, seed old rows
-    python scripts/capture.py status    # is it checking in, and what has it recorded
-    python scripts/capture.py pull      # copy captured plays into the local store now
+    python scripts/capture.py install --dry-run   # apply, check, roll back: what would change
+    python scripts/capture.py install             # apply for real
+    python scripts/capture.py status              # per account: checking in? recording?
+    python scripts/capture.py pull [--user ID]    # copy captured plays into the local stores now
+    python scripts/capture.py enroll [--user ID]  # give capture an account's token by hand
 
 The capture itself is `supabase/capture.sql`. This script only puts it there and
 reads back what it did - nothing here has to be running for plays to be recorded.
+Accounts are normally enrolled by signing in; `enroll` is for one that signed in
+while the database could not be reached.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from musicshare import live  # noqa: E402
+from musicshare import live, users  # noqa: E402
 from musicshare.config import settings  # noqa: E402
 
 SQL = ROOT / "supabase" / "capture.sql"
@@ -50,6 +54,10 @@ def as_local(when: datetime) -> datetime:
     return (when if when.tzinfo else when.replace(tzinfo=UTC)).astimezone()
 
 
+def name_of(uid: str) -> str:
+    return (users.load(uid) or {}).get("display_name") or uid
+
+
 def _put_secret(con, name: str, value: str) -> None:
     """Create or replace one Vault secret. The value is passed as a parameter and
     never printed or logged."""
@@ -60,81 +68,164 @@ def _put_secret(con, name: str, value: str) -> None:
         con.execute("select vault.create_secret(%s, %s)", [value, name])
 
 
-def install() -> int:
-    s = settings()
-    # Capture records one account until it is per-user: the one marked on its
-    # record as captured (see scripts/migrate_owner.py).
-    who = live.capture_user()
-    if not who:
-        print("  no account is marked as the captured one - run scripts/migrate_owner.py")
-        return 1
-    tokens = live.token_path(who)
-    if not tokens.exists():
-        print(f"  no Spotify login at {tokens} - sign in with Spotify first")
-        return 1
-    refresh = json.loads(tokens.read_text(encoding="utf-8")).get("refresh_token")
-    if not (s.spotify_client_id and s.spotify_client_secret and refresh):
-        print("  SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET and a refresh token are all needed")
-        return 1
+def _refresh_token(uid: str) -> str | None:
+    path = live.token_path(uid)
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8")).get("refresh_token")
 
+
+# ---------------------------------------------------------------- install
+
+
+def _owner(given: str | None) -> str:
+    """Whose plays the rows from before accounts are. Only matters once, on the
+    first install over a single-listener database, and the SQL refuses to guess."""
+    if given:
+        return given
+    marked = live.captured_users()
+    return marked[0] if len(marked) == 1 else ""
+
+
+def install(owner: str | None, dry_run: bool) -> int:
+    s = settings()
+    if not (s.spotify_client_id and s.spotify_client_secret):
+        print("  SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET are both needed")
+        return 1
+    owner = _owner(owner)
+
+    # One transaction: the schema change, the migration, the new functions and
+    # the jobs land together or not at all, and a dry run is the same work with
+    # a rollback at the end instead of a commit.
     with live.cloud() as con:
-        con.autocommit = True
+        # Waiting behind a running poll is fine; waiting forever is not.
+        con.execute("set local lock_timeout = '10s'")
+        con.execute("select set_config('listen.owner', %s, true)", [owner])
         _put_secret(con, "spotify_client_id", s.spotify_client_id)
         _put_secret(con, "spotify_client_secret", s.spotify_client_secret)
-        _put_secret(con, "spotify_refresh_token", refresh)
-        print("  secrets     stored in Vault")
-
         con.execute(SQL.read_text(encoding="utf-8"))
-        jobs = con.execute(
-            "select jobname, schedule from cron.job where jobname like 'listen-%' order by 1"
-        ).fetchall()
         print(f"  schema      applied from {SQL.relative_to(ROOT)}")
-        for name, schedule in jobs:
-            print(f"  job         {name:<22} {schedule}")
 
-        # Plays the laptop poller already caught, so the first pull - which
-        # replaces local days with the database's copy - does not delete them.
-        # They came from recently-played, so they go in as that source and give
-        # way to anything the watcher records for the same play.
-        rows = live.local_rows()
-        seeded = 0
-        for r in rows:
-            seeded += con.execute(
-                "select listen.add_play(%s::jsonb, 'recent')",
-                [json.dumps({**r, "played_at": r["played_at"].replace(tzinfo=UTC).isoformat()})],
-            ).fetchone()[0]
-        print(f"  seeded      {seeded} of {len(rows)} local live row(s)")
-    print()
+        # A database with no single-listener past has no migrated token for the
+        # owner, so they are enrolled the way anyone signing in is.
+        if owner and not _has_token(con, owner):
+            refresh = _refresh_token(owner)
+            if refresh:
+                con.execute("select listen.enroll(%s, %s)", [owner, refresh])
+                print(f"  enrolled    {name_of(owner)}")
+
+        ok = _check(con, owner)
+        if dry_run:
+            con.rollback()
+            print("\n  DRY RUN - rolled back. Nothing above was kept.")
+            return 0 if ok else 1
+        if not ok:
+            con.rollback()
+            print("\n  checks failed - rolled back, nothing changed")
+            return 1
+        con.commit()
+
+    if owner and users.exists(owner):
+        users.save({"id": owner, "captured": True})
+    print("\n  applied.\n")
     return status()
+
+
+def _has_token(con, uid: str) -> bool:
+    return bool(
+        con.execute(
+            "select 1 from vault.secrets where name = %s", [f"spotify_refresh_token:{uid}"]
+        ).fetchone()
+    )
+
+
+def _check(con, owner: str) -> bool:
+    """What the database looks like after the install, from inside its transaction."""
+    ok = True
+    total = con.execute("select count(*) from listen.plays").fetchone()[0]
+    by_user = con.execute(
+        "select user_id, count(*), min(played_at), max(played_at) from listen.plays group by 1"
+    ).fetchall()
+    print(f"  plays       {total:,} in all")
+    for uid, n, lo, hi in by_user:
+        print(f"              {n:>7,}  {name_of(uid)}  {lo:%Y-%m-%d} to {hi:%Y-%m-%d}")
+
+    accounts = con.execute(
+        "select user_id, active from listen.accounts order by added_at"
+    ).fetchall()
+    print(f"  accounts    {len(accounts)}")
+    for uid, active in accounts:
+        token = "token in Vault" if _has_token(con, uid) else "NO TOKEN"
+        print(f"              {name_of(uid)}  {'active' if active else 'paused'}, {token}")
+        if not _has_token(con, uid):
+            ok = False
+
+    for job, uid in con.execute("select job, user_id from listen.status order by 1, 2").fetchall():
+        print(f"  status      {job:<10} {name_of(uid) if uid else '(no account)'}")
+    for name, schedule in con.execute(
+        "select jobname, schedule from cron.job where jobname like 'listen-%' order by 1"
+    ).fetchall():
+        print(f"  job         {name:<22} {schedule}")
+
+    # A real poll for the owner, through the new functions - but only on the
+    # access token already cached. A refresh inside a transaction that is about
+    # to be rolled back could lose a rotated refresh token with it.
+    if owner:
+        fresh = con.execute(
+            "select expires_at > now() + interval '5 minutes' from listen.token where user_id = %s",
+            [owner],
+        ).fetchone()
+        if fresh and fresh[0]:
+            con.execute("select listen.watch_one(%s)", [owner])
+            st = live.watch_status(con, "watch", owner)
+            if st and st["last_error"] is None:
+                print(f"  live poll   ok for {name_of(owner)}")
+            else:
+                print(f"  live poll   FAILED for {name_of(owner)}: {(st or {}).get('last_error')}")
+                ok = False
+        else:
+            print("  live poll   skipped - no cached access token to test with")
+    return ok
+
+
+# ----------------------------------------------------------------- status
 
 
 def status() -> int:
     try:
         with live.cloud() as con:
-            watch = live.watch_status(con, "watch")
-            recent = live.watch_status(con, "recent")
-            awake = live.watch_status(con, "keepalive")
-            day = con.execute("""
-                select source, count(*) from listen.plays
-                where played_at > now() - interval '24 hours' group by 1 order by 1
-            """).fetchall()
-            newest = con.execute("select max(played_at) from listen.plays").fetchone()[0]
-            playing = con.execute("select state from listen.watch_state where id").fetchone()[0]
+            accounts = con.execute(
+                "select user_id, active from listen.accounts order by added_at"
+            ).fetchall()
+            awake = live.watch_status(con, "keepalive", "")
+            seen = []
+            for uid, active in accounts:
+                day = con.execute(
+                    """select source, count(*) from listen.plays
+                       where user_id = %s and played_at > now() - interval '24 hours'
+                       group by 1 order by 1""",
+                    [uid],
+                ).fetchall()
+                newest = con.execute(
+                    "select max(played_at) from listen.plays where user_id = %s", [uid]
+                ).fetchone()[0]
+                playing = con.execute(
+                    "select state from listen.watch_state where user_id = %s", [uid]
+                ).fetchone()
+                seen.append(
+                    (
+                        uid,
+                        active,
+                        live.watch_status(con, "watch", uid),
+                        live.watch_status(con, "recent", uid),
+                        day,
+                        newest,
+                        playing[0] if playing else None,
+                    )
+                )
     except live.NoCapture as e:
         print(f"  {e}")
         return 1
-
-    for label, st in (("watcher", watch), ("backup", recent)):
-        if not st:
-            print(f"  {label:<9} never run")
-            continue
-        ok = f"ok {ago(st['last_ok_at'])}" if st["last_ok_at"] else "never succeeded"
-        print(
-            f"  {label:<9} checked {ago(st['last_run_at'])}, {ok}, {st['runs']:,} runs, "
-            f"{st['added']:,} plays written"
-        )
-        if st["last_error"]:
-            print(f"            last error: {st['last_error']}")
 
     # The daily GitHub Actions ping that keeps a free project from pausing.
     if awake and awake["last_ok_at"]:
@@ -142,26 +233,65 @@ def status() -> int:
     else:
         print("  keepalive never pinged - check the GitHub workflow and its secrets")
 
-    counts = ", ".join(f"{n} from {src}" for src, n in day) or "none"
-    print(f"  last 24h  {counts}")
-    if newest:
-        print(f"  newest    {as_local(newest):%Y-%m-%d %H:%M} local ({ago(newest)})")
-    if playing and playing.get("track_name"):
-        state = "playing" if playing.get("playing") else "paused"
-        print(f"  now       {state}: {playing['track_name']} - {playing.get('artist_name')}")
+    stalled = []
+    for uid, active, watch, recent, day, newest, playing in seen:
+        print(f"\n  {name_of(uid)}{'' if active else '  (paused)'}")
+        for label, st in (("watcher", watch), ("backup", recent)):
+            if not st:
+                print(f"    {label:<9} never run")
+                continue
+            ok = f"ok {ago(st['last_ok_at'])}" if st["last_ok_at"] else "never succeeded"
+            print(
+                f"    {label:<9} checked {ago(st['last_run_at'])}, {ok}, {st['runs']:,} runs, "
+                f"{st['added']:,} plays written"
+            )
+            if st["last_error"]:
+                print(f"              last error: {st['last_error']}")
+        counts = ", ".join(f"{n} from {src}" for src, n in day) or "none"
+        print(f"    last 24h  {counts}")
+        if newest:
+            print(f"    newest    {as_local(newest):%Y-%m-%d %H:%M} local ({ago(newest)})")
+        if playing and playing.get("track_name"):
+            state = "playing" if playing.get("playing") else "paused"
+            print(f"    now       {state}: {playing['track_name']} - {playing.get('artist_name')}")
+        if active and live.PullResult(0, False, None, watch).stalled:
+            stalled.append(name_of(uid))
+
     print()
-    if live.PullResult(0, False, None, watch).stalled:
-        print(f"  STALLED - the watcher has not succeeded in {live.STALE_AFTER}.")
+    if stalled:
+        print(f"  STALLED for {', '.join(stalled)} - no success in {live.STALE_AFTER}.")
         return 2
     print("  keeping up")
     return 0
 
 
-def pull() -> int:
-    r = live.pull()
-    print(f"  read {r.pulled} row(s); local store {'updated' if r.changed else 'unchanged'}")
-    if r.changed:
-        print(f"  pruned {live.prune()} covered live file(s)")
+# ------------------------------------------------------------ pull, enroll
+
+
+def pull(who: str | None) -> int:
+    for uid in [who] if who else live.captured_users():
+        r = live.pull(uid)
+        if r is None:
+            print(f"  {name_of(uid)}: not captured")
+            continue
+        print(
+            f"  {name_of(uid)}: read {r.pulled} row(s); store {'updated' if r.changed else 'unchanged'}"
+        )
+        if r.changed:
+            print(f"    pruned {live.prune(uid)} covered live file(s)")
+    return 0
+
+
+def enroll(who: str | None) -> int:
+    targets = [who] if who else users.all_ids()
+    for uid in targets:
+        refresh = _refresh_token(uid)
+        if not refresh:
+            print(f"  {name_of(uid)}: no token - they need to sign in")
+            continue
+        print(
+            f"  {name_of(uid)}: {'enrolled' if live.enroll(uid, refresh) else 'FAILED (see log)'}"
+        )
     return 0
 
 
@@ -170,9 +300,18 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("command", choices=["install", "status", "pull"])
+    ap.add_argument("command", choices=["install", "status", "pull", "enroll"])
+    ap.add_argument("--user", help="one account (pull, enroll)")
+    ap.add_argument("--owner", help="install: whose the plays from before accounts are")
+    ap.add_argument("--dry-run", action="store_true", help="install: roll back instead of commit")
     args = ap.parse_args()
-    return {"install": install, "status": status, "pull": pull}[args.command]()
+    if args.command == "install":
+        return install(args.owner, args.dry_run)
+    if args.command == "pull":
+        return pull(args.user)
+    if args.command == "enroll":
+        return enroll(args.user)
+    return status()
 
 
 if __name__ == "__main__":

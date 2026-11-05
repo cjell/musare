@@ -12,7 +12,7 @@ import duckdb
 import numpy as np
 import pytest
 
-from musicshare import users
+from musicshare import live, users
 from musicshare.embed import Space
 
 SEED = 20260910
@@ -39,6 +39,26 @@ def _no_accounts_written_to_real_data():
     yield
     leaked = _accounts() - before
     assert not leaked, f"a test created accounts in the real data dir: {sorted(leaked)}"
+
+
+@pytest.fixture(autouse=True)
+def _no_capture_database(request, monkeypatch):
+    """Only integration tests reach Supabase.
+
+    Signing in enrols the account in the live capture database, so a test that
+    signs someone in would otherwise put a test account and its token into the
+    real Vault, and a test that pulls would read real plays. Any path to the
+    database fails here the way an unreachable one does, which is a path the
+    code already handles. A test that wants a database patches its own in.
+    """
+    if request.node.get_closest_marker("integration"):
+        return
+
+    def no_database():
+        raise live.NoCapture("tests do not reach the capture database")
+
+    monkeypatch.setattr(live, "cloud", no_database)
+
 
 # Three genres on orthogonal axes, so which cluster is which is never in doubt.
 GENRES = {

@@ -4,6 +4,11 @@ Marked integration because it needs the database, so it is deselected by
 default. Every test runs inside a transaction that is rolled back, so nothing it
 writes is ever visible to the jobs running against the same tables.
 
+Each test first applies `supabase/capture.sql` inside that same transaction, so
+what is tested is the file in the repository rather than whatever was last
+installed, and a change can be tested before it is applied. Every real account
+is paused inside the transaction too, so nothing here polls Spotify for one.
+
     ./mscs/python.exe -m pytest -m integration tests/test_capture_sql.py
 """
 
@@ -11,12 +16,17 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
 from musicshare.config import settings
 
 pytestmark = pytest.mark.integration
+
+SQL = Path(__file__).resolve().parents[1] / "supabase" / "capture.sql"
+ME = "TESTlistener"
+YOU = "TESTfriend"
 
 T0 = datetime(2026, 9, 14, 12, 0, 0, tzinfo=UTC)
 A = "spotify:track:TESTaaaaaaaaaaaaaaaaaa"
@@ -35,6 +45,12 @@ def conn():
 
 @pytest.fixture
 def db(conn):
+    conn.execute("set local lock_timeout = '10s'")
+    # Rows from before accounts, if this database still has any, go to a test
+    # owner - and come back when the transaction rolls back.
+    conn.execute("select set_config('listen.owner', 'TESTowner', true)")
+    conn.execute(SQL.read_text(encoding="utf-8"))
+    conn.execute("update listen.accounts set active = false")
     yield conn
     conn.rollback()
 
@@ -205,9 +221,9 @@ def test_recently_played_rows_estimate_listening_from_the_gap(db):
 # -------------------------------------------------------------------- dedupe
 
 
-def add(db, uri, at, src, ms=100_000, name="A Song", artist="An Artist"):
+def add(db, uri, at, src, ms=100_000, name="A Song", artist="An Artist", uid=ME):
     return db.execute(
-        "select listen.add_play(%s::jsonb, %s)",
+        "select listen.add_play(%s::jsonb, %s, %s)",
         [
             json.dumps(
                 {
@@ -219,13 +235,15 @@ def add(db, uri, at, src, ms=100_000, name="A Song", artist="An Artist"):
                 }
             ),
             src,
+            uid,
         ],
     ).fetchone()[0]
 
 
-def rows_for(db, uri):
+def rows_for(db, uri, uid=ME):
     return db.execute(
-        "select source from listen.plays where track_uri = %s order by source", [uri]
+        "select source from listen.plays where track_uri = %s and user_id = %s order by source",
+        [uri, uid],
     ).fetchall()
 
 
@@ -284,3 +302,70 @@ def test_different_songs_ending_together_are_both_kept(db):
 def test_a_repeat_past_the_tolerance_is_its_own_play(db):
     add(db, A, T0, "watch")
     assert add(db, A, T0 + timedelta(seconds=40), "recent") == 1
+
+
+def test_two_people_playing_the_same_song_are_two_plays(db):
+    """Dedupe is within one account. Across two it would delete a friend's play."""
+    add(db, A, T0, "watch", uid=ME)
+    assert add(db, A, T0 + timedelta(seconds=3), "recent", uid=YOU) == 1
+    add(db, A, T0 + timedelta(seconds=5), "watch", uid=YOU)
+    assert rows_for(db, A, ME) == [("watch",)]
+    assert rows_for(db, A, YOU) == [("watch",)]
+
+
+# ------------------------------------------------------------------- accounts
+
+
+def secret(db, uid):
+    row = db.execute(
+        "select decrypted_secret from vault.decrypted_secrets where name = %s",
+        [f"spotify_refresh_token:{uid}"],
+    ).fetchone()
+    return row and row[0]
+
+
+def test_enrolling_adds_the_account_and_its_token(db):
+    db.execute("select listen.enroll(%s, %s)", [YOU, "first-token"])
+    assert db.execute(
+        "select active from listen.accounts where user_id = %s", [YOU]
+    ).fetchone() == (True,)
+    assert secret(db, YOU) == "first-token"
+
+
+def test_enrolling_again_replaces_the_token_and_forgets_the_old_access(db):
+    db.execute("select listen.enroll(%s, %s)", [YOU, "first-token"])
+    db.execute(
+        "insert into listen.token (user_id, access_token, expires_at) values (%s, 'old', now() + interval '1 hour')",
+        [YOU],
+    )
+    db.execute("update listen.accounts set active = false where user_id = %s", [YOU])
+    db.execute("select listen.enroll(%s, %s)", [YOU, "second-token"])
+    assert secret(db, YOU) == "second-token"
+    assert (
+        db.execute("select count(*) from listen.token where user_id = %s", [YOU]).fetchone()[0] == 0
+    )
+    assert db.execute(
+        "select active from listen.accounts where user_id = %s", [YOU]
+    ).fetchone() == (True,), "signing in again resumes a paused account"
+
+
+def test_an_account_that_cannot_be_polled_is_recorded_against_itself(db):
+    """No refresh token: the poll fails before any request, and says whose it was."""
+    db.execute("insert into listen.accounts (user_id) values (%s)", [YOU])
+    db.execute("select listen.watch_one(%s)", [YOU])
+    err = db.execute(
+        "select last_error from listen.status where job = 'watch' and user_id = %s", [YOU]
+    ).fetchone()[0]
+    assert "no refresh token" in err
+    assert (
+        db.execute(
+            "select count(*) from listen.status where job = 'watch' and user_id = %s", [ME]
+        ).fetchone()[0]
+        == 0
+    ), "nobody else's status moved"
+
+
+def test_applying_the_file_twice_changes_nothing(db):
+    before = db.execute("select count(*) from listen.plays").fetchone()[0]
+    db.execute(SQL.read_text(encoding="utf-8"))
+    assert db.execute("select count(*) from listen.plays").fetchone()[0] == before

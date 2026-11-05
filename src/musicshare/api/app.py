@@ -684,13 +684,11 @@ def home(refresh: bool = False) -> dict[str, object]:
 
     # A capture job that stops writes nothing, which on this screen looks exactly
     # like not listening. Say so instead: a feed that quietly falls behind is
-    # worse than one that admits to it.
-    # Only for the account capture actually records. Until capture is per-user,
-    # telling anyone else their capture is behind would be about someone else's.
-    captured = live_mod.capture_user() == users.current()
+    # worse than one that admits to it. An account capture does not record has
+    # no pull, so nothing is claimed about it either way.
     data["live"] = {
-        "pulled": captured and bool(pulled),
-        "stalled": captured and bool(pulled and pulled.stalled),
+        "pulled": bool(pulled),
+        "stalled": bool(pulled and pulled.stalled),
     }
     return data
 

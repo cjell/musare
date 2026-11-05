@@ -7,9 +7,8 @@ tokens, asks Spotify who they belong to, and from then on the browser holds only
 a signed session cookie naming that account.
 
 Signing in is joining. The same exchange that proves who someone is hands over
-the refresh token their now-playing status, their playlists and - once capture
-is per-user - their listening capture all run on, so there is no separate step
-to enrol an account.
+the refresh token their now-playing status, their playlists and their listening
+capture all run on, so there is no separate step to enrol an account.
 
 Only what the app calls is asked for. The token behind the original single-user
 setup carried eight scopes, including email, top artists and the saved library;
@@ -137,4 +136,8 @@ def sign_in(code: str) -> dict[str, Any]:
         ),
         encoding="utf-8",
     )
+    # Capture gets the same refresh token. Signing in again hands it the new one,
+    # which is also how capture recovers for someone whose old token was revoked.
+    if live.enroll(uid, tok["refresh_token"]):
+        record = users.load(uid) or record
     return record

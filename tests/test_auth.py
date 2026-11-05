@@ -15,7 +15,7 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from fastapi.testclient import TestClient
 
-from musicshare import auth, history, users
+from musicshare import auth, history, live, users
 from musicshare.api import app as app_mod
 
 
@@ -97,6 +97,38 @@ def test_signing_in_again_keeps_what_the_record_already_said(accounts, monkeypat
     sign_in_as(TestClient(app_mod.app), "alice", monkeypatch)
     rec = users.load("alice")
     assert rec["storage_owner"] == "me" and rec["captured"] is True
+
+
+class FakeCapture:
+    """Stands in for the capture database: records what it was asked to run."""
+
+    def __init__(self):
+        self.ran = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=None):
+        self.ran.append((sql, params))
+
+
+def test_signing_in_enrols_the_account_in_capture(accounts, monkeypatch):
+    db = FakeCapture()
+    monkeypatch.setattr(live, "cloud", lambda: db)
+    sign_in_as(TestClient(app_mod.app), "carol", monkeypatch)
+    assert db.ran == [("select listen.enroll(%s, %s)", ["carol", "r"])]
+    assert users.load("carol")["captured"] is True
+
+
+def test_signing_in_works_when_capture_cannot_be_reached(accounts, monkeypatch):
+    """No database is a reason to not capture, never a reason to not sign in."""
+    c = TestClient(app_mod.app)
+    sign_in_as(c, "carol", monkeypatch)  # the conftest guard makes the database unreachable
+    assert c.get("/api/me").json()["signed_in"] is True
+    assert not users.load("carol").get("captured"), "only a real enrolment marks an account"
 
 
 def test_an_account_not_on_the_allowlist_is_told_so(accounts, monkeypatch):

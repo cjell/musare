@@ -133,7 +133,7 @@ def test_prune_deletes_only_what_the_export_covers(store, tmp_path, monkeypatch)
     )
     monkeypatch.setattr(live, "has_export", lambda uid=None: True)
 
-    assert live.prune() == 1
+    assert live.prune(UID) == 1
     assert names(store) == ["live-20260920.parquet"]
 
 
@@ -141,7 +141,7 @@ def test_prune_keeps_everything_when_there_is_no_export(store, monkeypatch):
     """Nothing else local holds these rows, so a missing export means keep them all."""
     live._store([row(datetime(2020, 1, 1, 12, 0))], None, UID)
     monkeypatch.setattr(live, "has_export", lambda uid=None: False)
-    assert live.prune() == 0
+    assert live.prune(UID) == 0
     assert len(names(store)) == 1
 
 
@@ -154,7 +154,7 @@ def test_prune_does_not_delete_by_file_count(store, tmp_path, monkeypatch):
         live, "export_glob", lambda uid=None: _export_ending(tmp_path, datetime(2026, 8, 1))
     )
     monkeypatch.setattr(live, "has_export", lambda uid=None: True)
-    assert live.prune() == 0
+    assert live.prune(UID) == 0
     assert len(names(store)) == 20
 
 
@@ -184,25 +184,79 @@ def test_an_unreachable_database_degrades_to_no_pull(monkeypatch):
     def boom():
         raise OSError("no route to host")
 
-    monkeypatch.setattr(live, "_last_pull", None)
-    monkeypatch.setattr(live, "pull", boom)
-    assert live.pull_if_stale() is None
+    monkeypatch.setattr(live, "_last_pull", {})
+    monkeypatch.setattr(live, "pull", lambda uid: boom())
+    assert live.pull_if_stale("alice") is None
 
 
 def test_pulls_are_spaced_and_the_repeat_reports_no_change(monkeypatch):
     calls = []
 
-    def fake():
-        calls.append(1)
+    def fake(uid):
+        calls.append(uid)
         return live.PullResult(3, True, None, {"last_ok_at": datetime.now(UTC)})
 
-    monkeypatch.setattr(live, "_last_pull", None)
+    monkeypatch.setattr(live, "_last_pull", {})
     monkeypatch.setattr(live, "pull", fake)
-    monkeypatch.setattr(live, "prune", lambda: 0)
-    first = live.pull_if_stale()
-    second = live.pull_if_stale()
-    assert len(calls) == 1
+    monkeypatch.setattr(live, "prune", lambda uid=None: 0)
+    first = live.pull_if_stale("alice")
+    second = live.pull_if_stale("alice")
+    assert calls == ["alice"]
     assert first.changed and not second.changed, "the page must not rebuild on a cached answer"
+
+
+def test_one_accounts_pull_does_not_stand_in_for_anothers(monkeypatch):
+    calls = []
+
+    def fake(uid):
+        calls.append(uid)
+        return live.PullResult(1, True, None, {"last_ok_at": datetime.now(UTC)})
+
+    monkeypatch.setattr(live, "_last_pull", {})
+    monkeypatch.setattr(live, "pull", fake)
+    monkeypatch.setattr(live, "prune", lambda uid=None: 0)
+    live.pull_if_stale("alice")
+    assert live.pull_if_stale("bob").changed, "bob's feed is not fresh because alice's is"
+    assert calls == ["alice", "bob"]
+
+
+def test_an_account_capture_does_not_record_is_never_pulled(store, monkeypatch):
+    """Not captured means no query at all - not an empty one that wipes its store."""
+    users.save({"id": "notcaptured"})
+    monkeypatch.setattr(live, "cloud", lambda: pytest.fail("must not reach the database"))
+    assert live.pull("notcaptured") is None
+
+
+class FakeRows:
+    def __init__(self, rows):
+        self.rows, self.asked = rows, []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=None):
+        self.asked.append((sql, params))
+        return self
+
+    def fetchall(self):
+        return self.rows
+
+    def fetchone(self):
+        return None
+
+
+def test_a_pull_reads_only_its_own_accounts_rows(store, monkeypatch):
+    db = FakeRows([(datetime(2026, 9, 14, 1, 0, tzinfo=UTC), "a", "S", "X", "Al", 1000)])
+    monkeypatch.setattr(live, "cloud", lambda: db)
+    r = live.pull(UID)
+    assert r.pulled == 1
+    plays_sql, params = db.asked[0]
+    assert "user_id = %s" in plays_sql and params[0] == UID
+    _, status_params = db.asked[1]
+    assert status_params == ["watch", UID]
 
 
 def test_ago_reads_naive_timestamps_as_utc():
@@ -270,12 +324,14 @@ def test_a_pull_already_running_is_not_started_twice(monkeypatch):
         release.wait(5)
         return result(timedelta(seconds=10))
 
-    monkeypatch.setattr(live, "pull", slow_pull)
-    monkeypatch.setattr(live, "_last_pull", None)
-    first = threading.Thread(target=live.pull_if_stale)
+    monkeypatch.setattr(live, "pull", lambda uid: slow_pull())
+    monkeypatch.setattr(live, "_last_pull", {})
+    first = threading.Thread(target=live.pull_if_stale, args=("alice",))
     first.start()
     assert started.wait(5)
-    assert live.pull_if_stale() is None, "the second caller gets the last result, not a new pull"
+    assert live.pull_if_stale("alice") is None, (
+        "the second caller gets the last result, not a new pull"
+    )
     release.set()
     first.join(5)
     assert calls == [1]
