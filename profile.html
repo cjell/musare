@@ -1,4 +1,4 @@
-<title>MusicShare Profile</title>
+<title>munity</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500;600&display=swap">
@@ -235,6 +235,18 @@ body{
 .btn-ghost{width:34px;background:transparent;border-color:var(--line-2);color:var(--ink-2)}
 .btn-ghost:hover{color:var(--ink);border-color:var(--ink-3)}
 .btn-word{width:auto;padding:0 13px;font-size:12px}
+
+/* ---- bringing a history ---- */
+.upload-card{padding:16px;border:1px solid var(--line);border-radius:13px;background:var(--raise)}
+.up-lead{color:var(--ink-2);font-size:13px;line-height:1.5;margin:4px 0 12px}
+.up-steps{margin:0 0 16px;padding-left:18px;color:var(--ink-2);font-size:12.5px;line-height:1.6}
+.up-steps li{margin-bottom:6px}
+.up-steps a{color:var(--accent)}
+.up-steps b{color:var(--ink);font-weight:600}
+.up-pick{display:inline-flex;align-items:center;height:36px;padding:0 16px;cursor:pointer}
+.up-bar{height:4px;border-radius:2px;background:var(--line-2);margin-top:14px;overflow:hidden}
+.up-bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .3s}
+.up-note{color:var(--ink-2);font-size:12px;line-height:1.5;margin:10px 0 0;min-height:1em}
 
 /* ---- signing in ---- */
 /* Fixed to the viewport, not the phone frame: the frame is many screens tall, so
@@ -1570,7 +1582,7 @@ details[open] summary .chev{transform:rotate(180deg)}
   <div class="screen" id="screenHome">
     <div class="home-top solo">
       <div class="home-bar">
-        <div class="wordmark">MusicShare</div>
+        <div class="wordmark">munity</div>
         <div style="display:flex;align-items:center;gap:14px">
         <button class="bell" id="bellBtn" aria-label="Notifications">
           <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 9a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6"/><path d="M13.7 20a2 2 0 0 1-3.4 0"/></svg>
@@ -1581,6 +1593,22 @@ details[open] summary .chev{transform:rotate(180deg)}
     </div>
 
     <div class="pad" id="tabYou">
+      <!-- Shown while this account has no history: everything below needs one. -->
+      <section class="sec upload-card" id="uploadCard" hidden>
+        <div class="sec-label"><span>Bring your listening history</span></div>
+        <p class="up-lead">Everything here is built from your Spotify history, so it starts with that.</p>
+        <ol class="up-steps">
+          <li>On Spotify&rsquo;s site, open
+            <a href="https://www.spotify.com/account/privacy/" target="_blank" rel="noopener">Privacy settings</a>.</li>
+          <li>Under <b>Download your data</b>, tick <b>Extended streaming history</b> and request it.
+            Spotify emails a zip - often in a few days, at most 30.</li>
+          <li>Upload that zip here, exactly as it arrived.</li>
+        </ol>
+        <label class="btn btn-primary up-pick">Choose the zip
+          <input type="file" id="uploadFile" accept=".zip,application/zip" hidden></label>
+        <div class="up-bar" id="uploadBar" hidden><i id="uploadFill"></i></div>
+        <p class="up-note" id="uploadNote" aria-live="polite"></p>
+      </section>
       <section class="sec anim">
         <div class="sec-label"><span id="mvTitle">Your map moved</span><span class="aux" id="mvAux">Last 4 weeks</span></div>
         <div class="map" id="moveMapBtn" role="button" tabindex="0" aria-label="Open full taste map">
@@ -2330,15 +2358,10 @@ var HOME = {
          clusters:[[.20,.34,.09,44,"ambient jazz"],[.42,.62,.10,58,"dub techno"],
                    [.66,.40,.11,64,"UK garage"],[.83,.66,.08,34,"footwork"]],
          you:[.60,.44], viewer:[.50,.51]},
-    up:[["Overmono","+41%"],["Nala Sinephro","+28%"],["Priori","+22%"],["Loraine James","+16%"]],
-    down:[["Skee Mask","-19%"],["Yaeji","-12%"],["Kelly Lee Owens","-8%"],["Four Tet","-4%"]],
-    found:[["Priori","41 plays"],["DJ Python","28 plays"],["Nala Sinephro","12 plays"]],
-    foundSongs:[["Rhythm Bandit","Priori","14"],["Angel","DJ Python","11"],
-                ["Waiting Game","Nala Sinephro","8"]],
-    upSongs:[["Is U","Overmono","+44%"],["Del Oro","DJ Python","+31%"]],
-    downSongs:[["So Vain","Yaeji","-22%"],["Two Thousand and Seventeen","Four Tet","-11%"]],
-    tracks:[["Is U","Overmono","31"],["Del Oro","DJ Python","27"],["Space 1.8","Nala Sinephro","24"],
-            ["So Vain","Yaeji","19"],["Two Thousand and Seventeen","Four Tet","17"]]
+    /* Empty until the feed arrives. These were hand-written artists, and they
+       showed before the real week loaded - and stayed, for anyone whose feed
+       could not load at all. Each section has its own empty state instead. */
+    up:[], down:[], found:[], foundSongs:[], upSongs:[], downSongs:[], tracks:[]
   },
   /* attribution, not audience: the only way to move these is to be right early */
   reach:{
@@ -3382,7 +3405,10 @@ function loadAccounts(){
     })
     .then(function(list){
       if(!ME) return;
-      var others = ((list && list.users) || []).filter(function(u){ return u.id !== ME.id; });
+      var all = (list && list.users) || [];
+      var mine = all.filter(function(u){ return u.id === ME.id; })[0];
+      ME_HAS_HISTORY = !mine || mine.has_history !== false;
+      var others = all.filter(function(u){ return u.id !== ME.id; });
       PROFILES = [profileFor(ME)].concat(others.map(profileFor));
       loadLocal();
       renderPeople();
@@ -3412,6 +3438,70 @@ function showSignIn(){
 $("signOut").addEventListener("click", function(){
   fetch("/api/auth/logout", { method: "POST" })
     .finally(function(){ location.href = "/"; });
+});
+
+/* ---------- bringing a history ----------
+   The zip goes up as the raw body, like a photo does, so the bar can follow the
+   bytes; reading it happens on the server after the upload has answered, and
+   this asks how it went. A finished upload reloads the page, because every part
+   of it - feed, map, card, charts - is about to say something different. */
+var ME_HAS_HISTORY = true;
+var UPLOAD_LIMIT = 200 * 1024 * 1024;
+
+function showUpload(on){
+  $("uploadCard").hidden = !on;
+  Array.prototype.forEach.call($("tabYou").children, function(el){
+    if(el.id !== "uploadCard") el.hidden = on;
+  });
+}
+
+function uploadSays(text, fill){
+  $("uploadNote").textContent = text;
+  $("uploadBar").hidden = fill == null;
+  if(fill != null) $("uploadFill").style.width = Math.round(fill * 100) + "%";
+}
+
+function pollUpload(){
+  fetch("/api/history/status").then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(st){
+      if(!st) return;
+      if(st.state === "processing"){
+        uploadSays("Reading your history\u2026", 0.85);
+        setTimeout(pollUpload, 1500);
+      } else if(st.state === "done"){
+        uploadSays("Done \u2014 " + st.plays.toLocaleString() + " plays, " +
+                   String(st.first).slice(0, 4) + " to " + String(st.last).slice(0, 4) + ".", 1);
+        setTimeout(function(){ location.reload(); }, 1400);
+      } else if(st.state === "failed"){
+        uploadSays(st.message || "That export couldn\u2019t be read.", null);
+      }
+    }).catch(function(){ setTimeout(pollUpload, 3000); });
+}
+
+$("uploadFile").addEventListener("change", function(){
+  var f = this.files && this.files[0];
+  this.value = "";
+  if(!f) return;
+  if(f.size > UPLOAD_LIMIT){
+    uploadSays("That file is larger than a Spotify export.", null);
+    return;
+  }
+  var xhr = new XMLHttpRequest();
+  xhr.open("POST", "/api/history/upload");
+  xhr.setRequestHeader("Content-Type", "application/zip");
+  /* The upload is most of the wait, so it fills most of the bar. */
+  xhr.upload.onprogress = function(e){
+    if(e.lengthComputable) uploadSays("Uploading\u2026", 0.75 * e.loaded / e.total);
+  };
+  xhr.onload = function(){
+    if(xhr.status === 202){ pollUpload(); return; }
+    var said = null;
+    try { said = JSON.parse(xhr.responseText).detail; } catch(e){}
+    uploadSays(said ? said.charAt(0).toUpperCase() + said.slice(1) + "." : "The upload didn\u2019t go through.", null);
+  };
+  xhr.onerror = function(){ uploadSays("The upload didn\u2019t go through. Try again.", null); };
+  uploadSays("Uploading\u2026", 0);
+  xhr.send(f);
 });
 
 function renderPeople(){
@@ -6643,6 +6733,11 @@ showScreen("home");
    page above is a placeholder for the time that takes. */
 loadAccounts().then(function(){
   if(!ME){ showSignIn(); return; }
+  if(!ME_HAS_HISTORY){
+    showUpload(true);
+    /* Reloaded while an upload was being read: pick up where it was. */
+    pollUpload();
+  }
   /* A sign-in that just finished, or failed while a session survived it: either
      way the message has been seen, so a reload should not say it again. */
   if(location.search.indexOf("login=") >= 0) history.replaceState(null, "", location.pathname);
