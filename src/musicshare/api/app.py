@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import secrets
+import shutil
 import threading
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -33,6 +34,7 @@ from musicshare import playlists as pl_mod
 from musicshare import regions as regions_mod
 from musicshare import shows as shows_mod
 from musicshare import streak as streak_mod
+from musicshare import upload as upload_mod
 from musicshare.config import settings
 from musicshare.spec import ChartSpec, plot, run_chart, validate, validate_chart
 from musicshare.spec.apply import familiar_enough
@@ -209,6 +211,70 @@ def profile_card() -> dict[str, object]:
     """The computed facts at the top of a profile - hours, plays, genres - for
     whoever is being looked at."""
     return card_mod.card()
+
+
+# --------------------------------------------------------- bringing a history
+
+
+@app.post("/api/history/upload")
+async def upload_history(request: Request) -> JSONResponse:
+    """Take a Spotify export zip and turn it into this account's history.
+
+    The zip is untrusted and large, so it is streamed to disk with the size
+    counted as it arrives - Content-Length is checked first but believed only
+    as far as the bytes actually sent - and processed after the request has
+    answered. The page asks /api/history/status how it went. Only ever the
+    signed-in account's own history: nothing here reads a ?user=.
+    """
+    uid = users.current()
+    if upload_mod.busy(uid):
+        raise HTTPException(409, "an export is already being read for this account")
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > upload_mod.MAX_UPLOAD:
+        raise HTTPException(413, "that file is larger than a Spotify export")
+
+    folder = users.path(uid) / "incoming"
+    shutil.rmtree(folder, ignore_errors=True)
+    folder.mkdir(parents=True)
+    archive = folder / "upload.zip"
+    size = 0
+    with archive.open("wb") as out:
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > upload_mod.MAX_UPLOAD:
+                out.close()
+                shutil.rmtree(folder, ignore_errors=True)
+                raise HTTPException(413, "that file is larger than a Spotify export")
+            out.write(chunk)
+    if not size:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise HTTPException(400, "that file is empty")
+
+    upload_mod.set_status(uid, state="processing", bytes=size)
+    threading.Thread(target=_read_upload, args=(uid, archive), daemon=True).start()
+    return JSONResponse({"state": "processing"}, status_code=202)
+
+
+def _read_upload(uid: str, archive) -> None:
+    """The work behind an upload, off the request. Always leaves a status."""
+    try:
+        result = upload_mod.process(uid, archive)
+    except Exception:
+        log.exception("reading an uploaded export failed for %s", uid)
+        result = {
+            "state": "failed",
+            "message": "Something went wrong reading that export. Try it again.",
+        }
+    # The map was drawn from the history that has just been replaced.
+    for key in [k for k in _map_cache if k[0] == uid]:
+        _map_cache.pop(key, None)
+    upload_mod.set_status(uid, **result)
+
+
+@app.get("/api/history/status")
+def history_status() -> dict[str, object]:
+    """How the last upload went: none, processing, done or failed."""
+    return upload_mod.status(users.current())
 
 
 @app.get("/api/users")
