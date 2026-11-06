@@ -11,6 +11,9 @@ import pytest
 
 from musicshare import media
 
+# Storage paths are per account, so every call needs someone to be about.
+pytestmark = pytest.mark.usefixtures("one_account")
+
 # A real 1x1 GIF, so `sniff` is reading a genuine header rather than a string
 # that happens to start with the right letters.
 GIF = bytes.fromhex(

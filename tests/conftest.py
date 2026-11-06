@@ -41,6 +41,19 @@ def _no_accounts_written_to_real_data():
     assert not leaked, f"a test created accounts in the real data dir: {sorted(leaked)}"
 
 
+@pytest.fixture
+def one_account(tmp_path, monkeypatch):
+    """An account of the test's own, for tests that call the app as someone.
+
+    Without one, a call that names nobody falls back to the only account on
+    disk - which on a laptop is the real one, and in CI does not exist. Tests
+    that leaned on that passed here and failed on every push.
+    """
+    monkeypatch.setattr(users, "USERS_DIR", tmp_path / "users")
+    users.save({"id": "tester", "display_name": "Tester"})
+    return "tester"
+
+
 @pytest.fixture(autouse=True)
 def _no_capture_database(request, monkeypatch):
     """Only integration tests reach Supabase.

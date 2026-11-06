@@ -7,12 +7,19 @@ first, and refuses a spec it cannot draw or no longer recognises.
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from musicshare.api import app as app_mod
 from musicshare.spec.chartrun import ChartData
 
 client = TestClient(app_mod.app)
+
+
+@pytest.fixture(autouse=True)
+def _someone_with_history(one_account, monkeypatch):
+    """The executor is faked, so the history only has to be said to exist."""
+    monkeypatch.setattr(app_mod.history_mod, "has_any", lambda uid=None: True)
 
 
 def _fake(monkeypatch, data: ChartData | None = None) -> list[str]:
