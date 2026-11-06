@@ -1,0 +1,49 @@
+# Deploy to Fly.io once CI has passed on main - never from a red build, and
+# never from another branch. Also runnable by hand from the Actions tab.
+#
+# Needs one repository secret: FLY_API_TOKEN, a deploy token for the munity app
+# (`fly tokens create deploy -a munity`).
+
+name: Deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One deploy at a time, and a newer one waits rather than cancelling one that
+# is halfway through replacing the machine.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # The commit CI actually tested, not whatever main is by now.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::error::the FLY_API_TOKEN repository secret is not set"
+            exit 1
+          fi
+          flyctl deploy --remote-only --ha=false

@@ -332,7 +332,9 @@ def _fitted() -> tuple[object, object, object]:
 
 @app.get("/health")
 def health() -> dict[str, object]:
-    return {"ok": True, "has_history": taste.has_history()}
+    # Only whether the process answers. It once also said whether "the" user had
+    # a history, which is a fact about someone, given to anyone who asks.
+    return {"ok": True}
 
 
 @app.get("/api/search")

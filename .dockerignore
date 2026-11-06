@@ -1,0 +1,8 @@
+# The image is pyproject, src and profile.html. Everything else stays out -
+# above all the data (it lives on the volume) and anything holding secrets.
+*
+!pyproject.toml
+!src/
+!profile.html
+**/__pycache__
+**/*.py[cod]

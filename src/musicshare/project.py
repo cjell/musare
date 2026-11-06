@@ -54,9 +54,16 @@ METRIC = "euclidean"
 
 @dataclass
 class Basemap:
-    """A fitted projection, plus where the corpus itself landed in it."""
+    """A fitted projection, plus where the corpus itself landed in it.
 
-    model: Any  # umap.UMAP, fitted
+    `model` is None after `load_basemap` until something needs it. Drawing a map
+    reads only `xy` - every artist anyone can play is already on it - and the
+    pickled model is 393MB that would otherwise sit in memory, and in every
+    deploy, to serve a code path the app does not take. `fitted()` loads it the
+    first time a new vector actually has to be placed.
+    """
+
+    model: Any  # umap.UMAP, fitted; None until fitted() is called
     xy: Any  # (n_corpus, 2)
     artists: list[str]
     seed: int
@@ -65,6 +72,16 @@ class Basemap:
 
     def __len__(self) -> int:
         return len(self.artists)
+
+    def fitted(self) -> Any:
+        if self.model is None:
+            if not BASEMAP.exists():
+                raise FileNotFoundError(
+                    f"{BASEMAP} is not here - placing a new vector needs the fitted model"
+                )
+            with BASEMAP.open("rb") as fh:
+                self.model = pickle.load(fh)
+        return self.model
 
 
 def fit_basemap(space: Space | None = None, sample: int | None = None) -> Basemap:
@@ -110,7 +127,7 @@ def save_basemap(b: Basemap) -> None:
     # upgrade, refit rather than trying to repair it, and remember that refitting
     # moves every saved position.
     with BASEMAP.open("wb") as fh:
-        pickle.dump(b.model, fh, protocol=pickle.HIGHEST_PROTOCOL)
+        pickle.dump(b.fitted(), fh, protocol=pickle.HIGHEST_PROTOCOL)
     np.save(BASEMAP_XY, b.xy)
     BASEMAP_META.write_text(
         json.dumps(
@@ -129,13 +146,12 @@ def save_basemap(b: Basemap) -> None:
 
 
 def load_basemap() -> Basemap:
-    if not (BASEMAP.exists() and BASEMAP_XY.exists() and BASEMAP_META.exists()):
+    """The map's positions. The model behind them loads on first use - see Basemap."""
+    if not (BASEMAP_XY.exists() and BASEMAP_META.exists()):
         raise FileNotFoundError(f"no basemap in {OUT_DIR}; run fit_basemap and save_basemap")
     meta = json.loads(BASEMAP_META.read_text(encoding="utf-8"))
-    with BASEMAP.open("rb") as fh:
-        model = pickle.load(fh)
     return Basemap(
-        model=model,
+        model=None,
         xy=np.load(BASEMAP_XY),
         artists=meta["artists"],
         seed=meta["seed"],
@@ -158,12 +174,13 @@ def place(b: Basemap, Z: Any, retries: int = 3) -> Any:
     whole drawing with it.
     """
     Z = np.atleast_2d(np.asarray(Z, dtype=np.float32))
-    xy = np.asarray(b.model.transform(Z), dtype=np.float32)
+    model = b.fitted()
+    xy = np.asarray(model.transform(Z), dtype=np.float32)
     for _ in range(retries):
         bad = ~np.isfinite(xy).all(axis=1)
         if not bad.any():
             return xy
-        xy[bad] = np.asarray(b.model.transform(Z[bad]), dtype=np.float32)
+        xy[bad] = np.asarray(model.transform(Z[bad]), dtype=np.float32)
     bad = ~np.isfinite(xy).all(axis=1)
     if bad.any():
         log.warning("%d point(s) would not project after %d retries", bad.sum(), retries)

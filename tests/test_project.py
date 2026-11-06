@@ -248,3 +248,39 @@ def test_atlas_map_lately_is_its_own_share_not_all_time_relabelled(atlas, basema
     lately = [r for r in m["regions"] if r["recent_share"] > 0]
     assert len(lately) == 1 and lately[0]["recent_share"] == 1.0
     assert lately[0]["recent_hours"] > 0
+
+
+# ------------------------------------------------------------- the lazy model
+
+
+def test_the_map_loads_without_the_fitted_model(basemap, tmp_path, monkeypatch):
+    """The server holds positions, not the 393MB pickle; only placing needs that."""
+    for name, path in (
+        ("BASEMAP", "basemap.pkl"),
+        ("BASEMAP_XY", "xy.npy"),
+        ("BASEMAP_META", "b.json"),
+    ):
+        monkeypatch.setattr(project, name, tmp_path / path)
+    project.save_basemap(basemap)
+    project.BASEMAP.unlink()
+
+    loaded = project.load_basemap()
+    assert loaded.model is None and len(loaded) == len(basemap)
+    xy, keep = project.positions(loaded, basemap.artists[:3])
+    assert len(keep) == 3 and xy.shape == (3, 2), "drawing works from positions alone"
+    with pytest.raises(FileNotFoundError, match="fitted model"):
+        project.place(loaded, np.ones((1, 4)))
+
+
+def test_the_fitted_model_loads_the_first_time_it_is_needed(basemap, tmp_path, monkeypatch):
+    for name, path in (
+        ("BASEMAP", "basemap.pkl"),
+        ("BASEMAP_XY", "xy.npy"),
+        ("BASEMAP_META", "b.json"),
+    ):
+        monkeypatch.setattr(project, name, tmp_path / path)
+    project.save_basemap(basemap)
+    loaded = project.load_basemap()
+    assert loaded.model is None
+    assert project.place(loaded, np.ones((1, 4))).shape == (1, 2)
+    assert isinstance(loaded.model, StubModel)

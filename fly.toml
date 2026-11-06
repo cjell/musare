@@ -1,0 +1,48 @@
+# munity on Fly.io. Deployed by .github/workflows/deploy.yml after CI passes on main.
+#
+# One machine, on purpose: accounts and histories are files on one volume, and
+# the app keeps per-process locks and caches. Deploy with --ha=false so Fly does
+# not start a second machine that has no volume.
+
+app = "munity"
+primary_region = "iad"  # near the Supabase project (us-east-2)
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PRODUCTION = "true"
+  SPOTIFY_REDIRECT_URI = "https://munity.fly.dev/api/auth/callback/spotify"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Capture runs in Supabase, not here, so nothing is lost while this sleeps;
+  # the first request after a quiet spell wakes it in a couple of seconds.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 40
+    hard_limit = 60
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/health"
+
+[mounts]
+  source = "munity_data"
+  destination = "/app/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+
+# An upload is read with DuckDB capped at 512MB, beside the map's ~250MB in
+# memory. Swap is the margin for the two at once rather than a crash.
+swap_size_mb = 1024

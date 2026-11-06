@@ -294,6 +294,17 @@ Python 3.13, FastAPI, DuckDB over Parquet, Pydantic for every spec, Supabase
 the front end - no build step, because the design is the thing I iterate on
 fastest and a toolchain between me and it costs more than it gives.
 
+## Hosting
+
+It runs on one Fly.io machine, deployed by GitHub Actions after CI passes on
+main. The image is code only, about the size of its dependencies. Accounts,
+histories and the map's artefacts live on a volume, so a deploy never touches
+anyone's data. The map is drawn from stored positions, which is why the 393MB
+fitted UMAP model stays off the server entirely: it is only needed to place an
+artist the map has never seen, and serving never does that. Capture doesn't
+need the machine either - it runs in Supabase - so the machine sleeps when
+nobody is using it.
+
 ## The Spotify constraint
 
 Spotify closed extended API quota to individuals in May 2025 - it now requires a
