@@ -37,7 +37,15 @@ import httpx
 
 from musicshare import users
 from musicshare.config import settings
-from musicshare.history import connect, export_glob, has_export, has_live, live_dir
+from musicshare.history import (
+    LIVE_PATTERN,
+    connect,
+    export_glob,
+    has_export,
+    has_live,
+    live_dir,
+    live_glob,
+)
 
 log = logging.getLogger(__name__)
 
@@ -204,7 +212,7 @@ def _first_day(uid: str) -> date | None:
     marks = []
     if has_live(uid):
         newest = con.execute(
-            f"select max(played_at) from read_parquet('{(live_dir(uid) / '*.parquet').as_posix()}')"
+            f"select max(played_at) from read_parquet('{live_glob(uid)}')"
         ).fetchone()[0]
         if newest:
             marks.append(newest - REREAD)
@@ -236,7 +244,7 @@ def _store(rows: list[dict[str, Any]], first_day: date | None, uid: str) -> bool
     floor = first_day.strftime("%Y%m%d") if first_day else ""
     held = {
         p.stem.removeprefix("live-"): p
-        for p in folder.glob("live-*.parquet")
+        for p in folder.glob(LIVE_PATTERN)
         if p.stem.removeprefix("live-") >= floor
     }
 
@@ -405,7 +413,7 @@ def prune(uid: str | None = None) -> int:
     else stays however old it is. The database keeps its copy either way.
     """
     uid = uid or users.current()
-    files = sorted(live_dir(uid).glob("live-*.parquet"))
+    files = sorted(live_dir(uid).glob(LIVE_PATTERN))
     if not files or not has_export(uid):
         return 0
 

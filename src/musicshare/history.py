@@ -53,8 +53,15 @@ def account_glob(uid: str | None = None) -> str:
     return (account_dir(uid) / "*.parquet").as_posix()
 
 
+# The live files by name, not every parquet in the folder. DuckDB's COPY writes
+# to tmp_<name> and renames it into place, so for the moment a pull is writing a
+# day there is a second file a bare *.parquet also matches - one that is gone by
+# the time a query that listed it tries to open it.
+LIVE_PATTERN = "live-*.parquet"
+
+
 def live_glob(uid: str | None = None) -> str:
-    return (live_dir(uid) / "*.parquet").as_posix()
+    return (live_dir(uid) / LIVE_PATTERN).as_posix()
 
 
 # Everything the export carries. Live rows fill what they can and null the rest,
@@ -121,7 +128,7 @@ def has_account(uid: str | None = None) -> bool:
 
 
 def has_live(uid: str | None = None) -> bool:
-    return _any(lambda: live_dir(uid), "*.parquet")
+    return _any(lambda: live_dir(uid), LIVE_PATTERN)
 
 
 def has_any(uid: str | None = None) -> bool:

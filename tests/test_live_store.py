@@ -335,3 +335,21 @@ def test_a_pull_already_running_is_not_started_twice(monkeypatch):
     release.set()
     first.join(5)
     assert calls == [1]
+
+
+def test_a_day_being_written_is_not_read(store):
+    """DuckDB's COPY writes to tmp_<name> and renames it into place. A query
+    that listed the folder mid-write tried to open that file just after it was
+    renamed away, and the chart behind it failed with a 500."""
+    from musicshare import history
+
+    live._store([row(datetime(2026, 9, 14, 1, 0))], None, UID)
+    (store / "tmp_live-20260915.parquet").write_bytes(b"half a parquet file")
+    n = (
+        duckdb.connect()
+        .execute(f"select count(*) from read_parquet('{history.live_glob(UID)}')")
+        .fetchone()[0]
+    )
+    assert n == 1
+    assert live._first_day(UID) is not None
+    assert history.connect(uid=UID).execute("select count(*) from plays").fetchone()[0] == 1
