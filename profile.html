@@ -4647,7 +4647,7 @@ var KEPT_MAX = 12;
    see. These are yours and they are live: what is stored is the spec - the
    question as it was understood - and every render re-runs it against whatever
    has been played since. The model reads a question once, when it is asked. */
-var HOME_CHARTS_MAX = 3, homeChartSeq = 0;
+var HOME_CHARTS_MAX = 3, homeChartSeq = 0, homeChartsDrawn = "";
 
 function homePins(){
   var c = CUSTOM[0] || {};
@@ -4692,7 +4692,7 @@ function dayNav(id, back, data, cap){
 function renderHomeCharts(){
   var pins = homePins();
   $("homeChartsSec").hidden = !pins.length;
-  if(!pins.length){ $("homeCharts").innerHTML = ""; return; }
+  if(!pins.length){ $("homeCharts").innerHTML = ""; homeChartsDrawn = ""; return; }
   var seq = ++homeChartSeq;
   Promise.all(pins.map(function(p){
     /* A frozen chart is the numbers it was frozen with; only live ones ask. */
@@ -4731,6 +4731,11 @@ function renderHomeCharts(){
               '</div><div class="chart-note">' + why + '</div><div class="chart-q">' +
               esc(p.q) + "</div></div>";
     });
+    /* Coming back to Home with nothing changed leaves the drawn charts where
+       they are, rather than tearing them down to draw the same thing again. */
+    var drawn = html + JSON.stringify(draw);
+    if(drawn === homeChartsDrawn && $("homeCharts").children.length) return;
+    homeChartsDrawn = drawn;
     $("homeCharts").innerHTML = html;
     draw.forEach(function(d){
       drawChart(document.querySelector('#homeCharts [data-chart="home' + d[0] + '"]'), d[1], pins[d[0]].style);
@@ -6122,14 +6127,25 @@ function plainStyle(st){
     (st.gridlines || "normal") === "normal" && (st.values || "auto") === "auto");
 }
 
+/* A plan is a pure function of the numbers and the style, so it is kept for
+   the session: a styled chart redrawn on a later visit draws from memory
+   instead of waiting on the server again. */
+var PLAN_CACHE = {};
 function planFor(d, style){
-  return fetch("/api/chart/plan", {
+  var key = JSON.stringify([d, style]);
+  if(PLAN_CACHE[key]) return PLAN_CACHE[key];
+  var p = fetch("/api/chart/plan", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ data: d, style: style })
   }).then(function(r){ return r.ok ? r.json() : null; })
-    .then(function(res){ return res && res.plan; })
-    .catch(function(){ return null; });
+    .then(function(res){
+      if(!(res && res.plan)) delete PLAN_CACHE[key];
+      return res && res.plan;
+    })
+    .catch(function(){ delete PLAN_CACHE[key]; return null; });
+  PLAN_CACHE[key] = p;
+  return p;
 }
 
 function hexAlpha(hex, a){
@@ -6494,27 +6510,51 @@ function modeBar(m){
 
 /* `scaleBack` asks the server to hold one height across that many windows, so
    stepping through days compares them instead of redrawing each to fit. */
+/* Every visit to Home, a profile or Charts used to run every live chart again
+   and wait for all of them before drawing, so switching screens blanked the
+   charts for as long as the slowest query took. A result is now reused for a
+   minute - live charts still move within a minute of a new play - and the
+   promise itself is shared, so the same chart on Home and on your profile is
+   one request rather than two. Failures are not kept. */
+var RUN_TTL = 60 * 1000, RUN_CACHE = {};
+function cachedRun(key, make){
+  var hit = RUN_CACHE[key];
+  if(hit && Date.now() - hit.t < RUN_TTL) return hit.p;
+  var p = make().then(function(res){
+    if(!res || res.understood === false) delete RUN_CACHE[key];
+    return res;
+  });
+  RUN_CACHE[key] = { t: Date.now(), p: p };
+  return p;
+}
+
 function runSpec(spec, back, scaleBack){
   var q = [];
   if(back) q.push("back=" + back);
   if(scaleBack) q.push("scale_back=" + scaleBack);
-  return fetch("/api/chart/run" + (q.length ? "?" + q.join("&") : ""), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(spec)
-  }).then(function(r){
-    /* A 422 is a spec the schema no longer accepts - saved before a change. */
-    return r.ok ? r.json() : { understood: false };
-  }).catch(function(){ return null; });
+  var url = "/api/chart/run" + (q.length ? "?" + q.join("&") : "");
+  return cachedRun("run " + url + " " + JSON.stringify(spec), function(){
+    return fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(spec)
+    }).then(function(r){
+      /* A 422 is a spec the schema no longer accepts - saved before a change. */
+      return r.ok ? r.json() : { understood: false };
+    }).catch(function(){ return null; });
+  });
 }
 
 /* A chart pinned on a friend's profile, re-run over their history. The server
    reads the spec from their saved profile by slot; /api/chart/run would run it
    over yours. */
 function runPinned(slot, of){
-  return fetch(asUser("/api/chart/pinned?slot=" + slot, of)).then(function(r){
-    return r.ok ? r.json() : { understood: false };
-  }).catch(function(){ return null; });
+  var url = asUser("/api/chart/pinned?slot=" + slot, of);
+  return cachedRun("pinned " + url, function(){
+    return fetch(url).then(function(r){
+      return r.ok ? r.json() : { understood: false };
+    }).catch(function(){ return null; });
+  });
 }
 
 /* `theirs` is { slot, of } for a pin on someone else's profile, else null. */
