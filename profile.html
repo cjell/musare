@@ -5129,7 +5129,8 @@ var CROP = {
   banner: { work: 2000, out: 1500, aspect: 420 / 216, title: "Position your banner" },
   avatar: { work: 1200, out: 640, aspect: 1, title: "Position your photo" }
 };
-var crop = { img: null, key: null, cfg: null, zoom: 1, base: 1, x: 0, y: 0, drag: null };
+var crop = { img: null, key: null, cfg: null, zoom: 1, base: 1, x: 0, y: 0, fw: 0 };
+var CROP_MAX_ZOOM = 3.2;
 
 function cropFrame(){
   var cv = $("cropCanvas");
@@ -5150,6 +5151,14 @@ function clampCrop(){
 function drawCrop(){
   if(!crop.img) return;
   var cv = $("cropCanvas"), f = cropFrame();
+  /* The sheet changes width when the window does - a phone turned sideways - and
+     the position is in frame pixels, so it scales with the frame rather than
+     sliding to a different part of the photo. */
+  if(crop.fw && f.w !== crop.fw){
+    var r = f.w / crop.fw;
+    crop.x *= r; crop.y *= r; crop.base *= r;
+  }
+  crop.fw = f.w;
   var dpr = Math.min(2, window.devicePixelRatio || 1);
   cv.width = Math.round(f.w * dpr);
   cv.height = Math.round(f.h * dpr);
@@ -5171,7 +5180,7 @@ function openCrop(key, file){
     var work = downscale(raw, cfg.work);
     var img = new Image();
     img.onload = function(){
-      crop.img = img; crop.key = key; crop.cfg = cfg; crop.zoom = 1;
+      crop.img = img; crop.key = key; crop.cfg = cfg; crop.zoom = 1; crop.fw = 0;
       closeCust();
       $("cropHead").textContent = cfg.title;
       $("cropMask").className = "crop-mask" + (key === "avatar" ? " circle" : "");
@@ -5241,28 +5250,78 @@ wirePhoto("avatarFile", "avatar");
 $("cropCancel").addEventListener("click", closeCrop);
 $("cropBg").addEventListener("click", closeCrop);
 $("cropSave").addEventListener("click", saveCrop);
-$("cropZoom").addEventListener("input", function(){
-  crop.zoom = (+this.value) / 100;
+/* Zoom about a point of the frame - its centre for the slider, the fingers or
+   the cursor otherwise - so what is under that point stays under it. Zooming
+   used to scale the photo from its top-left corner without moving it, so the
+   part being looked at slid away down and to the right. */
+function zoomCrop(z, cx, cy){
+  if(!crop.img) return;
+  var f = cropFrame();
+  if(cx == null){ cx = f.w / 2; cy = f.h / 2; }
+  z = Math.max(1, Math.min(CROP_MAX_ZOOM, z));
+  crop.x = cx - (cx - crop.x) * z / crop.zoom;
+  crop.y = cy - (cy - crop.y) * z / crop.zoom;
+  crop.zoom = z;
+  $("cropZoom").value = Math.round(z * 100);
   drawCrop();
-});
+}
 
+$("cropZoom").addEventListener("input", function(){ zoomCrop((+this.value) / 100); });
+window.addEventListener("resize", function(){ if(!$("cropWrap").hidden) drawCrop(); });
+
+/* One finger or the mouse pans, two fingers pinch. Panning moves by how far the
+   pointer moved since the last event, against the clamped position, so dragging
+   past an edge and back moves the photo straight away instead of waiting for
+   the pointer to come back to where the edge was hit. */
 (function(){
-  var stage = $("cropStage");
+  var stage = $("cropStage"), pts = {}, pinch = null;
+  function local(e){
+    var r = stage.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+  function ids(){ return Object.keys(pts); }
+  function startPinch(){
+    var a = pts[ids()[0]], b = pts[ids()[1]];
+    pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, zoom: crop.zoom,
+              mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2 };
+  }
   stage.addEventListener("pointerdown", function(e){
     if(!crop.img) return;
-    crop.drag = { x: e.clientX - crop.x, y: e.clientY - crop.y };
+    pts[e.pointerId] = local(e);
+    try { stage.setPointerCapture(e.pointerId); } catch(err){}
     stage.classList.add("dragging");
-    stage.setPointerCapture(e.pointerId);
+    if(ids().length === 2) startPinch();
   });
   stage.addEventListener("pointermove", function(e){
-    if(!crop.drag) return;
-    crop.x = e.clientX - crop.drag.x;
-    crop.y = e.clientY - crop.drag.y;
+    var last = pts[e.pointerId];
+    if(!last || !crop.img) return;
+    var now = local(e);
+    pts[e.pointerId] = now;
+    if(ids().length >= 2 && pinch){
+      var a = pts[ids()[0]], b = pts[ids()[1]];
+      var mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      crop.x += mx - pinch.mx; crop.y += my - pinch.my;
+      pinch.mx = mx; pinch.my = my;
+      zoomCrop(pinch.zoom * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d, mx, my);
+      return;
+    }
+    crop.x += now.x - last.x;
+    crop.y += now.y - last.y;
     drawCrop();
   });
-  function end(){ crop.drag = null; stage.classList.remove("dragging"); }
+  function end(e){
+    delete pts[e.pointerId];
+    if(ids().length === 2) startPinch(); else pinch = null;
+    if(!ids().length) stage.classList.remove("dragging");
+  }
   stage.addEventListener("pointerup", end);
   stage.addEventListener("pointercancel", end);
+  stage.addEventListener("wheel", function(e){
+    if(!crop.img) return;
+    e.preventDefault();
+    var at = local(e);
+    zoomCrop(crop.zoom * Math.exp(-e.deltaY * 0.0015), at.x, at.y);
+  }, { passive: false });
 })();
 
 $("custReset").addEventListener("click", function(){
