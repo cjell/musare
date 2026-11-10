@@ -20,7 +20,7 @@ import threading
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from starlette.middleware.sessions import SessionMiddleware
 
 from musicshare import auth, taste, users
@@ -78,6 +78,7 @@ VIEWABLE = (
     "/api/streak",
     "/api/map",
     "/api/playlists",
+    "/api/chart/pinned",
 )
 
 
@@ -661,6 +662,52 @@ def chart_run(
         }
     live_mod.pull_if_stale()
     d = run_chart(spec, back=back, scale_over=scale_back)
+    return {"understood": True, "empty": d.empty, "problems": [], "data": _chart_payload(d)}
+
+
+# Matches PIN_SLOTS.charts in the page.
+CHART_PIN_SLOTS = 2
+
+
+@app.get("/api/chart/pinned", dependencies=[Depends(needs_history)])
+def chart_pinned(slot: int = Query(..., ge=0, lt=CHART_PIN_SLOTS)) -> dict[str, object]:
+    """Re-run a chart pinned on a profile, over that profile's own history.
+
+    What makes a friend's live chart look on their profile the way it does on
+    yours. /api/chart/run cannot do it: it takes the spec from the request and
+    always runs over the signed-in account, so a friend's chart would quietly
+    redraw from the visitor's listening. Here the spec comes from the owner's
+    saved profile, never from the request, so a visitor can refresh exactly the
+    charts the owner chose to show and cannot point an arbitrary query at
+    someone else's history.
+    """
+    if not media_mod.configured():
+        raise HTTPException(503, "storage is not configured")
+    try:
+        doc = media_mod.get_doc("profile") or {}
+    except Exception as e:
+        log.warning("profile read failed: %s", e)
+        raise HTTPException(502, "could not read the profile") from e
+    # The page's older format kept the owner's document under "0".
+    if isinstance(doc.get("0"), dict):
+        doc = doc["0"]
+    pins = ((doc.get("pins") or {}).get("charts")) or []
+    pin = pins[slot] if slot < len(pins) else None
+    if not isinstance(pin, dict) or not isinstance(pin.get("spec"), dict):
+        raise HTTPException(404, "no chart pinned there")
+    try:
+        spec = ChartSpec.model_validate(pin["spec"])
+    except ValidationError:
+        # Saved against an older schema: the page falls back to the saved rows.
+        return {"understood": False, "problems": []}
+    problems = validate_chart(spec)
+    if problems or not spec.understood:
+        return {
+            "understood": False,
+            "problems": [{"field": p.field, "message": p.message} for p in problems],
+        }
+    live_mod.pull_if_stale()
+    d = run_chart(spec)
     return {"understood": True, "empty": d.empty, "problems": [], "data": _chart_payload(d)}
 
 

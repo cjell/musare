@@ -5885,9 +5885,9 @@ function renderPins(p){
      the count only existed for tracks pinned from this listener's own history -
      anything pinned from search had none, so the column read as half-broken.
      On repeat and the song movers keep their counts, which do mean something. */
-  var tp = pinList("tracks"), tAny = self && tp.some(Boolean), th = "";
+  var tp = pinList("tracks"), tAny = tp.some(Boolean), th = "";
   for(var i = 0; i < PIN_SLOTS.tracks; i++){
-    var pin = self ? tp[i] : null;
+    var pin = tp[i];
     var demo = (!tAny && p.tracks[i]) ? p.tracks[i] : null;
     if(pin){
       th += '<div class="row pinbox" tabindex="0" role="button">' +
@@ -5895,7 +5895,7 @@ function renderPins(p){
         "<div " + artAttr(pin, pin.name, hue) + "></div>" +
         '<div class="meta"><div class="tt">' + esc(pin.name) + '</div><div class="ta">' +
         esc(pin.artist_name) + "</div></div>" +
-        unpinBtn("tracks", i) + "</div>";
+        (self ? unpinBtn("tracks", i) : "") + "</div>";
     } else if(demo && !editing){
       th += '<div class="row" tabindex="0" role="button">' +
         '<span class="idx">' + (i + 1) + "</span>" +
@@ -5908,16 +5908,16 @@ function renderPins(p){
   }
   $("tracks").innerHTML = th;
 
-  var ap = pinList("artists"), aAny = self && ap.some(Boolean), ah = "";
+  var ap = pinList("artists"), aAny = ap.some(Boolean), ah = "";
   for(var j = 0; j < PIN_SLOTS.artists; j++){
-    var apin = self ? ap[j] : null;
+    var apin = ap[j];
     var ademo = (!aAny && p.artists[j]) ? p.artists[j] : null;
     if(apin){
       ah += '<div class="artist pinbox" tabindex="0" role="button">' +
         '<div class="ring"><div ' + artAttr(apin, apin.name, hue) + "></div></div>" +
         '<div class="an">' + esc(apin.name) + '</div><div class="ameta">' +
         (apin.your_hours ? esc(apin.your_hours) + "h" : "") + "</div>" +
-        unpinBtn("artists", j) + "</div>";
+        (self ? unpinBtn("artists", j) : "") + "</div>";
     } else if(ademo && !editing){
       ah += '<div class="artist" tabindex="0" role="button">' +
         '<div class="ring"><div class="art" style="' + artStyle(ademo[0], hue) + '"></div></div>' +
@@ -5930,15 +5930,15 @@ function renderPins(p){
 
   /* Albums have no sample data - the section only exists once you pin one, and
      in edit mode where its empty slots are the invitation. */
-  var bp = pinList("albums"), bAny = self && bp.some(Boolean), bh = "";
+  var bp = pinList("albums"), bAny = bp.some(Boolean), bh = "";
   for(var k = 0; k < PIN_SLOTS.albums; k++){
-    var bpin = self ? bp[k] : null;
+    var bpin = bp[k];
     if(bpin){
       bh += '<div class="pl pinbox" tabindex="0" role="button" data-album="' + k + '">' +
         "<div " + artAttr(bpin, bpin.name, hue) + "></div>" +
         '<div class="pn">' + esc(bpin.name) + '</div><div class="pm">' +
         esc((bpin.release_date || "").slice(0, 4)) + "</div>" +
-        unpinBtn("albums", k) + "</div>";
+        (self ? unpinBtn("albums", k) : "") + "</div>";
     } else if(editing && self){
       bh += slotCell("albums", k, "slot-sq", "pl", "pn", "pm");
     }
@@ -5946,12 +5946,12 @@ function renderPins(p){
   /* A chart pin stores the spec, the rows and the question. The rows mean a
      visitor sees it without a server; the spec means it can be refreshed into
      a live one later without re-asking the model. */
-  var cp = pinList("charts"), cAny = self && cp.some(Boolean), ch = "";
+  var cp = pinList("charts"), cAny = cp.some(Boolean), ch = "";
   for(var q = 0; q < PIN_SLOTS.charts; q++){
-    var cpin = self ? cp[q] : null;
+    var cpin = cp[q];
     if(cpin && cpin.data){
       ch += '<div class="pl chartpin pinbox">' +
-        chartCard(cpin.data, { unpin: unpinBtn("charts", q), key: "pin" + q,
+        chartCard(cpin.data, { unpin: self ? unpinBtn("charts", q) : "", key: "pin" + q,
           mode: { live: isLive(cpin, "pin"), since: cpin.frozenAt || cpin.at } }) + "</div>";
     } else if(editing && self){
       ch += '<div class="pl chartpin">' + slotBtn("charts", q, "slot-sq") + "</div>";
@@ -5962,7 +5962,8 @@ function renderPins(p){
   $("chartAux").textContent = cAny ? cp.filter(Boolean).length + " pinned" : "";
   for(var z = 0; z < PIN_SLOTS.charts; z++){
     if(cp[z] && cp[z].data){
-      drawRecord(cp[z], "pin", document.querySelector('#charts [data-chart="pin' + z + '"]'));
+      drawRecord(cp[z], "pin", document.querySelector('#charts [data-chart="pin' + z + '"]'),
+                 self ? null : { slot: z, of: current });
     }
   }
 
@@ -6438,13 +6439,24 @@ function runSpec(spec, back, scaleBack){
   }).catch(function(){ return null; });
 }
 
-function drawRecord(rec, scope, cv){
+/* A chart pinned on a friend's profile, re-run over their history. The server
+   reads the spec from their saved profile by slot; /api/chart/run would run it
+   over yours. */
+function runPinned(slot, of){
+  return fetch(asUser("/api/chart/pinned?slot=" + slot, of)).then(function(r){
+    return r.ok ? r.json() : { understood: false };
+  }).catch(function(){ return null; });
+}
+
+/* `theirs` is { slot, of } for a pin on someone else's profile, else null. */
+function drawRecord(rec, scope, cv, theirs){
   if(!cv) return;
   if(!isLive(rec, scope) || !rec.spec){ drawChart(cv, rec.data, rec.style); return; }
-  runSpec(rec.spec).then(function(res){
+  (theirs ? runPinned(theirs.slot, theirs.of) : runSpec(rec.spec)).then(function(res){
     /* No server, or a spec that no longer fits: the saved numbers beat an empty box. */
     var fresh = res && res.understood && res.data && !res.empty;
-    if(fresh) LIVE_DATA[scope + ":" + rec.id] = res.data;
+    /* Kept only for your own charts: it is what Freeze saves. */
+    if(fresh && !theirs) LIVE_DATA[scope + ":" + rec.id] = res.data;
     drawChart(cv, fresh ? res.data : rec.data, rec.style);
   });
 }
