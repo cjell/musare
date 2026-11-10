@@ -6306,6 +6306,22 @@ function plotChart(cv, plan){
     cv.insertAdjacentHTML("afterend", '<div class="chart-note">Charts need Chart.js, which did not load.</div>');
     return;
   }
+  /* A canvas inside a screen that is not shown yet has no width, and these
+     charts are not responsive, so drawing now fixes them at nothing: opening a
+     profile renders it a moment before its screen appears, and a snapshot draws
+     straight away - a friend's charts came up blank. Wait for a size instead. */
+  if(cv._waitSize){ cv._waitSize.disconnect(); cv._waitSize = null; }
+  if(!cv.clientWidth && window.ResizeObserver){
+    var ro = new ResizeObserver(function(){
+      if(!cv.clientWidth) return;
+      ro.disconnect();
+      cv._waitSize = null;
+      if(cv.isConnected) plotChart(cv, plan);
+    });
+    cv._waitSize = ro;
+    ro.observe(cv);
+    return;
+  }
   var css = getComputedStyle(document.querySelector(".phone"));
   var accent = css.getPropertyValue("--accent").trim() || "#E74094";
   var tint = css.getPropertyValue("--accent-tint").trim() || "rgba(231,64,148,.13)";
