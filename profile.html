@@ -1348,6 +1348,10 @@ details[open] summary .chev{transform:rotate(180deg)}
 }
 .chart-mode button:hover{color:var(--ink)}
 .chart-mode button:disabled{cursor:default;color:var(--ink-3)}
+.pin-order{margin-top:9px;padding-top:8px;border-top:1px solid var(--line)}
+.chart-replace{margin-top:10px}
+.chart-replace .chart-acts{flex-wrap:wrap;margin-top:8px}
+.chart-replace .chart-acts .btn{flex:1 1 40%;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chart-mode button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
 .chart-canvas{display:block;width:100%;margin-top:10px}
 .chart-note{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3);margin-top:6px}
@@ -4483,6 +4487,7 @@ var currentScreen = "home";
 function showScreen(which){
   screenScroll[currentScreen] = window.scrollY;
   currentScreen = which;
+  if(which !== "charts"){ PIN_TARGET = null; PIN_ASK = null; }
 
   /* Every screen but a profile is yours. Opening someone's profile themes the
      whole page and makes them the current person, and nothing put that back:
@@ -4790,6 +4795,23 @@ function chartBadges(labels){
     "</div>";
 }
 
+/* Which slot the next "Pin to profile" fills - set by tapping an empty chart
+   slot on the profile - and which kept chart is waiting for a "replace which"
+   answer because the profile was full. Both end when you leave Charts. */
+var PIN_TARGET = null, PIN_ASK = null;
+
+function replaceChooser(id){
+  var pins = pinList("charts");
+  return '<div class="chart-replace"><div class="chart-note">Your profile shows ' + PIN_SLOTS.charts +
+    ' charts. Replace:</div><div class="chart-acts">' +
+    pins.map(function(pc, i){
+      var name = pc ? ((pc.data && pc.data.title) || pc.q || "Chart " + (i + 1)) : "Empty slot";
+      return '<button class="btn btn-ghost" type="button" data-replace="' + i + '" data-for="' +
+        esc(id) + '">' + esc(name) + "</button>";
+    }).join("") +
+    '<button class="btn btn-ghost" type="button" data-replace-cancel>Cancel</button></div></div>';
+}
+
 function renderKept(){
   var l = keptList(), pins = pinList("charts");
   var pinnedIds = pins.filter(Boolean).map(function(p){ return p.id; });
@@ -4811,7 +4833,7 @@ function renderKept(){
         '<button class="btn btn-ghost" type="button" data-home="' + esc(k.id) + '"' +
         (onHome ? " disabled" : "") + ">" + (onHome ? "On Home" : "Pin to Home") + "</button>" +
         '<button class="btn btn-ghost" type="button" data-drop="' + esc(k.id) + '">Remove</button>' +
-        "</div>"
+        "</div>" + (PIN_ASK === k.id ? replaceChooser(k.id) : "")
     });
   }).join("");
 
@@ -5027,20 +5049,34 @@ $("chartKept").addEventListener("click", function(e){
     renderPins(PROFILES[current]);
     return;
   }
+  if(e.target.closest("[data-replace-cancel]")){ PIN_ASK = null; renderKept(); return; }
+  var rep = e.target.closest("[data-replace]");
+  if(rep){
+    var rk = keptList()[keptIndex(rep.dataset.for)];
+    if(rk) pinChartTo(+rep.dataset.replace, rk);
+    return;
+  }
   var pin = e.target.closest("[data-pin]");
   if(!pin) return;
   var k = keptList()[keptIndex(pin.dataset.pin)];
   if(!k) return;
-  var list = pinList("charts");
-  var slot = list.indexOf(null);
-  if(slot < 0) slot = PIN_SLOTS.charts - 1;   /* full: replace the oldest */
+  /* The slot tapped on the profile, else the first free one. A full profile
+     used to lose its last chart without a word; now it asks which to replace. */
+  var slot = PIN_TARGET != null ? PIN_TARGET : pinList("charts").indexOf(null);
+  if(slot < 0){ PIN_ASK = k.id; renderKept(); return; }
+  pinChartTo(slot, k);
+});
+
+function pinChartTo(slot, k){
   setPin("charts", slot, chartRecord(k));
+  PIN_TARGET = null;
+  PIN_ASK = null;
   renderKept();
   renderPins(PROFILES[current]);
   var note = $("chartNote");
   note.className = "ask-note";
-  note.textContent = "On your profile now.";
-});
+  note.textContent = "On your profile now, in slot " + (slot + 1) + ".";
+}
 
 $("chartGo").addEventListener("click", askChart);
 $("chartInput").addEventListener("keydown", function(e){
@@ -5989,6 +6025,30 @@ function renderShelf(){
   setPlaylists(false);
 }
 
+/* Move a pinned chart up or down a slot, into an empty one or past another. */
+function pinOrderBar(q){
+  var last = PIN_SLOTS.charts - 1;
+  return '<div class="chart-mode pin-order"><span class="m">Slot ' + (q + 1) + " of " +
+    PIN_SLOTS.charts + "</span><span>" +
+    (q > 0 ? '<button type="button" data-pin-move="-1" data-idx="' + q + '">Move up</button>' : "") +
+    (q > 0 && q < last ? " &middot; " : "") +
+    (q < last ? '<button type="button" data-pin-move="1" data-idx="' + q + '">Move down</button>' : "") +
+    "</span></div>";
+}
+document.addEventListener("click", function(e){
+  var b = e.target.closest("[data-pin-move]");
+  if(!b || current !== 0) return;
+  var from = +b.dataset.idx, to = from + (+b.dataset.pinMove);
+  var list = pinList("charts");
+  if(to < 0 || to >= list.length) return;
+  var t = list[to]; list[to] = list[from]; list[from] = t;
+  var c = cust();
+  if(!c.pins) c.pins = {};
+  c.pins.charts = list;
+  saveCustom();
+  renderPins(PROFILES[current]);
+});
+
 function renderPins(p){
   var editing = document.body.classList.contains("editing");
   var hue = p.artHue, self = current === 0;
@@ -6062,10 +6122,15 @@ function renderPins(p){
   for(var q = 0; q < PIN_SLOTS.charts; q++){
     var cpin = cp[q];
     if(cpin && cpin.data){
+      var mine = editing && self;
       ch += '<div class="pl chartpin pinbox">' +
         chartCard(cpin.data, { unpin: self ? unpinBtn("charts", q) : "", key: "pin" + q,
           mode: { live: isLive(cpin, "pin"), since: cpin.frozenAt || cpin.at,
-                  copy: !self && cpin.spec ? q : null } }) + "</div>";
+                  copy: !self && cpin.spec ? q : null },
+          /* Styling and order belong to editing your own profile, so the resting
+             profile - yours or a friend's - stays just the charts. */
+          style: mine ? { scope: "pin", id: cpin.id, style: cpin.style } : null,
+          actions: mine ? pinOrderBar(q) : "" }) + "</div>";
     } else if(editing && self){
       ch += '<div class="pl chartpin">' + slotBtn("charts", q, "slot-sq") + "</div>";
     }
@@ -6219,7 +6284,10 @@ var STYLE_DATA = {};
 function styleBar(d, s){
   var styles = d.plan && d.plan.styles;
   /* A table has no drawing to style, and an empty chart has nothing in it. */
-  if((d.table && d.table.length) || (d.plan && !styles)) return "";
+  if((d.table && d.table.length) || (d.plan && !styles && /^(table|empty)$/.test(d.plan.kind))) return "";
+  /* A plan with no options otherwise is one saved before styling existed - the
+     first charts anyone pinned. The button shows, and opening it asks for a
+     fresh plan, the same way a chart with no plan at all does. */
   var k = s.scope + ":" + s.id;
   /* A chart kept before plans existed has no list of options yet. The button still
      shows; opening it fetches the plan once, and the record keeps it. */
@@ -6269,6 +6337,7 @@ function stylePanel(s, styles){
 function rerenderStyled(scope){
   if(scope === "home") renderHomeCharts();
   else if(scope === "kept") renderKept();
+  else if(scope === "pin") renderPins(PROFILES[current]);
   else if(scope === "live" && lastChart){
     showChartResult(lastChart.data, lastChart.q, lastChart.spec, lastChart.history, lastChart.style);
   }
@@ -6281,6 +6350,22 @@ function applyStyle(scope, id, key, val){
     if(!lastChart) return;
     lastChart.style = Object.assign({}, lastChart.style, patch);
     rerenderStyled("live");
+    return;
+  }
+  if(scope === "pin"){
+    /* A profile chart styled in place. Its kept copy follows, the same way a
+       kept chart's style already followed onto the profile. */
+    var pins = pinList("charts");
+    var pr = pins.filter(function(r){ return r && r.id === id; })[0];
+    if(!pr) return;
+    pr.style = Object.assign({}, pr.style, patch);
+    var kl = keptList(), kr = kl.filter(function(r){ return r.id === id; })[0];
+    if(kr){ kr.style = pr.style; saveKept(kl); }
+    var pc = cust();
+    if(!pc.pins) pc.pins = {};
+    pc.pins.charts = pins;
+    saveCustom();
+    rerenderStyled("pin");
     return;
   }
   var list = scope === "home" ? homePins() : keptList();
@@ -6307,7 +6392,7 @@ document.addEventListener("click", function(e){
     var k = open.dataset.stScope + ":" + open.dataset.stId, scope = open.dataset.stScope;
     OPEN_STYLE = OPEN_STYLE === k ? null : k;
     var d = STYLE_DATA[k];
-    if(OPEN_STYLE && d && !d.plan){
+    if(OPEN_STYLE && d && !(d.plan && d.plan.styles)){
       planFor(d, null).then(function(plan){
         if(!plan) return;
         d.plan = plan;
@@ -6906,13 +6991,18 @@ $("pickList").addEventListener("click", function(e){
 
 /* A chart is made, not chosen from a list, so an empty chart slot sends you to
    the Charts tab instead of opening a picker. */
-function chartsSlotGuard(kind){
+function chartsSlotGuard(kind, idx){
   if(kind !== "charts") return false;
   setEditing(false);
   showScreen("charts");
+  /* The slot that was tapped is the one the next pin fills. */
+  PIN_TARGET = idx;
+  var spare = keptList().some(function(k){ return pinnedIndex("charts", k.id) < 0; });
   $("chartNote").className = "ask-note";
-  $("chartNote").textContent = "Ask for a chart, then pin it.";
-  $("chartInput").focus();
+  $("chartNote").textContent = spare
+    ? "Pick a chart below for slot " + (idx + 1) + ", or ask for a new one."
+    : "Ask for a chart, then pin it to slot " + (idx + 1) + ".";
+  if(!spare) $("chartInput").focus();
   return true;
 }
 
@@ -6921,7 +7011,7 @@ function chartsSlotGuard(kind){
 document.addEventListener("click", function(e){
   var slot = e.target.closest("[data-slot]");
   if(slot){
-    if(!chartsSlotGuard(slot.dataset.slot)) openPicker(slot.dataset.slot, +slot.dataset.idx);
+    if(!chartsSlotGuard(slot.dataset.slot, +slot.dataset.idx)) openPicker(slot.dataset.slot, +slot.dataset.idx);
     return;
   }
   var un = e.target.closest("[data-unpin]");
