@@ -1347,6 +1347,7 @@ details[open] summary .chev{transform:rotate(180deg)}
   text-transform:inherit;color:var(--ink-2);
 }
 .chart-mode button:hover{color:var(--ink)}
+.chart-mode button:disabled{cursor:default;color:var(--ink-3)}
 .chart-mode button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
 .chart-canvas{display:block;width:100%;margin-top:10px}
 .chart-note{font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3);margin-top:6px}
@@ -5999,11 +6000,8 @@ function renderPins(p){
     if(cpin && cpin.data){
       ch += '<div class="pl chartpin pinbox">' +
         chartCard(cpin.data, { unpin: self ? unpinBtn("charts", q) : "", key: "pin" + q,
-          mode: { live: isLive(cpin, "pin"), since: cpin.frozenAt || cpin.at },
-          actions: !self && cpin.spec
-            ? '<div class="chart-acts"><button class="btn btn-ghost" type="button" data-copy="' + q +
-              '">Copy to my charts</button></div>'
-            : "" }) + "</div>";
+          mode: { live: isLive(cpin, "pin"), since: cpin.frozenAt || cpin.at,
+                  copy: !self && cpin.spec ? q : null } }) + "</div>";
     } else if(editing && self){
       ch += '<div class="pl chartpin">' + slotBtn("charts", q, "slot-sq") + "</div>";
     }
@@ -6483,9 +6481,13 @@ function modeBar(m){
   var label = m.live
     ? '<span class="m live"><i></i>Live</span>'
     : '<span class="m">Snapshot' + (m.since ? " \u00B7 " + esc(fmtDay(m.since)) : "") + "</span>";
+  /* A friend's chart offers Copy in the same small slot your own offers Freeze,
+     so it never takes more of the card than the label beside it. */
   var btn = m.toggle
     ? '<button type="button" data-mode-scope="' + esc(m.scope) + '" data-mode-id="' + esc(m.id) + '">' +
       (m.live ? "Freeze" : "Go live") + "</button>"
+    : m.copy != null
+    ? '<button type="button" data-copy="' + esc(m.copy) + '" title="Copy to my charts">Copy</button>'
     : "";
   return '<div class="chart-mode">' + label + btn + "</div>";
 }
@@ -6578,20 +6580,20 @@ function copyChart(btn){
     btn.disabled = !again;
   }
   if((mine.kept || []).some(function(k){ return k && k.id === id; })){
-    done("Already in your charts");
+    done("Already yours");
     return;
   }
   done("Copying...");
   runSpec(pin.spec).then(function(res){
     if(!res || !res.understood || !res.data){
-      done(res === null ? "Could not copy. Try again." : "Your listening cannot fill this one", res === null);
+      done(res === null ? "Copy failed - retry" : "Not in your listening", res === null);
       return;
     }
     mine.kept = [{ id: id, spec: pin.spec, data: res.data, q: pin.q, at: Date.now(),
                    live: true, style: pin.style || null }]
       .concat(mine.kept || []).slice(0, KEPT_MAX);
     saveCustom();
-    done("Copied to your Charts");
+    done("Copied to Charts");
   });
 }
 document.addEventListener("click", function(e){
