@@ -669,25 +669,14 @@ body{
    "who here is going" line is the part no other app can render. */
 /* Time runs down the page. Phones scroll vertically, so the axis gets the long
    dimension and every show gets the full width for its artist and its people. */
-/* The timeline scrolls inside itself and stops about two thirds down, so what
-   sits under it -- who you match with, and where they're going -- never gets
-   pushed past the end of an endless list. */
+/* The timeline runs down the page. It used to scroll inside a box stopped two
+   thirds of the way down, to leave room for "Your matches are going" under it;
+   that section is hidden until it can be computed from real people, and the
+   box went on reserving its space as an empty gap above the nav. */
 .vt-outer{position:relative}
-/* reserve the chrome below (matches section + tab bar) rather than trusting a
-   flat vh, so the section under the timeline survives short phones too */
-.vt-wrap{
-  max-height:max(260px, min(58vh, calc(100vh - 430px)));
-  overflow-y:auto;overflow-x:hidden;scrollbar-width:none;-webkit-overflow-scrolling:touch;
-  /* setting overflow-y makes overflow-x compute to auto, and the rows hang 10px
-     past each edge for their hover highlight -- take that overhang into this
-     box's own padding so there is nothing to scroll sideways */
-  margin:0 -10px;padding:0 10px;
-}
-.vt-wrap::-webkit-scrollbar{display:none}
-.vt-fade{
-  position:absolute;left:-10px;right:-10px;bottom:0;height:46px;pointer-events:none;
-  background:linear-gradient(180deg,rgba(11,10,15,0),var(--ground));
-}
+/* the rows hang 10px past each edge for their hover highlight -- take that
+   overhang into this box's own padding so nothing sticks out sideways */
+.vt-wrap{margin:0 -10px;padding:0 10px;overflow:hidden}
 .vt{position:relative}
 .vt::before{
   content:"";position:absolute;left:47px;top:14px;bottom:14px;
@@ -1775,7 +1764,6 @@ details[open] summary .chev{transform:rotate(180deg)}
         </div>
         <div class="vt-outer">
           <div class="vt-wrap" id="vtWrap"><div class="vt" id="timeline"></div></div>
-          <div class="vt-fade" aria-hidden="true"></div>
         </div>
       </section>
 
@@ -4550,13 +4538,13 @@ document.addEventListener("click", function(e){
 
 /* stream the next batch in before the reader reaches the end, and offer a way
    back once they are deep enough that scrolling up would be a chore */
-/* the timeline scrolls inside itself now, so paging and the Top control both
-   listen to that container rather than the page */
-$("vtWrap").addEventListener("scroll", function(){
-  var el = this;
-  $("toTop").hidden = !(currentScreen === "shows" && el.scrollTop > 700);
-  if(shownShows >= HOME.shows.length) return;
-  if(el.scrollTop + el.clientHeight > el.scrollHeight - 500){
+/* the timeline is part of the page, so paging and the Top control follow the
+   page's scroll - on Shows only */
+window.addEventListener("scroll", function(){
+  var onShows = currentScreen === "shows" && $("showsBeen").hidden;
+  $("toTop").hidden = !(onShows && window.scrollY > 700);
+  if(!onShows || shownShows >= HOME.shows.length) return;
+  if(window.scrollY + window.innerHeight > document.documentElement.scrollHeight - 500){
     shownShows = Math.min(shownShows + SHOW_BATCH, HOME.shows.length);
     renderTimeline();
   }
@@ -4564,7 +4552,7 @@ $("vtWrap").addEventListener("scroll", function(){
 
 $("toTop").addEventListener("click", function(){
   var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  $("vtWrap").scrollTo({top:0, behavior: reduce ? "auto" : "smooth"});
+  window.scrollTo({top:0, behavior: reduce ? "auto" : "smooth"});
   $("toTop").hidden = true;
 });
 
