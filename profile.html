@@ -5999,7 +5999,11 @@ function renderPins(p){
     if(cpin && cpin.data){
       ch += '<div class="pl chartpin pinbox">' +
         chartCard(cpin.data, { unpin: self ? unpinBtn("charts", q) : "", key: "pin" + q,
-          mode: { live: isLive(cpin, "pin"), since: cpin.frozenAt || cpin.at } }) + "</div>";
+          mode: { live: isLive(cpin, "pin"), since: cpin.frozenAt || cpin.at },
+          actions: !self && cpin.spec
+            ? '<div class="chart-acts"><button class="btn btn-ghost" type="button" data-copy="' + q +
+              '">Copy to my charts</button></div>'
+            : "" }) + "</div>";
     } else if(editing && self){
       ch += '<div class="pl chartpin">' + slotBtn("charts", q, "slot-sq") + "</div>";
     }
@@ -6557,6 +6561,42 @@ function setChartLive(scope, id){
 document.addEventListener("click", function(e){
   var b = e.target.closest("[data-mode-id]");
   if(b) setChartLive(b.dataset.modeScope, b.dataset.modeId);
+});
+
+/* Copying a friend's pinned chart takes its spec - what it counts, over what
+   window, split how - and runs it over your own history. No model: the question
+   was read when they asked it. It lands in your kept charts as a live chart,
+   and from there pins like any other. Written to CUSTOM[0] directly, because
+   while their profile is open `current` is theirs and keptList() reads it. */
+function copyChart(btn){
+  var pin = pinList("charts")[+btn.dataset.copy];
+  if(!pin || !pin.spec) return;
+  var id = specId(pin.spec);
+  var mine = CUSTOM[0] || (CUSTOM[0] = {});
+  function done(text, again){
+    btn.textContent = text;
+    btn.disabled = !again;
+  }
+  if((mine.kept || []).some(function(k){ return k && k.id === id; })){
+    done("Already in your charts");
+    return;
+  }
+  done("Copying...");
+  runSpec(pin.spec).then(function(res){
+    if(!res || !res.understood || !res.data){
+      done(res === null ? "Could not copy. Try again." : "Your listening cannot fill this one", res === null);
+      return;
+    }
+    mine.kept = [{ id: id, spec: pin.spec, data: res.data, q: pin.q, at: Date.now(),
+                   live: true, style: pin.style || null }]
+      .concat(mine.kept || []).slice(0, KEPT_MAX);
+    saveCustom();
+    done("Copied to your Charts");
+  });
+}
+document.addEventListener("click", function(e){
+  var b = e.target.closest("[data-copy]");
+  if(b && !b.disabled) copyChart(b);
 });
 
 function chartCard(d, opts){
