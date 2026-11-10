@@ -36,9 +36,15 @@ API = "https://app.ticketmaster.com/discovery/v2/events.json"
 CACHE_NAME = "shows.json"
 CACHE_TTL = 6 * 3600
 
-# Chapel Hill. Ticketmaster wants a geohash; five characters is a few km, which
-# is the right grain for "near me" when the radius does the real work.
+# Chapel Hill. Only a default for calling fetch_events directly: the app always
+# searches around the account's own saved location, and asks for one when there
+# is none rather than showing someone else's town. Ticketmaster wants a geohash;
+# five characters is a few km, which is the right grain for "near me" when the
+# radius does the real work.
 DEFAULT_LAT, DEFAULT_LON = 35.9132, -79.0558
+# Two decimal places is about a kilometre: far finer than a 5-150 mile search
+# needs, and coarse enough that the account record never holds a street address.
+LOCATION_DECIMALS = 2
 # Fetch wide once and let the client's slider narrow it: dragging a distance
 # control should not spend a network round trip, and a cache keyed by radius
 # would refetch for every position.
@@ -285,8 +291,41 @@ def genre_of(artist: str) -> str | None:
         return None
 
 
+class NoLocation(LookupError):
+    """The account has not said where it is, so there is no "near" to search."""
+
+
+def location(uid: str | None = None) -> tuple[float, float] | None:
+    """Where this account searches for shows, or None before it has said."""
+    rec = users.load(uid or users.current()) or {}
+    loc = rec.get("location")
+    if not isinstance(loc, dict):
+        return None
+    try:
+        return float(loc["lat"]), float(loc["lon"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def set_location(lat: float, lon: float, uid: str | None = None) -> dict[str, float]:
+    """Save where this account searches, and drop the show list made for the old place."""
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise ValueError("not a place on Earth")
+    uid = uid or users.current()
+    loc = {"lat": round(lat, LOCATION_DECIMALS), "lon": round(lon, LOCATION_DECIMALS)}
+    users.save({"id": uid, "location": loc})
+    users.cache(CACHE_NAME, uid).unlink(missing_ok=True)
+    return loc
+
+
 def build(refresh: bool = False, **kw) -> list[dict[str, Any]]:
-    """Normalised upcoming shows, each carrying how much you play that artist."""
+    """Normalised upcoming shows near this account, each carrying how much you
+    play that artist. Raises NoLocation when the account has no location yet."""
+    if "lat" not in kw:
+        here = location()
+        if here is None:
+            raise NoLocation("no location saved for this account")
+        kw["lat"], kw["lon"] = here
     cache_file = users.cache(CACHE_NAME)
     if cache_file.exists() and not refresh and time.time() - cache_file.stat().st_mtime < CACHE_TTL:
         cached = json.loads(cache_file.read_text(encoding="utf-8"))

@@ -376,9 +376,13 @@ def shows(
     """Upcoming shows near the user, each carrying how much they play that artist.
 
     Ticketmaster needs no auth, so this works before any Spotify login exists.
+    "Near" is the account's saved location; without one this is a 409 the page
+    answers by asking for it, never a list of somewhere else's shows.
     """
     try:
         data = shows_mod.build(refresh=refresh)
+    except shows_mod.NoLocation as e:
+        raise HTTPException(409, "no_location") from e
     except Exception as e:
         log.error("shows build failed: %s", e)
         raise HTTPException(502, str(e)) from e
@@ -389,6 +393,27 @@ def shows(
         "matching": sum(1 for s in data if s.get("yours")),
         "shows": data[:limit],
     }
+
+
+class Location(BaseModel):
+    """Where to look for shows: the browser's own reading of where you are."""
+
+    lat: float = Field(ge=-90, le=90)
+    lon: float = Field(ge=-180, le=180)
+
+
+@app.get("/api/location")
+def get_location() -> dict[str, object]:
+    """The signed-in account's saved location, or null before one is set."""
+    here = shows_mod.location()
+    return {"location": {"lat": here[0], "lon": here[1]} if here else None}
+
+
+@app.post("/api/location")
+def put_location(body: Location) -> dict[str, object]:
+    """Save where the signed-in account searches for shows. Rounded to about a
+    kilometre before it is stored; the cached show list is dropped with it."""
+    return {"location": shows_mod.set_location(body.lat, body.lon)}
 
 
 @app.get("/api/spec/shows")

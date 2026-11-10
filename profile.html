@@ -1770,7 +1770,9 @@ details[open] summary .chev{transform:rotate(180deg)}
 
     <div class="pad" id="showsUpcoming">
       <section class="sec anim">
-        <div class="sec-label"><span>Near you</span></div>
+        <div class="sec-label"><span>Near you</span>
+          <button class="sec-toggle" type="button" id="locBtn" hidden>Use my location</button>
+        </div>
         <div class="vt-outer">
           <div class="vt-wrap" id="vtWrap"><div class="vt" id="timeline"></div></div>
           <div class="vt-fade" aria-hidden="true"></div>
@@ -3930,23 +3932,81 @@ function loadShows(){
   if(showsLoaded) return;
   showsLoaded = true;
   fetch("/api/shows?limit=600").then(function(r){
+    /* A 409 says which thing is missing: a location or a history. */
+    if(r.status === 409) return r.json().then(function(b){ throw new Error((b && b.detail) || "409"); });
     if(!r.ok) throw new Error(r.status);
     return r.json();
   }).then(function(d){
+    locButton("Update location");
     if(!d.shows || !d.shows.length) throw new Error("empty");
     ALL_SHOWS = d.shows.map(apiShow);
     applyShowFilter();
-  }).catch(function(){
+  }).catch(function(e){
+    if(e && e.message === "no_location"){
+      locButton("Use my location");
+      SHOWS_EMPTY = "Shows are searched around where you are. Tap Use my location to see what\u2019s on near you.";
+      ALL_SHOWS = [];
+      applyShowFilter();
+      return;
+    }
     /* Invented shows used to stand in here, for a published copy with no server.
        With real people on the app that would put made-up gigs in front of them,
        so a failure says what it is instead. */
-    SHOWS_EMPTY = data(0).noHistory
+    SHOWS_EMPTY = e && e.message === "empty"
+      ? "No upcoming shows found near you."
+      : data(0).noHistory
       ? "Shows are matched to what you play - upload your listening history to see them."
       : "Shows could not be loaded right now.";
     ALL_SHOWS = [];
     applyShowFilter();
   });
 }
+
+function locButton(label){
+  var b = $("locBtn");
+  b.textContent = label;
+  b.disabled = false;
+  b.hidden = false;
+}
+
+/* Shows are searched around the account's saved location, which comes from
+   the browser and nowhere else. The server rounds it to about a kilometre and
+   drops the old show list, so the reload below fetches the new area. */
+function useMyLocation(){
+  var b = $("locBtn");
+  function say(text){
+    SHOWS_EMPTY = text;
+    ALL_SHOWS = [];
+    applyShowFilter();
+  }
+  if(!navigator.geolocation){
+    say("This browser cannot share a location.");
+    return;
+  }
+  b.disabled = true;
+  b.textContent = "Locating...";
+  navigator.geolocation.getCurrentPosition(function(pos){
+    fetch("/api/location", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lat: pos.coords.latitude, lon: pos.coords.longitude })
+    }).then(function(r){
+      if(!r.ok) throw new Error(r.status);
+      say("Loading shows...");
+      showsLoaded = false;
+      loadShows();
+    }).catch(function(){
+      locButton("Use my location");
+      say("Your location could not be saved. Try again.");
+    });
+  }, function(err){
+    locButton("Use my location");
+    say(err && err.code === 1
+      ? "Location is blocked for this site. Allow it in your browser\u2019s site settings, then try again."
+      : "Your location could not be found. Try again.");
+  }, { enableHighAccuracy: false, timeout: 15000, maximumAge: 10 * 60 * 1000 });
+}
+$("locBtn").addEventListener("click", useMyLocation);
 
 $("showsFilter").addEventListener("click", function(){
   $("filtMi").value = showFilter.maxMi;
