@@ -1884,7 +1884,7 @@ details[open] summary .chev{transform:rotate(180deg)}
     <!-- "Most underground" lived here; pinned, not deleted. The `ug` data is
          still on every profile so it can come back cheaply. -->
 
-    <section class="sec anim a4">
+    <section class="sec anim a4" id="plSection">
       <div class="sec-label"><span>Playlists</span>
         <button class="sec-toggle" type="button" id="plToggle" aria-expanded="false" aria-controls="playlists">Show all</button>
       </div>
@@ -5830,7 +5830,7 @@ function slotCell(kind, idx, shape, wrapCls, nameCls, metaCls){
 function renderShelf(){
   var p = PROFILES[current], self = current === 0;
   var editing = document.body.classList.contains("editing");
-  var lp = pinList("playlists"), lAny = self && lp.some(Boolean);
+  var lp = pinList("playlists"), lAny = lp.some(Boolean);
 
   function tile(x, at, kill){
     var art = x[2]
@@ -5866,14 +5866,13 @@ function renderShelf(){
         ph += '<div class="pl">' + slotBtn("playlists", i, "slot-sq") + "</div>";
       }
     }
-  } else {
-    /* Nobody has pinned any: the full list stands in, so the section still
-       teaches what it is for. */
-    shelf = p.playlists;
-    ph = shelf.map(function(x, at){ return tile(x, at, ""); }).join("");
   }
+  /* Nothing pinned means nothing shown. The whole library used to stand in for
+     an empty shelf, so a new account opened with every playlist it owns on its
+     profile before choosing any. Edit mode's empty slots are the invitation. */
   PL_SHELF = shelf;
   $("playlists").innerHTML = ph;
+  $("plSection").hidden = !lAny && !(editing && self);
   setPlaylists(false);
 }
 
