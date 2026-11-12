@@ -2826,11 +2826,8 @@ function loadLocal(){
    draw immediately rather than wait on a request. */
 PROFILES = [profileFor({ id: "you", name: "You" })];
 
-/* Reconcile with the server once, at startup. Three cases and only the third
-   needs a rule: the server has something and this browser does not, so adopt
-   it; this browser has something and the server does not, so push it; both
-   have something, so the newer one wins. Without the timestamp the last
-   browser opened would quietly overwrite the one the work was done in. */
+/* Reconcile with the server once, at startup - see syncCustom below for the
+   rule when both this browser and the server hold a profile. */
 /* Anything still stored as a data URI becomes an upload, once.
 
    Profiles that predate the upload path keep the banner and the photo inline,
@@ -2879,6 +2876,43 @@ function migrateInline(){
   }).catch(function(){ return false; });
 }
 
+/* Which server version this browser's copy was last in step with. A copy is
+   only ever pushed on top of the version it came from: the server refuses a
+   save whose base is not what it holds, and on load a copy whose base is not
+   the server's current version gives way to it.
+
+   That replaced "newest savedAt wins", which a stale browser could win by
+   accident. Loading the page re-saves a few things on its own - playlist pins
+   refreshed, an old chart given a plan - and every save stamped the copy with
+   the time, so a browser holding a profile from days ago stamped it as the
+   newest thing anywhere, pushed it, and every other device then adopted it as
+   the latest. */
+var SYNCED = false, BASE = null, PENDING = false;
+var pushing = false, pushAgain = false;
+
+function baseKey(){ return storeKey() + ":base"; }
+function loadBase(){
+  try { var v = localStorage.getItem(baseKey()); return v ? +v : null; } catch(e){ return null; }
+}
+function keepBase(v){
+  BASE = v == null ? null : v;
+  try {
+    if(BASE == null) localStorage.removeItem(baseKey());
+    else localStorage.setItem(baseKey(), String(BASE));
+  } catch(e){}
+}
+function adoptRemote(doc){
+  CUSTOM[0] = doc;
+  keepBase(doc.savedAt || null);
+  try { localStorage.setItem(storeKey(), JSON.stringify(doc)); } catch(e){}
+}
+function stampAndPush(){
+  var mine = CUSTOM[0] || (CUSTOM[0] = {});
+  mine.savedAt = Date.now();
+  try { localStorage.setItem(storeKey(), JSON.stringify(mine)); } catch(e){}
+  pushCustom();
+}
+
 function syncCustom(){
   return fetch("/api/profile")
     .then(function(r){ return r.ok ? r.json() : null; })
@@ -2890,70 +2924,105 @@ function syncCustom(){
       /* A document still in the pre-account shape is rewritten in the new one,
          so the conversion happens once rather than on every load. */
       var reshape = !!(stored && stored["0"]);
+      var localBase = loadBase();
+      SYNCED = true;
 
       if(!remote){
-        if(have) pushCustom();
+        keepBase(null);
+        if(have) stampAndPush();
         return false;
       }
       if(!have){                       /* nothing here to lose - take theirs */
-        CUSTOM[0] = remote;
-        try { localStorage.setItem(storeKey(), JSON.stringify(remote)); } catch(e){}
+        adoptRemote(remote);
         if(reshape) pushCustom();
         return true;
       }
-      /* Content saved before this browser started stamping has no savedAt, and
-         treating that as zero makes it lose to anything on the server - which
-         is precisely the profile someone spent an evening building. Unstamped
-         local content wins and gets stamped on its way up. */
-      if(!mine.savedAt){ pushCustom(); return false; }
-
-      if((remote.savedAt || 0) > mine.savedAt){
-        CUSTOM[0] = remote;
-        try { localStorage.setItem(storeKey(), JSON.stringify(remote)); } catch(e){}
-        if(reshape) pushCustom();
-        return true;
+      /* This copy builds on the server's only if it was last in step with
+         exactly that version. Then anything changed here since - edits whose
+         push never landed, or what the page re-saved while loading - goes up.
+         Otherwise the server has moved on without this browser, and its copy
+         is the profile; a browser that has not been opened for days no longer
+         gets to roll it back. */
+      if(localBase != null && localBase === (remote.savedAt || null)){
+        keepBase(localBase);
+        if(PENDING || (mine.savedAt || 0) > localBase || reshape) stampAndPush();
+        PENDING = false;
+        return false;
       }
-      if(mine.savedAt > (remote.savedAt || 0) || reshape) pushCustom();
-      return false;
+      PENDING = false;
+      adoptRemote(remote);
+      if(reshape) pushCustom();
+      return true;
     })
-    .catch(function(){ return false; });
+    .catch(function(){
+      /* No server to ask. Saving carries on locally; a push that does reach a
+         server is still checked against what it holds. */
+      SYNCED = true;
+      return false;
+    });
 }
 
 /* localStorage is per browser and per origin, which made it the wrong system of
    record: a profile built in one browser did not exist in another, and
    127.0.0.1 and localhost are two different stores of the same app. So the
    server holds it and this is the local copy - still authoritative when there
-   is no server, which is how the published page works at all.
-
-   `savedAt` is what decides between them on load. Newest wins, which is the
-   only rule that does not silently overwrite whichever side the user last
-   typed into. */
+   is no server, which is how the published page works at all. */
 var pushTimer = null;
 
 function pushCustom(){
   clearTimeout(pushTimer);
   /* Pins fire this on every click, so it waits for the clicking to stop. */
-  pushTimer = setTimeout(function(){
-    fetch("/api/profile", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      /* Yours and only yours - the server writes whoever is signed in anyway. */
-      body: JSON.stringify(CUSTOM[0] || {})
-    }).catch(function(){ /* no server: the local copy is still the truth */ });
-  }, 600);
+  pushTimer = setTimeout(sendPush, 600);
+}
+
+/* One push at a time: a second one sent while the first is in flight would
+   carry the base from before the first landed and be refused. */
+function sendPush(){
+  if(!SYNCED) return;
+  if(pushing){ pushAgain = true; return; }
+  pushing = true;
+  var doc = CUSTOM[0] || {}, sentAt = doc.savedAt || null;
+  fetch("/api/profile", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    /* Yours and only yours - the server writes whoever is signed in anyway. */
+    body: JSON.stringify(Object.assign({}, doc, { _base: BASE }))
+  }).then(function(r){
+    if(r.ok){ keepBase(sentAt); return; }
+    if(r.status !== 409) return;
+    /* Saved somewhere else since this page loaded. Theirs is the profile now;
+       what this page was about to send was built on the older one. */
+    return r.json().then(function(b){
+      if(!b || !b.profile) return;
+      pushAgain = false;
+      adoptRemote(toDoc(b.profile));
+      render(current);
+      renderHomeCharts();
+      paintMood();
+      if(!$("custWrap").hidden) syncSheet();
+    });
+  }).catch(function(){ /* no server: the local copy is still the truth */ })
+    .then(function(){
+      pushing = false;
+      if(pushAgain){ pushAgain = false; sendPush(); }
+    });
 }
 
 function saveCustom(){
   /* Returns whether it stuck locally. For a colour or a bio, failing quietly is
      right - the session still works and the stake is low. For an uploaded image
      it is not: the user watches it appear, believes it is saved, and finds it
-     gone. Callers that can lose real work check the answer. */
+     gone. Callers that can lose real work check the answer.
+
+     Before the first sync nothing is stamped or sent: this copy has not been
+     compared with the server yet, and the sync decides what happens to it. */
   var mine = CUSTOM[0] || (CUSTOM[0] = {});
-  mine.savedAt = Date.now();
+  if(SYNCED) mine.savedAt = Date.now();
+  else PENDING = true;
   var ok;
   try { localStorage.setItem(storeKey(), JSON.stringify(mine)); ok = true; }
   catch(e){ ok = false; }
-  pushCustom();
+  if(SYNCED) pushCustom();
   return ok;
 }
 function cust(){ return CUSTOM[current] || (CUSTOM[current] = {}); }

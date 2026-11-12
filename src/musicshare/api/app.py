@@ -895,6 +895,13 @@ async def put_profile(request: Request) -> dict[str, object]:
     Whole-document rather than per-field on purpose. The page already keeps this
     as one object, one writer owns it, and a merge protocol would be inventing a
     problem that arrives with the second device rather than the second browser.
+
+    But never on top of a version the sender has not seen. The document names
+    the stored version it was built on, as `_base` (the stored `savedAt`); when
+    that is not what is stored, the save is refused with 409 and the stored
+    document, which the page adopts. A browser that had not been opened for days
+    once rolled a profile back by stamping its stale copy as the newest save;
+    whatever a page does, that can no longer reach the stored profile.
     """
     if not media_mod.configured():
         raise HTTPException(503, "storage is not configured")
@@ -912,12 +919,41 @@ async def put_profile(request: Request) -> dict[str, object]:
         raise HTTPException(400, "not valid JSON") from e
     if not isinstance(doc, dict):
         raise HTTPException(400, "expected an object")
+    base = doc.pop("_base", None)
 
-    try:
-        media_mod.put_doc("profile", doc)
-    except media_mod.MediaError as e:
-        raise HTTPException(502, str(e)[:200]) from e
-    return {"saved": True, "bytes": len(raw)}
+    with _profile_lock:
+        try:
+            stored = media_mod.get_doc("profile")
+        except Exception as e:
+            # Unable to see what is stored means unable to say this save is safe.
+            log.warning("profile read before write failed: %s", e)
+            raise HTTPException(502, "could not check the stored profile") from e
+        held = _saved_at(stored)
+        if held is not None and base != held:
+            return JSONResponse({"detail": "stale", "profile": stored}, status_code=409)
+        try:
+            media_mod.put_doc("profile", doc)
+        except media_mod.MediaError as e:
+            raise HTTPException(502, str(e)[:200]) from e
+    return {"saved": True, "bytes": len(raw), "savedAt": doc.get("savedAt")}
+
+
+# Read, check and write as one step, so two saves cannot both pass the check.
+_profile_lock = threading.Lock()
+
+
+def _saved_at(stored: object) -> object:
+    """The version a stored profile document is at, or None when it has none.
+
+    Documents from before accounts kept everything under "0". Read the way the
+    page's toDoc() reads it - the inner stamp first - so the base it sends back
+    is the version this finds."""
+    if not isinstance(stored, dict):
+        return None
+    inner = stored.get("0")
+    if isinstance(inner, dict) and inner.get("savedAt") is not None:
+        return inner["savedAt"]
+    return stored.get("savedAt")
 
 
 @app.get("/api/now")

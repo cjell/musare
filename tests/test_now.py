@@ -76,6 +76,8 @@ def test_profile_rejects_things_that_are_not_objects(monkeypatch):
     and then fail to merge on the way back out."""
     monkeypatch.setattr(app_mod.media_mod, "configured", lambda: True)
     monkeypatch.setattr(app_mod.media_mod, "put_doc", lambda *a, **k: "x")
+    # A save reads what is stored first; nothing stored, so any object lands.
+    monkeypatch.setattr(app_mod.media_mod, "get_doc", lambda *a, **k: None)
     assert client.put("/api/profile", content=b"[1,2]").status_code == 400
     assert client.put("/api/profile", content=b'"hello"').status_code == 400
     assert client.put("/api/profile", content=b"not json at all").status_code == 400
