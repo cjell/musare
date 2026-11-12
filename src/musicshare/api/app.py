@@ -21,6 +21,7 @@ import threading
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field, ValidationError
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 from musicshare import auth, taste, users
@@ -789,7 +790,9 @@ async def upload_media(kind: str, name: str, request: Request) -> dict[str, obje
 
     data = await request.body()
     try:
-        stored = media_mod.put(data, kind, name)
+        # Off the event loop: a GIF is megabytes on its way to storage, and on
+        # the loop the whole app waited for it, health check and all.
+        stored = await run_in_threadpool(media_mod.put, data, kind, name)
     except media_mod.MediaError as e:
         # The message is written to be read by the person uploading, so it is
         # passed through rather than replaced with a status code.
@@ -921,6 +924,24 @@ async def put_profile(request: Request) -> dict[str, object]:
         raise HTTPException(400, "expected an object")
     base = doc.pop("_base", None)
 
+    # Off the event loop: two round trips to storage, and a handler declared
+    # async runs on the loop itself, so doing them here stalled every other
+    # request - the health check included - for as long as they took.
+    stale = await run_in_threadpool(_save_profile, doc, base)
+    if stale is not None:
+        return JSONResponse({"detail": "stale", "profile": stale}, status_code=409)
+    return {"saved": True, "bytes": len(raw), "savedAt": doc.get("savedAt")}
+
+
+# Read, check and write as one step, so two saves cannot both pass the check.
+_profile_lock = threading.Lock()
+
+
+def _save_profile(doc: dict, base: object) -> dict | None:
+    """Store `doc` unless it was built on an older version than the stored one.
+
+    Returns None when saved, or the stored document when the save is refused.
+    """
     with _profile_lock:
         try:
             stored = media_mod.get_doc("profile")
@@ -930,16 +951,12 @@ async def put_profile(request: Request) -> dict[str, object]:
             raise HTTPException(502, "could not check the stored profile") from e
         held = _saved_at(stored)
         if held is not None and base != held:
-            return JSONResponse({"detail": "stale", "profile": stored}, status_code=409)
+            return stored
         try:
             media_mod.put_doc("profile", doc)
         except media_mod.MediaError as e:
             raise HTTPException(502, str(e)[:200]) from e
-    return {"saved": True, "bytes": len(raw), "savedAt": doc.get("savedAt")}
-
-
-# Read, check and write as one step, so two saves cannot both pass the check.
-_profile_lock = threading.Lock()
+    return None
 
 
 def _saved_at(stored: object) -> object:

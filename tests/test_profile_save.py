@@ -85,3 +85,34 @@ def test_unable_to_read_what_is_stored_means_no_write(store, monkeypatch):
     monkeypatch.setattr(app_mod.media_mod, "get_doc", down)
     assert client.put("/api/profile", json={"bio": "a", "_base": 1}).status_code == 502
     assert store["writes"] == 0
+
+
+def test_a_slow_save_does_not_stall_other_requests(store, monkeypatch):
+    """Storage round trips ran on the event loop, so one slow save held up
+    every request - Fly's health check timed out and the site dropped."""
+    import asyncio
+    import time
+
+    import httpx
+
+    def slow_put(name, doc, owner=None):
+        time.sleep(1.5)
+        store["doc"] = doc
+
+    monkeypatch.setattr(app_mod.media_mod, "put_doc", slow_put)
+
+    async def run():
+        transport = httpx.ASGITransport(app=app_mod.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+            # Timed from the start of the save: a blocked loop freezes this
+            # coroutine too, so a clock started after the sleep would miss it.
+            t0 = time.perf_counter()
+            save = asyncio.create_task(c.put("/api/profile", json={"bio": "x", "savedAt": 1}))
+            await asyncio.sleep(0.2)
+            health = await c.get("/health")
+            waited = time.perf_counter() - t0
+            assert (await save).status_code == 200
+            return health.status_code, waited
+
+    status, waited = asyncio.run(run())
+    assert status == 200 and waited < 1.0, f"health waited {waited:.2f}s behind a save"
