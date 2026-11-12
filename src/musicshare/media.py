@@ -48,6 +48,10 @@ DATA_BUCKET = "data"
 # the client respects is not a limit. This one exists so an oversized file is
 # refused before it is sent rather than after.
 MAX_BYTES = 10 * 1024 * 1024
+# A banner or profile photo that moves is stored as uploaded rather than cropped
+# into a JPEG, and every visitor downloads all of it each time the profile opens.
+# Stills arrive already cropped and compressed; this is for the ones that do not.
+MAX_PHOTO_ANIMATION_BYTES = 5 * 1024 * 1024
 
 # Sniffed from the first bytes, never taken from the upload's declared type:
 # that field is chosen by whoever is uploading, so trusting it would let a file
@@ -119,6 +123,8 @@ def put(data: bytes, kind: str, name: str, owner: str | None = None) -> Stored:
             raise MediaError(f"invalid path segment: {part!r}")
 
     ctype, ext = sniff(data)
+    if kind == "photos" and ext in ("gif", "webp") and len(data) > MAX_PHOTO_ANIMATION_BYTES:
+        raise MediaError(f"a GIF can be up to {MAX_PHOTO_ANIMATION_BYTES // 1024 // 1024}MB")
     path = f"u/{owner}/{kind}/{name}.{ext}"
     base, headers = _base()
     r = httpx.post(

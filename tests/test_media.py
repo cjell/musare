@@ -131,3 +131,27 @@ def test_a_document_that_was_never_written_reads_as_none():
 def test_document_names_are_constrained(bad):
     with pytest.raises(media.MediaError):
         media.put_doc(bad, {})
+
+
+def test_a_moving_banner_or_photo_has_a_smaller_cap():
+    """Stored as uploaded rather than cropped, and downloaded whole by every
+    visitor, so a GIF photo stops at 5MB - refused before any network call."""
+    big = GIF + b"\x00" * media.MAX_PHOTO_ANIMATION_BYTES
+    with pytest.raises(media.MediaError) as e:
+        media.put(big, "photos", "avatar", owner="tester")
+    assert "GIF can be up to 5MB" in str(e.value)
+
+
+def test_the_photo_cap_leaves_mood_art_alone(monkeypatch):
+    """Mood GIFs keep the general limit. Stopped at the network, which this
+    reaching proves the photo cap did not apply."""
+
+    class Reached(Exception):
+        pass
+
+    def stop():
+        raise Reached
+
+    monkeypatch.setattr(media, "_base", stop)
+    with pytest.raises(Reached):
+        media.put(GIF + b"\x00" * media.MAX_PHOTO_ANIMATION_BYTES, "moods", "hype", owner="tester")

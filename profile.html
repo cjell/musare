@@ -2116,6 +2116,7 @@ details[open] summary .chev{transform:rotate(180deg)}
       </div>
       <input class="crop-zoom" id="cropZoom" type="range" min="100" max="320" value="100" aria-label="Zoom">
       <div class="sheet-actions">
+        <p class="ask-note bad" id="cropNote" hidden></p>
         <button type="button" id="cropCancel">Cancel</button>
         <button type="button" class="primary" id="cropSave">Use photo</button>
       </div>
@@ -2143,7 +2144,7 @@ details[open] summary .chev{transform:rotate(180deg)}
     <div class="sheet">
       <div class="mf-grab" aria-hidden="true"></div>
       <div class="sheet-head">Make it yours</div>
-      <div class="sheet-sub">Your photos stay on this phone. Avatar art is uploaded, so it can be large and follow you between devices.</div>
+      <div class="sheet-sub">Photos are uploaded, so they follow you between devices. GIFs keep moving, up to 5MB.</div>
 
       <div class="srow">
         <span class="k">Banner photo</span>
@@ -2153,6 +2154,7 @@ details[open] summary .chev{transform:rotate(180deg)}
         <span class="k">Profile photo</span>
         <label class="pick"><span class="has" id="hasAvatar" hidden></span>Choose<input type="file" accept="image/*" id="avatarFile"></label>
       </div>
+      <p class="ask-note bad" id="photoNote" hidden></p>
       <div class="srow col">
         <div class="k">Avatar states</div>
         <div class="moodgrid" id="moodGrid"></div>
@@ -3151,11 +3153,16 @@ function render(i){
   $("bannerImg").hidden = !c.banner;
   $("bannerWrap").classList.toggle("has-photo", !!c.banner);
   if(c.banner) $("bannerImg").src = c.banner;
+  placeBanner(c);
 
   var av = $("avatar");
   av.classList.toggle("has-photo", !!c.avatar);
   $("initials").hidden = !!c.avatar;
-  if(c.avatar){
+  if(c.avatar && c.avatarFrame){
+    var g = placeFramed(av.clientWidth || 92, av.clientHeight || 92, c.avatarFrame);
+    av.style.background = "url(" + c.avatar + ") " + g.x + "px " + g.y + "px / " +
+      g.w + "px " + g.h + "px no-repeat, #221B32";
+  } else if(c.avatar){
     av.style.background = "url(" + c.avatar + ") center/cover no-repeat, #221B32";
   } else {
     av.style.background =
@@ -3290,6 +3297,31 @@ function paint(){
   if(!$("screenHome").hidden) paintYou();
   if(!$("mapFull").hidden) paintFull();
 }
+
+/* Where a kept-original picture sits in a box: scaled to cover it, zoomed as
+   chosen, with the chosen point centred - and never leaving a gap at an edge,
+   so a box of a different shape from the crop frame (a wider phone, say)
+   still comes out filled. */
+function placeFramed(W, H, fr){
+  var s = Math.max(W / fr.w, H / fr.h) * (fr.z || 1);
+  var w = fr.w * s, h = fr.h * s;
+  var x = Math.min(0, Math.max(W - w, W / 2 - fr.cx * w));
+  var y = Math.min(0, Math.max(H - h, H / 2 - fr.cy * h));
+  return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+}
+
+function placeBanner(c){
+  var im = $("bannerImg"), fr = c && c.banner && c.bannerFrame;
+  if(!fr){
+    im.style.cssText = "position:absolute;inset:0;width:100%;height:100%;object-fit:cover";
+    return;
+  }
+  var box = $("bannerWrap");
+  var g = placeFramed(box.clientWidth || Math.min(window.innerWidth, 420), box.clientHeight || 216, fr);
+  im.style.cssText = "position:absolute;max-width:none;object-fit:fill;left:" + g.x + "px;top:" +
+    g.y + "px;width:" + g.w + "px;height:" + g.h + "px";
+}
+window.addEventListener("resize", function(){ placeBanner(CUSTOM[current] || {}); });
 
 function wallFromImage(src){
   var cv = $("wall"), img = new Image();
@@ -5234,7 +5266,16 @@ var CROP = {
   banner: { work: 2000, out: 1500, aspect: 420 / 216, title: "Position your banner" },
   avatar: { work: 1200, out: 640, aspect: 1, title: "Position your photo" }
 };
-var crop = { img: null, key: null, cfg: null, zoom: 1, base: 1, x: 0, y: 0, fw: 0 };
+var crop = { img: null, key: null, cfg: null, zoom: 1, base: 1, x: 0, y: 0, fw: 0, file: null };
+
+/* A GIF (or WebP) is kept as uploaded. The crop draws onto a canvas, which
+   holds one frame, so cropping one into a JPEG stopped it moving. Instead the
+   original goes up untouched and the position chosen here is saved beside it
+   as a frame - zoom and the point at the centre - which placeFramed() applies
+   wherever it is shown. */
+var ANIMATED_MAX = 5 * 1024 * 1024;
+function keepsOriginal(file){ return !!file && /^image\/(gif|webp)$/.test(file.type); }
+function sayNote(id, text){ $(id).textContent = text || ""; $(id).hidden = !text; }
 var CROP_MAX_ZOOM = 3.2;
 
 function cropFrame(){
@@ -5280,12 +5321,22 @@ function drawCrop(){
 
 function openCrop(key, file){
   var cfg = CROP[key];
+  if(keepsOriginal(file) && file.size > ANIMATED_MAX){
+    sayNote("photoNote", "That GIF is " + (file.size / 1048576).toFixed(1) +
+        "MB. GIFs can be up to 5MB - try a shorter or smaller one.");
+    return;
+  }
+  sayNote("photoNote", "");
   readImage(file, function(raw){
     if(!raw) return;
     var work = downscale(raw, cfg.work);
     var img = new Image();
     img.onload = function(){
       crop.img = img; crop.key = key; crop.cfg = cfg; crop.zoom = 1; crop.fw = 0;
+      crop.file = keepsOriginal(file) ? file : null;
+      sayNote("cropNote", "");
+      $("cropSave").disabled = false;
+      $("cropSave").textContent = crop.file ? "Use GIF" : "Use photo";
       closeCust();
       $("cropHead").textContent = cfg.title;
       $("cropMask").className = "crop-mask" + (key === "avatar" ? " circle" : "");
@@ -5306,9 +5357,46 @@ function closeCrop(){
   $("cropWrap").hidden = true;
   document.body.style.overflow = "";
   crop.img = null;
+  crop.file = null;
+}
+
+/* Keep the original and save where it was placed. The sheet stays open until
+   the upload lands, because there is no inline fallback for a file this size
+   and a failure has to be said where it can be seen. */
+function saveOriginal(){
+  var f = cropFrame(), s = crop.base * crop.zoom;
+  var iw = crop.img.width * s, ih = crop.img.height * s;
+  var frame = { z: crop.zoom, cx: (f.w / 2 - crop.x) / iw, cy: (f.h / 2 - crop.y) / ih,
+                w: crop.img.width, h: crop.img.height };
+  var key = crop.key, btn = $("cropSave");
+  btn.disabled = true;
+  btn.textContent = "Uploading...";
+  sayNote("cropNote", "");
+  fetch("/api/media/photos/" + encodeURIComponent(key), { method: "POST", body: crop.file })
+    .then(function(r){
+      return r.json().catch(function(){ return {}; }).then(function(b){
+        if(!r.ok || !b.url) throw new Error(b.detail || "the upload did not go through");
+        return b.url;
+      });
+    })
+    .then(function(url){
+      var c = cust();
+      c[key] = url;
+      c[key + "Frame"] = frame;
+      closeCrop();
+      saveCustom();
+      render(current);
+      if(!$("custWrap").hidden) syncSheet();
+    })
+    .catch(function(e){
+      btn.disabled = false;
+      btn.textContent = "Use GIF";
+      sayNote("cropNote", "Could not upload it: " + e.message + ".");
+    });
 }
 
 function saveCrop(){
+  if(crop.file){ saveOriginal(); return; }
   var f = cropFrame(), cfg = crop.cfg;
   var outW = cfg.out, outH = Math.round(outW / cfg.aspect);
   var k = outW / f.w;   /* preview pixels -> export pixels */
@@ -5330,6 +5418,7 @@ function saveCrop(){
   cv.toBlob(function(blob){
     var done = function(value){
       cust()[key] = value;
+      delete cust()[key + "Frame"];   /* a still is cropped into the file itself */
       saveCustom();
       render(current);
       if(!$("custWrap").hidden) syncSheet();
