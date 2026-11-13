@@ -17,6 +17,9 @@ import logging
 import secrets
 import shutil
 import threading
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -136,6 +139,28 @@ app.add_middleware(
 )
 
 
+# Reading a listening history is the heavy work here - a DuckDB query over
+# hundreds of thousands of plays - and the machine has one shared CPU. A page
+# load asks for a dozen of these at once, two people double it, and with every
+# one of them running together the load average reached 23: each request took
+# 15-30 seconds, the health check timed out, and Fly stopped sending traffic, so
+# half a page came back empty. Two at a time, the rest wait their turn.
+HEAVY_AT_ONCE = 2
+_heavy = threading.BoundedSemaphore(HEAVY_AT_ONCE)
+
+
+@contextmanager
+def heavy() -> Iterator[None]:
+    with _heavy:
+        yield
+
+
+def heavy_slot() -> Iterator[None]:
+    """A route dependency holding one heavy slot for the length of the request."""
+    with heavy():
+        yield
+
+
 def needs_history() -> None:
     """For routes that draw from listening history: say so when there is none.
 
@@ -208,11 +233,25 @@ def me(request: Request) -> dict[str, object]:
     return {"signed_in": False, "user": None}
 
 
-@app.get("/api/card", dependencies=[Depends(needs_history)])
+@app.get("/api/card", dependencies=[Depends(needs_history), Depends(heavy_slot)])
 def profile_card() -> dict[str, object]:
     """The computed facts at the top of a profile - hours, plays, genres - for
-    whoever is being looked at."""
-    return card_mod.card()
+    whoever is being looked at.
+
+    Kept for a few minutes per account. These are all-time totals, so a few
+    minutes behind changes nothing anyone can see, and they were recomputed
+    from the whole history on every visit to every profile."""
+    uid = users.current()
+    hit = _card_cache.get(uid)
+    if hit and time.monotonic() - hit[0] < CARD_TTL:
+        return hit[1]
+    out = card_mod.card()
+    _card_cache[uid] = (time.monotonic(), out)
+    return out
+
+
+CARD_TTL = 5 * 60
+_card_cache: dict[str, tuple[float, dict[str, object]]] = {}
 
 
 # --------------------------------------------------------- bringing a history
@@ -267,9 +306,10 @@ def _read_upload(uid: str, archive) -> None:
             "state": "failed",
             "message": "Something went wrong reading that export. Try it again.",
         }
-    # The map was drawn from the history that has just been replaced.
+    # The map and the card were drawn from the history that has just been replaced.
     for key in [k for k in _map_cache if k[0] == uid]:
         _map_cache.pop(key, None)
+    _card_cache.pop(uid, None)
     upload_mod.set_status(uid, **result)
 
 
@@ -332,8 +372,11 @@ def _fitted() -> tuple[object, object, object]:
     return _atlas_cache["space"], _atlas_cache["basemap"], _atlas_cache["atlas"]
 
 
+# async, so it answers on the event loop rather than queueing for a worker
+# thread behind the heavy routes - a busy app is not a dead one, and a health
+# check that waits its turn tells Fly otherwise.
 @app.get("/health")
-def health() -> dict[str, object]:
+async def health() -> dict[str, object]:
     # Only whether the process answers. It once also said whether "the" user had
     # a history, which is a fact about someone, given to anyone who asks.
     return {"ok": True}
@@ -355,7 +398,7 @@ def search(
         raise HTTPException(502, str(e)) from e
 
 
-@app.get("/api/seed", dependencies=[Depends(needs_history)])
+@app.get("/api/seed", dependencies=[Depends(needs_history), Depends(heavy_slot)])
 def seed(refresh: bool = False) -> dict[str, object]:
     """The user's own top tracks and artists, with artwork.
 
@@ -489,7 +532,10 @@ def _chart_answer(g: Generated) -> dict[str, object]:
             "model": g.model,
         }
 
-    d = run_chart(spec)
+    # Only the query takes a heavy slot - the model call before it is a wait on
+    # the network, and holding a slot through it would stall everyone else.
+    with heavy():
+        d = run_chart(spec)
     return {
         "spec": spec.model_dump(),
         "understood": not d.empty,
@@ -584,7 +630,7 @@ GALLERY: list[tuple[str, ChartSpec]] = [
 ]
 
 
-@app.get("/api/chart/gallery", dependencies=[Depends(needs_history)])
+@app.get("/api/chart/gallery", dependencies=[Depends(needs_history), Depends(heavy_slot)])
 def chart_gallery() -> dict[str, object]:
     """Every shape a chart can take, drawn from the real history on one page.
 
@@ -657,7 +703,7 @@ def _chart_payload(d: ChartData) -> dict[str, object]:
     return out
 
 
-@app.post("/api/chart/run", dependencies=[Depends(needs_history)])
+@app.post("/api/chart/run", dependencies=[Depends(needs_history), Depends(heavy_slot)])
 def chart_run(
     spec: ChartSpec,
     back: int = Query(0, ge=0, le=3650, description="days back, for a chart of today"),
@@ -695,7 +741,7 @@ def chart_run(
 CHART_PIN_SLOTS = 2
 
 
-@app.get("/api/chart/pinned", dependencies=[Depends(needs_history)])
+@app.get("/api/chart/pinned", dependencies=[Depends(needs_history), Depends(heavy_slot)])
 def chart_pinned(slot: int = Query(..., ge=0, lt=CHART_PIN_SLOTS)) -> dict[str, object]:
     """Re-run a chart pinned on a profile, over that profile's own history.
 
@@ -737,7 +783,7 @@ def chart_pinned(slot: int = Query(..., ge=0, lt=CHART_PIN_SLOTS)) -> dict[str, 
     return {"understood": True, "empty": d.empty, "problems": [], "data": _chart_payload(d)}
 
 
-@app.get("/api/home", dependencies=[Depends(needs_history)])
+@app.get("/api/home", dependencies=[Depends(needs_history), Depends(heavy_slot)])
 def home(refresh: bool = False) -> dict[str, object]:
     """This week, who is climbing and cooling, what is on repeat.
 
@@ -1015,7 +1061,7 @@ def now() -> dict[str, object]:
     }
 
 
-@app.get("/api/streak", dependencies=[Depends(needs_history)])
+@app.get("/api/streak", dependencies=[Depends(needs_history), Depends(heavy_slot)])
 def streak() -> dict[str, object]:
     """The listening streak for the profile badge.
 
@@ -1033,7 +1079,7 @@ def streak() -> dict[str, object]:
         return {"days": None, "since": None}
 
 
-@app.get("/api/map", dependencies=[Depends(needs_history)])
+@app.get("/api/map", dependencies=[Depends(needs_history), Depends(heavy_slot)])
 def taste_map(
     refresh: bool = False,
     view_px: float = Query(360.0, ge=120, le=4000, description="width the client will draw at"),
