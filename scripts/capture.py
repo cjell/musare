@@ -178,8 +178,15 @@ def _check(con, owner: str) -> bool:
         if fresh and fresh[0]:
             con.execute("select listen.watch_one(%s)", [owner])
             st = live.watch_status(con, "watch", owner)
-            if st and st["last_error"] is None:
+            err = (st or {}).get("last_error") or ""
+            if st and not err:
                 print(f"  live poll   ok for {name_of(owner)}")
+            elif "429" in err or "rate limit" in err:
+                # Spotify refusing everyone is not this install being wrong -
+                # and the pause it just recorded is the install working.
+                held = con.execute("select until from listen.hold").fetchone()
+                until = f" until {as_local(held[0]):%H:%M:%S}" if held else ""
+                print(f"  live poll   Spotify is rate limiting; capture paused{until}")
             else:
                 print(f"  live poll   FAILED for {name_of(owner)}: {(st or {}).get('last_error')}")
                 ok = False

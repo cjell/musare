@@ -438,12 +438,45 @@ def prune(uid: str | None = None) -> int:
 
 
 NOW = "https://api.spotify.com/v1/me/player/currently-playing"
-# What "now" is worth caching for. Long enough that a page polling every few
-# seconds does not become a request per second, short enough that the answer is
-# still true - a status that lags a minute behind is worse than no status.
-NOW_TTL = 5.0
+# What "now" is worth caching for. Every open profile asks every 20 seconds, so
+# this is one Spotify request per account per 20 seconds however many people
+# are looking - and still true enough, since a track is minutes long. It was 5
+# seconds, which with several pages open was most of the requests that ran the
+# app into Spotify's rate limit.
+NOW_TTL = 20.0
 # Per user: one person's status must never be served from another's cache.
 _now_cache: dict[str, tuple[float, dict | None]] = {}
+
+# When Spotify answers 429, nothing here asks it anything until it says to.
+# The limit is on the app's client id, not on one account, so one account's 429
+# holds every account. Asking again straight away is what kept the limit in
+# place for hours: each refused request counts against the window it is waiting
+# out.
+_hold_until = 0.0
+HOLD_DEFAULT = 60.0  # when a 429 names no wait
+HOLD_MAX = 6 * 3600.0  # a wait longer than this is a header misread
+
+
+def _hold_for(r: httpx.Response) -> float:
+    """How long a 429 asks us to wait, from its Retry-After header."""
+    try:
+        wait = float(r.headers.get("retry-after", ""))
+    except ValueError:
+        wait = HOLD_DEFAULT
+    return min(max(wait, 5.0), HOLD_MAX)
+
+
+def spotify_held() -> float:
+    """Seconds left before Spotify may be asked again; 0 when it may."""
+    return max(0.0, _hold_until - time.monotonic())
+
+
+def hold_spotify(r: httpx.Response) -> float:
+    """Stop asking Spotify anything for as long as this 429 says. Returns the wait."""
+    global _hold_until
+    wait = _hold_for(r)
+    _hold_until = max(_hold_until, time.monotonic() + wait)
+    return wait
 
 
 def now_playing(uid: str | None = None, ttl: float = NOW_TTL) -> dict[str, Any] | None:
@@ -462,6 +495,9 @@ def now_playing(uid: str | None = None, ttl: float = NOW_TTL) -> dict[str, Any] 
     hit = _now_cache.get(uid)
     if hit and time.monotonic() - hit[0] < ttl:
         return hit[1]
+    if spotify_held():
+        # No status rather than an old one: the page shows the last play instead.
+        return None
 
     try:
         r = httpx.get(
@@ -493,6 +529,9 @@ def now_playing(uid: str | None = None, ttl: float = NOW_TTL) -> dict[str, Any] 
                 "url": (item.get("external_urls") or {}).get("spotify"),
                 "uri": item.get("uri"),
             }
+    elif r.status_code == 429:
+        wait = hold_spotify(r)
+        log.warning("now playing: Spotify rate limit, not asking again for %.0fs", wait)
     elif r.status_code not in (200, 204):
         log.warning("now playing: HTTP %s %s", r.status_code, r.text[:120])
 

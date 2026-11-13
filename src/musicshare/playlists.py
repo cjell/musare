@@ -29,7 +29,7 @@ from typing import Any
 import httpx
 
 from musicshare import users
-from musicshare.live import access_token, pick_image
+from musicshare.live import access_token, hold_spotify, pick_image, spotify_held
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +48,8 @@ MAX_ITEM_PAGES = 4
 def _get(
     path: str, params: dict[str, Any] | None = None, uid: str | None = None
 ) -> dict[str, Any] | None:
+    if spotify_held():
+        return None  # Spotify asked for a pause; see live.hold_spotify
     try:
         r = httpx.get(
             f"{API}{path}",
@@ -57,6 +59,9 @@ def _get(
         )
     except httpx.HTTPError as e:
         log.warning("playlists %s: %s", path, e)
+        return None
+    if r.status_code == 429:
+        log.warning("playlists %s: Spotify rate limit, pausing %.0fs", path, hold_spotify(r))
         return None
     if r.status_code != 200:
         log.warning("playlists %s: HTTP %s %s", path, r.status_code, r.text[:120])

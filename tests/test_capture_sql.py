@@ -51,6 +51,8 @@ def db(conn):
     conn.execute("select set_config('listen.owner', 'TESTowner', true)")
     conn.execute(SQL.read_text(encoding="utf-8"))
     conn.execute("update listen.accounts set active = false")
+    # A real rate-limit pause would turn every request below into its error.
+    conn.execute("delete from listen.hold")
     yield conn
     conn.rollback()
 
@@ -369,3 +371,94 @@ def test_applying_the_file_twice_changes_nothing(db):
     before = db.execute("select count(*) from listen.plays").fetchone()[0]
     db.execute(SQL.read_text(encoding="utf-8"))
     assert db.execute("select count(*) from listen.plays").fetchone()[0] == before
+
+
+# --------------------------------------------------------------- rate limit
+
+
+def _429(db, retry_after: str | None):
+    headers = (
+        "array[row('Retry-After', %s)::extensions.http_header]"
+        if retry_after is not None
+        else "array[]::extensions.http_header[]"
+    )
+    params = [retry_after] if retry_after is not None else []
+    return db.execute(
+        "select listen._hold(row(429, 'application/json', "
+        + headers
+        + ', \'{"error":"QUOTA_EXCEEDED"}\')::extensions.http_response)'
+        " - clock_timestamp()",
+        params,
+    ).fetchone()[0]
+
+
+def test_a_429_pauses_for_as_long_as_spotify_says(db):
+    wait = _429(db, "120")
+    assert timedelta(seconds=118) < wait <= timedelta(seconds=120)
+    assert "QUOTA_EXCEEDED" in db.execute("select reason from listen.hold").fetchone()[0]
+
+
+def test_a_429_naming_no_wait_pauses_a_minute(db):
+    assert timedelta(seconds=58) < _429(db, None) <= timedelta(seconds=60)
+
+
+def test_a_shorter_wait_does_not_cut_a_longer_one(db):
+    _429(db, "600")
+    _429(db, "10")
+    left = db.execute("select until - clock_timestamp() from listen.hold").fetchone()[0]
+    assert left > timedelta(seconds=590)
+
+
+def test_while_paused_nothing_asks_spotify(db):
+    """The pause is checked before the token, so this account - which has none -
+    fails on the pause, which means no request was attempted."""
+    db.execute("insert into listen.accounts (user_id) values (%s)", [YOU])
+    _429(db, "300")
+    db.execute("select listen.watch_one(%s)", [YOU])
+    err = db.execute(
+        "select last_error from listen.status where job = 'watch' and user_id = %s", [YOU]
+    ).fetchone()[0]
+    assert "rate limit" in err and "no refresh token" not in err
+
+
+def _polled(db, state, checked_ago: timedelta) -> bool:
+    """Whether watch_poll looks at an account in this state, last checked this long ago."""
+    db.execute("insert into listen.accounts (user_id) values (%s)", [YOU])
+    db.execute(
+        "insert into listen.watch_state (user_id, state, updated_at) values (%s, %s::jsonb, now() - %s)",
+        [YOU, json.dumps(state) if state is not None else None, checked_ago],
+    )
+    db.execute("select listen.watch_poll()")
+    return (
+        db.execute(
+            "select count(*) from listen.status where job = 'watch' and user_id = %s", [YOU]
+        ).fetchone()[0]
+        == 1
+    )
+
+
+def test_an_idle_player_is_left_alone_between_minutely_checks(db):
+    assert not _polled(db, None, timedelta(seconds=20))
+
+
+def test_an_idle_player_is_checked_once_the_minute_is_up(db):
+    assert _polled(db, None, timedelta(seconds=60))
+
+
+def test_a_playing_track_is_checked_every_poll(db):
+    state = {"track_uri": A, "playing": True, "moved_at": datetime.now(UTC).isoformat()}
+    assert _polled(db, state, timedelta(seconds=20))
+
+
+def test_a_long_pause_is_checked_like_an_idle_player(db):
+    state = {
+        "track_uri": A,
+        "playing": False,
+        "moved_at": (datetime.now(UTC) - timedelta(minutes=10)).isoformat(),
+    }
+    assert not _polled(db, state, timedelta(seconds=20))
+
+
+def test_a_brief_pause_is_still_checked_every_poll(db):
+    state = {"track_uri": A, "playing": False, "moved_at": datetime.now(UTC).isoformat()}
+    assert _polled(db, state, timedelta(seconds=20))

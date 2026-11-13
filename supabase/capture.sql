@@ -4,7 +4,7 @@
 -- plays - 15 captured on a day with hours of listening, a song played ten times
 -- reported twice - while currently-playing was right every time it was asked.
 -- So the history is built here from currently-playing instead: a job asks what
--- is playing every 10 seconds, and a play is written when the track changes,
+-- is playing every 20 seconds, and a play is written when the track changes,
 -- restarts, or stops.
 --
 -- It asked every 30 seconds until Spotify's account export gave something to
@@ -15,11 +15,18 @@
 -- it - a track dropped after three seconds is still invisible, and the export
 -- stays the way to correct the record.
 --
+-- It went back to 20 seconds when a third account joined. Spotify's rate limit
+-- is on the app, not the account, so every account polled is more requests
+-- against one allowance - and three at ten seconds, plus the site's own
+-- now-playing checks, ran into it and lost three hours of capture. Players
+-- that are idle or paused are only checked once a minute (see watch_poll), and
+-- a 429 now pauses every request until Spotify says to resume (listen.hold).
+--
 -- It runs in the database rather than on a laptop because the laptop is not
 -- online when its owner is walking around with headphones in.
 --
 --   listen.watch_step    pure: previous state + one snapshot -> next state, finished play
---   listen.watch_poll    every 10s: ask Spotify, step, write
+--   listen.watch_poll    every 20s: ask Spotify, step, write
 --   listen.recent_rows   pure: a recently-played response -> rows
 --   listen.poll_recent   every 30m: the backup, for anything the watcher missed
 --   listen.add_play      the one place rows are written, and where the two sources dedupe
@@ -99,6 +106,16 @@ create table if not exists listen.status (
   runs        bigint not null default 0,
   added       bigint not null default 0,
   primary key (job, user_id)
+);
+
+-- When Spotify answers 429 it says how long to wait, and until then nothing here
+-- asks it anything - for any account, since the limit belongs to the app. Asking
+-- again every poll is what held the limit in place: each refused request counts
+-- against the window being waited out. One row, or none.
+create table if not exists listen.hold (
+  one    boolean primary key default true check (one),
+  until  timestamptz not null,
+  reason text
 );
 
 -- A database from before accounts held one listener's capture: plays with no
@@ -242,7 +259,17 @@ create or replace function listen.spotify_get(url text, uid text) returns extens
 language plpgsql security definer set search_path = '' as $$
 declare
   resp extensions.http_response;
+  held timestamptz;
+  wait integer;
 begin
+  select until into held from listen.hold;
+  if held > clock_timestamp() then
+    -- Raised, so the caller records it as a failed check: it is one, and
+    -- capture.py status should say why nothing is arriving.
+    raise exception 'spotify rate limit: paused until % UTC',
+      to_char(held at time zone 'UTC', 'YYYY-MM-DD HH24:MI:SS');
+  end if;
+
   perform extensions.http_set_curlopt('CURLOPT_TIMEOUT_MS', '10000');
   resp := extensions.http(row(
     'GET'::extensions.http_method, url,
@@ -254,7 +281,33 @@ begin
     -- failing with the same token until the hour is up.
     update listen.token set access_token = null, expires_at = null where user_id = uid;
   end if;
+  if resp.status = 429 then
+    perform listen._hold(resp);
+  end if;
   return resp;
+end $$;
+
+
+-- Pause every request for as long as a 429 asks: its Retry-After, in seconds.
+-- A minute when it names none, and never more than six hours, which would be a
+-- misread header rather than a real request.
+create or replace function listen._hold(resp extensions.http_response) returns timestamptz
+language plpgsql security definer set search_path = '' as $$
+declare
+  wait integer;
+  till timestamptz;
+begin
+  select nullif(regexp_replace(h.value, '[^0-9]', '', 'g'), '')::integer into wait
+    from unnest(resp.headers) as h
+   where lower(h.field) = 'retry-after'
+   limit 1;
+  wait := least(greatest(coalesce(wait, 60), 5), 6 * 3600);
+  till := clock_timestamp() + make_interval(secs => wait);
+  insert into listen.hold (one, until, reason) values (true, till, left(resp.content, 160))
+  on conflict (one) do update
+     set until  = greatest(listen.hold.until, excluded.until),
+         reason = excluded.reason;
+  return till;
 end $$;
 
 
@@ -350,7 +403,7 @@ declare
   -- Spotify can blink out for a poll between tracks or during a device
   -- handoff. Ending a play on the first empty answer and starting it again on
   -- the next would count one listen twice, so nothing ends until it persists.
-  -- Five missed checks at the ten-second cadence, and it only delays the end
+  -- Two missed checks at the twenty-second cadence, and it only delays the end
   -- of a play rather than moving it: the end time comes from when the track
   -- last moved, not from when the blackout was noticed.
   gone_for  constant interval := interval '50 seconds';
@@ -500,7 +553,23 @@ begin
   if not pg_try_advisory_xact_lock(hashtext('listen.watch_poll')) then
     return;  -- the previous poll is still running
   end if;
-  for a in select user_id from listen.accounts where active order by user_id loop
+  -- A player with nothing on, or paused for over two minutes, is checked about
+  -- once a minute instead of every poll. Most of any day is that, so it is most
+  -- of the requests saved. Nothing is lost from a play already going; what a
+  -- slower check can miss is a track started and skipped inside that minute.
+  for a in
+    select ac.user_id
+      from listen.accounts ac
+      left join listen.watch_state w on w.user_id = ac.user_id
+     where ac.active
+       and not coalesce(
+             (w.state is null
+              or (not coalesce((w.state->>'playing')::boolean, false)
+                  and (w.state->>'moved_at')::timestamptz < now() - interval '2 minutes'))
+             and w.updated_at > now() - interval '50 seconds',
+             false)
+     order by ac.user_id
+  loop
     begin
       perform listen.watch_one(a.user_id);
     exception when others then
@@ -627,9 +696,9 @@ revoke all on all functions in schema listen from public, anon, authenticated;
 
 -- cron.schedule replaces a job of the same name, so re-applying this file
 -- updates the schedule rather than adding a second copy.
-select cron.schedule('listen-watch',  '10 seconds',   'select listen.watch_poll()');
+select cron.schedule('listen-watch',  '20 seconds',   'select listen.watch_poll()');
 select cron.schedule('listen-recent', '*/30 * * * *', 'select listen.poll_recent()');
--- A job every 10 seconds is 8,640 run records a day in pg_cron's own log.
+-- A job every 20 seconds is 4,320 run records a day in pg_cron's own log.
 select cron.schedule('listen-trim-cron-log', '17 4 * * *',
   $$delete from cron.job_run_details where end_time < now() - interval '2 days'$$);
 
