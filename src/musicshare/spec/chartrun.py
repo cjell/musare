@@ -89,6 +89,12 @@ MAX_TABLE_ROWS = 60
 # carries both, split apart again after the query: the title is the label, short
 # enough for an axis, and the artist rides along for the hover.
 BY_ARTIST = frozenset({"track", "album"})
+# Bars that play when tapped, and what they play: the track this listener has
+# played most inside each bar - the song itself, the album's most-played song,
+# the artist's most-played song. A song rather than the album or the artist's
+# top tracks because the history has track uris and nothing else, so it costs no
+# Spotify request, and because "your song of theirs" is the more personal answer.
+PLAYABLE_BARS = frozenset({"track", "album", "artist"})
 KEY_SEP = ""  # a control character, so no real title can contain it
 
 DIMENSIONS: dict[str, tuple[str, str]] = {
@@ -205,6 +211,9 @@ class ChartData:
     # The artist under each label, for charts of songs or albums - the hover's
     # second line. Empty for every other chart.
     subs: list[str] = field(default_factory=list)
+    # What tapping each bar plays - see PLAYABLE_BARS. Aligned to the labels,
+    # with "" for a bar that has nothing to play. Empty for every other chart.
+    uris: list[str] = field(default_factory=list)
 
     @property
     def empty(self) -> bool:
@@ -523,6 +532,7 @@ def run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
 
     con = _connect(spec)
     chart = chart_for(spec.dimension, spec.series, spec.per_period, spec.cumulative)
+    uris: list[str] = []
     partial: float | None = None
     timeline: list[list[float]] = []
 
@@ -540,12 +550,15 @@ def run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
             {order} {limit}
         """
         rows = con.execute(sql, dim_params + params).fetchall()
-        labels, values = [], []
+        labels, values, keys = [], [], []
         for k, v in rows:
             if k is None:
                 continue
+            keys.append(k)
             labels.append(_label(spec, k))
             values.append(round(float(v), 2))
+        if spec.dimension in PLAYABLE_BARS and keys:
+            uris = _most_played(con, frm, where, params, dim_sql, dim_params, keys)
         if spec.dimension == "hour_of_day" and spec.metric not in RATE_METRICS:
             labels, values = _every_hour(spec, con, labels, values, back)
             if spec.range == "today" and spec.year is None:
@@ -592,7 +605,37 @@ def run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
         earlier=earlier,
         scale_peak=peak,
         subs=subs,
+        uris=uris,
     )
+
+
+def _most_played(
+    con: duckdb.DuckDBPyConnection,
+    frm: str,
+    where: str,
+    params: list[Any],
+    dim_sql: str,
+    dim_params: list[Any],
+    keys: list[Any],
+) -> list[str]:
+    """The most-played track uri inside each of these bars, in their order.
+
+    Over the same plays the chart counted, so a chart of this week plays the
+    song that put the artist on it this week."""
+    rows = con.execute(
+        f"""
+        select k, arg_max(track_uri, n) from (
+          select {dim_sql} as k, track_uri, count(*) as n
+          from {frm}
+          where {where} and track_uri like 'spotify:track:%'
+          group by 1, 2
+        )
+        group by 1
+        """,
+        dim_params + params,
+    ).fetchall()
+    best = dict(rows)
+    return [best.get(k) or "" for k in keys]
 
 
 def _timeline(

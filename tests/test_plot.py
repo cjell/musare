@@ -372,3 +372,21 @@ def test_the_artist_under_each_song_reaches_the_drawing():
     assert _plan(data)["subs"] == [], "never the wrong artist under a bar"
     del data["subs"]
     assert _plan(data)["subs"] == [], "a chart saved before artists has none"
+
+
+def test_what_each_bar_plays_reaches_the_drawing_only_when_aligned():
+    from musicshare.spec.plot import plan as _plan
+
+    data = {
+        "labels": ["A", "B"],
+        "values": [3, 2],
+        "x_label": "track",
+        "y_label": "plays",
+        "chart": "bar",
+        "uris": ["spotify:track:a", ""],
+    }
+    assert _plan(data)["uris"] == ["spotify:track:a", ""]
+    data["uris"] = ["spotify:track:a"]
+    assert _plan(data)["uris"] == []
+    data["uris"] = ["", ""]
+    assert _plan(data)["uris"] == [], "nothing to play is no tapping at all"

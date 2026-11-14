@@ -379,8 +379,11 @@ def plan(p: dict[str, Any], style: ChartStyle | dict[str, Any] | None = None) ->
     # lines up with the labels, so a chart saved before it existed has none
     # rather than the wrong ones.
     subs = [str(x) for x in (p.get("subs") or [])]
+    # What each bar plays when tapped. Same rule: aligned, or none at all.
+    uris = [str(x or "") for x in (p.get("uris") or [])]
     common = {
         "subs": subs if len(subs) == len(labels) else [],
+        "uris": uris if len(uris) == len(labels) and any(uris) else [],
         "color": st.color if single else None,
         "style": {"type": kind, "color": st.color, "gridlines": st.gridlines, "values": st.values},
         "styles": {"types": allowed, "color": single, "gridlines": True, "values": kind == "bar"},

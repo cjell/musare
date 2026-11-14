@@ -368,3 +368,31 @@ def test_songs_and_albums_carry_their_artist_for_the_hover(dimension):
 
 def test_other_charts_carry_no_artist():
     assert run(ChartSpec(dimension="artist", limit=5)).subs == []
+
+
+@pytest.mark.parametrize("dimension", ["track", "album", "artist"])
+def test_each_bar_of_songs_albums_or_artists_has_a_song_to_play(dimension):
+    d = run(ChartSpec(dimension=dimension, limit=10))
+    assert len(d.uris) == len(d.labels)
+    assert all(u.startswith("spotify:track:") for u in d.uris if u)
+    assert sum(bool(u) for u in d.uris) >= len(d.uris) - 1
+
+
+def test_a_song_bar_plays_that_song():
+    """Not merely a song by the same artist: the bar's own title."""
+    from musicshare.history import connect
+
+    d = run(ChartSpec(dimension="track", limit=5))
+    con = connect()
+    for title, uri in zip(d.labels, d.uris, strict=True):
+        names = {
+            r[0]
+            for r in con.execute(
+                "select distinct track_name from plays where track_uri = ?", [uri]
+            ).fetchall()
+        }
+        assert title in names
+
+
+def test_bars_of_anything_else_play_nothing():
+    assert run(ChartSpec(dimension="day_of_week")).uris == []

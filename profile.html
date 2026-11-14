@@ -6367,8 +6367,11 @@ function closePlayer(){
 function tapPlay(row){
   /* Not while arranging pins: a tap there means pick this slot, not play it. */
   if(document.body.classList.contains("editing")) return;
-  var uri = row.dataset.play;
-  if(!PLAYABLE.test(uri)) return;
+  playUri(row.dataset.play);
+}
+/* Tap to play; the same thing again pauses or resumes it. */
+function playUri(uri){
+  if(!PLAYABLE.test(uri || "")) return;
   if(uri === PLAYER.uri && PLAYER.ctl){ PLAYER.ctl.togglePlay(); return; }
   playTrack(uri);
 }
@@ -6943,6 +6946,25 @@ function plotChart(cv, plan){
   }
   cfg.options.responsive = false;
   cfg.options.animation = false;
+  /* A bar of a song, an album or an artist plays when tapped: the song, or
+     the one of theirs played most in what the chart counted (plan.uris). */
+  var tunes = (plan.kind === "bar" || plan.kind === "hbar") && plan.uris && plan.uris.length ? plan.uris : null;
+  if(tunes){
+    var tuneAt = function(els){
+      var u = els && els.length ? tunes[els[0].index] : "";
+      return u && PLAYABLE.test(u) ? u : "";
+    };
+    /* Anywhere along the bar's row counts, not only the painted part - a short
+       bar is a small target, and the label beside it is the same song. */
+    cfg.options.interaction = { mode: "index", intersect: false, axis: plan.kind === "hbar" ? "y" : "x" };
+    cfg.options.onClick = function(ev, els){
+      var u = tuneAt(els);
+      if(u) playUri(u);
+    };
+    cfg.options.onHover = function(ev, els){
+      cv.style.cursor = tuneAt(els) ? "pointer" : "";
+    };
+  }
   var upright = plan.kind === "bar" && plan.value_labels && plan.value_labels.length;
   cfg.options.layout = { padding: { top: upright ? 14 : 4, right: plan.kind === "hbar" ? 30 : 6 } };
   cfg.options.plugins = {
