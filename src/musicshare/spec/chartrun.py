@@ -83,11 +83,19 @@ SPLITS: dict[str, str] = {
 # truncation is not, so the caller says so in the note.
 MAX_TABLE_ROWS = 60
 
+# Songs and albums are counted per title AND artist. Keyed on the title alone,
+# "Stay" by Rihanna and "Stay" by The Kid LAROI were one bar with both their
+# plays in it, and the artist was gone before anything could show it. The key
+# carries both, split apart again after the query: the title is the label, short
+# enough for an axis, and the artist rides along for the hover.
+BY_ARTIST = frozenset({"track", "album"})
+KEY_SEP = ""  # a control character, so no real title can contain it
+
 DIMENSIONS: dict[str, tuple[str, str]] = {
     "artist": ("artist_name", "artist"),
     "genre": (GENRE_SQL, "genre"),
-    "album": ("album_name", "album"),
-    "track": ("track_name", "track"),
+    "album": ("album_name || chr(31) || coalesce(artist_name, '')", "album"),
+    "track": ("track_name || chr(31) || coalesce(artist_name, '')", "track"),
     "platform": (PLATFORM, "platform"),
     "hour_of_day": (f"hour({LOCAL_TS})", "hour of day"),
     "day_of_week": (f"isodow({LOCAL_TS})", "day of week"),
@@ -194,6 +202,9 @@ class ChartData:
     # A running total of today as it happened, as [hours since midnight, total]
     # pairs, one ramp per play. Empty for every other chart.
     timeline: list[list[float]] = field(default_factory=list)
+    # The artist under each label, for charts of songs or albums - the hover's
+    # second line. Empty for every other chart.
+    subs: list[str] = field(default_factory=list)
 
     @property
     def empty(self) -> bool:
@@ -547,6 +558,11 @@ def run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
         data = (labels, values, [], sql.strip(), [])
 
     labels, values, series, sql, table = data
+    subs: list[str] = []
+    if spec.dimension in BY_ARTIST and labels:
+        parts = [lb.split(KEY_SEP, 1) for lb in labels]
+        labels = [pt[0] for pt in parts]
+        subs = [pt[1] if len(pt) > 1 else "" for pt in parts]
     if spec.cumulative:
         values = _running(values)
         series = [Line(ln.name, _running(ln.values)) for ln in series]
@@ -575,6 +591,7 @@ def run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
         window=window,
         earlier=earlier,
         scale_peak=peak,
+        subs=subs,
     )
 
 

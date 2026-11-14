@@ -689,6 +689,8 @@ def _chart_payload(d: ChartData) -> dict[str, object]:
         "window": d.window,
         "earlier": d.earlier,
         "scale_peak": d.scale_peak,
+        # The artist under each label on a chart of songs or albums.
+        "subs": d.subs,
         # Empty for an ordinary chart; when present it is the data and
         # `values` is empty. The page branches on which one has content.
         "series": [{"name": ln.name, "values": ln.values} for ln in d.series],

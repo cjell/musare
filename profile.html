@@ -1215,8 +1215,10 @@ details[open] summary .chev{transform:rotate(180deg)}
 .tab:focus-visible{outline:2px solid var(--accent);outline-offset:0}
 
 /* ---- player: Spotify's own embed, docked above the tab bar ---- */
+/* Above the playlist and album sheet (70), so a song started from inside one
+   can be paused there; below the crop and pin pickers, which want the screen. */
 .player{
-  position:fixed;left:50%;transform:translateX(-50%);z-index:22;
+  position:fixed;left:50%;transform:translateX(-50%);z-index:72;
   bottom:calc(var(--tab-h) + env(safe-area-inset-bottom) + 8px);
   width:100%;max-width:420px;padding:0 10px;
 }
@@ -1239,8 +1241,13 @@ details[open] summary .chev{transform:rotate(180deg)}
 .has-player .phone{padding-bottom:calc(96px + 88px)}
 .has-player .totop{bottom:calc(80px + 88px)}
 .has-player .editbar{bottom:calc(64px + env(safe-area-inset-bottom) + 12px + 88px)}
-.row[data-play]{cursor:pointer}
-.row.is-playing .tt{color:var(--accent)}
+.has-player .pl-card{padding-bottom:calc(16px + 88px + env(safe-area-inset-bottom))}
+.has-player .sheet{margin-bottom:88px}
+[data-play]{cursor:pointer}
+.row.is-playing .tt,.pl-tr.is-playing .tn,.now.is-playing #nowTrack{color:var(--accent)}
+.rise.is-playing .rn,.artist.is-playing .an{color:var(--accent)}
+.pl-tr[data-play]{border-radius:6px}
+.pl-tr[data-play]:hover{background:rgba(244,241,250,.045)}
 
 /* ---- motion ---- */
 /* The entrance runs only under .playin, which is re-applied every time a screen
@@ -2094,6 +2101,7 @@ details[open] summary .chev{transform:rotate(180deg)}
       <div class="pop-foot">
         <div class="ss-actions" style="margin-top:0">
           <button class="btn btn-primary" type="button" id="ssGo">Going</button>
+          <button class="btn btn-ghost" type="button" id="ssPlay" hidden>Listen</button>
           <button class="btn btn-ghost" type="button" id="ssTickets">Tickets</button>
         </div>
       </div>
@@ -3848,6 +3856,7 @@ function apiShow(x){
     friends: [], going: 0, av: [],
     listen: 0,
     img: x.image,
+    sp: x.spotify_id || null,
     hours: x.your_hours,
     yours: x.yours,
     fam: x.familiarity || null,
@@ -4011,30 +4020,32 @@ function loadHome(){
        from the job's own check-ins, so it is said here or nowhere. */
     $("gapNote").hidden = !(d.live && d.live.stalled);
 
-    HOME.you.up = d.up.map(function(a){ return [a.name, "+" + a.pct + "%", a.image]; });
-    HOME.you.down = d.down.map(function(a){ return [a.name, a.pct + "%", a.image]; });
-    HOME.you.back = (d.back || []).map(function(a){ return [a.name, a.plays + " plays", a.image]; });
+    /* The fourth or fifth slot is what a tap plays: an artist's is the song of
+       theirs this listener has played most. */
+    HOME.you.up = d.up.map(function(a){ return [a.name, "+" + a.pct + "%", a.image, a.play]; });
+    HOME.you.down = d.down.map(function(a){ return [a.name, a.pct + "%", a.image, a.play]; });
+    HOME.you.back = (d.back || []).map(function(a){ return [a.name, a.plays + " plays", a.image, a.play]; });
     HOME.you.backSongs = (d.back_songs || []).map(function(t){
-      return [t.name, t.artist, String(t.plays), t.image];
+      return [t.name, t.artist, String(t.plays), t.image, t.uri];
     });
     /* Time listened rather than days returned, because "20 days" beside a face
        reads as "20 days ago". Coming back is what got them into this list at
        all - the server will not return an artist played on only one day - so
        the label is free to show the size of it instead. */
     HOME.you.found = (d.found || []).map(function(a){
-      return [a.name, a.plays + " plays", a.image];
+      return [a.name, a.plays + " plays", a.image, a.play];
     });
     HOME.you.upSongs = (d.up_songs || []).map(function(t){
-      return [t.name, t.artist, "+" + t.pct + "%", t.image];
+      return [t.name, t.artist, "+" + t.pct + "%", t.image, t.uri];
     });
     HOME.you.downSongs = (d.down_songs || []).map(function(t){
-      return [t.name, t.artist, t.pct + "%", t.image];
+      return [t.name, t.artist, t.pct + "%", t.image, t.uri];
     });
     HOME.you.foundSongs = (d.found_songs || []).map(function(t){
-      return [t.name, t.artist, String(t.plays), t.image];
+      return [t.name, t.artist, String(t.plays), t.image, t.uri];
     });
     HOME.you.tracks = d.on_repeat.map(function(t){
-      return [t.name, t.artist, String(t.plays), t.image];
+      return [t.name, t.artist, String(t.plays), t.image, t.uri];
     });
     renderYou();
   }).catch(function(){
@@ -4252,7 +4263,7 @@ function trackRows(list){
     var art = t[3]
       ? 'class="art photo" style="background-image:url(' + t[3] + ')"'
       : 'class="art" style="' + artStyle(t[0], 200) + '"';
-    return '<div class="row" tabindex="0" role="button">' +
+    return '<div class="row" tabindex="0" role="button"' + playAttr(spUri("track", { uri: t[4] })) + ">" +
       '<span class="idx">' + (n + 1) + "</span>" +
       "<div " + art + "></div>" +
       '<div class="meta"><div class="tt">' + esc(t[0]) + '</div><div class="ta">' + esc(t[1]) + "</div></div>" +
@@ -4269,7 +4280,7 @@ function artistCircles(list, down){
     var art = a[2]
       ? 'class="art photo" style="display:block;background-image:url(' + a[2] + ')"'
       : 'class="art" style="display:block;' + artStyle(a[0], 200) + '"';
-    return '<div class="rise" tabindex="0" role="button">' +
+    return '<div class="rise" tabindex="0" role="button"' + playAttr(spUri("track", { uri: a[3] })) + ">" +
       '<span class="ring"><span ' + art + "></span></span>" +
       '<span class="rn">' + esc(a[0]) + '</span><span class="rd' + (down ? " down" : "") + '">' +
       esc(a[1]) + "</span></div>";
@@ -4356,6 +4367,7 @@ function renderYou(){
   fitScroll($("youDownSongs"), (y.downSongs || []).length);
   fitScroll($("youFoundSongs"), fs.length);
   renderRepeat();
+  markPlaying();
 }
 
 var actFilter = "all";
@@ -4493,6 +4505,13 @@ function openShow(i, anchor){
   $("ssDist").textContent = s.dist || "\u2014";
   $("ssPrice").textContent = s.price || "\u2014";
   $("ssDoors").textContent = s.doors || "\u2014";
+
+  /* Hear who it is before buying a ticket: the artist's top songs, when the
+     listing names them on Spotify. */
+  var spu = spUri("artist", { id: s.sp });
+  $("ssPlay").hidden = !spu;
+  if(spu) $("ssPlay").dataset.play = spu; else delete $("ssPlay").dataset.play;
+  markPlaying();
 
   /* Only real shows carry a listing; the generated ones have nowhere to send you. */
   $("ssTickets").disabled = !s.url;
@@ -5738,6 +5757,9 @@ function paintNow(){
     row.classList.toggle("on", !!NOW.is_playing);
     row.classList.remove("idle");
     row.href = NOW.url || "#";
+    var nu = spUri("track", { uri: NOW.uri });
+    if(nu) row.dataset.play = nu; else delete row.dataset.play;
+    markPlaying();
     $("nowTrack").textContent = NOW.track || "";
     $("nowArtist").textContent = (NOW.is_playing ? "" : "Paused \u00B7 ") + (NOW.artist || "");
     if(NOW.art){ art.src = NOW.art; art.hidden = false; } else { art.hidden = true; }
@@ -5747,6 +5769,7 @@ function paintNow(){
   row.classList.remove("on");
   row.classList.add("idle");
   row.removeAttribute("href");
+  delete row.dataset.play;
   art.hidden = true;
   $("nowTrack").textContent = "Not listening";
   /* The last play is worth more than an empty second line - it dates the
@@ -5923,6 +5946,7 @@ function openSheet(title, meta, cover, load){
 
   load().then(function(html){
     $("plList").innerHTML = html || '<div class="pl-tr"><span class="ta2">Nothing to show.</span></div>';
+    markPlaying();
   }).catch(function(){
     $("plList").innerHTML = '<div class="pl-tr"><span class="ta2">Could not load.</span></div>';
   });
@@ -5947,7 +5971,8 @@ function openAlbum(i){
                is only worth the room when it differs - which is exactly when it
                is a feature and worth seeing. */
             var feat = t.artist && t.artist !== bp.artist_name ? t.artist : "";
-            return '<div class="pl-tr"><span class="pl-no">' + (t.number || "") + "</span>" +
+            return '<div class="pl-tr" tabindex="0" role="button"' + playAttr(spUri("track", t)) + '>' +
+              '<span class="pl-no">' + (t.number || "") + "</span>" +
               '<span class="mx"><span class="tn">' + esc(t.name) + "</span>" +
               (feat ? '<br><span class="ta2">' + esc(feat) + "</span>" : "") + "</span>" +
               '<span class="pl-dur">' + mmss(t.duration_ms) + "</span></div>";
@@ -5976,7 +6001,7 @@ function openPlaylist(i){
       .then(function(d){
         var rows = (d && d.tracks) || [];
         var html = rows.map(function(t){
-          return '<div class="pl-tr">' +
+          return '<div class="pl-tr" tabindex="0" role="button"' + playAttr(spUri("track", t)) + '>' +
             (t.image ? '<img src="' + t.image + '" alt="">' : '<img alt="">') +
             '<span class="mx"><span class="tn">' + esc(t.name) + "</span><br>" +
             '<span class="ta2">' + esc(t.artist || "") + "</span></span></div>";
@@ -6248,15 +6273,21 @@ document.addEventListener("click", function(e){
    in this browser it is the whole track; signed out, a 30-second preview -
    Spotify's rule, not ours. It loads from Spotify directly, so it costs nothing
    against the app's API allowance, which the capture job already uses up.
-   A test on profile tracks only for now. */
+   Any row carrying data-play is tappable; spUri decides which can. */
 var PLAYER = { api: null, ctl: null, uri: null, loaded: null, making: false };
 
-function trackUri(t){
-  if(!t) return null;
-  if(t.uri && /^spotify:track:[A-Za-z0-9]+$/.test(t.uri)) return t.uri;
-  if(t.id && /^[A-Za-z0-9]{22}$/.test(t.id)) return "spotify:track:" + t.id;
+/* What Spotify can play: a track, or an artist (their top songs), album or
+   playlist. Anything else - a demo row, a song from a local file - has no uri
+   and is not tappable at all, rather than tappable and silent. */
+var PLAYABLE = /^spotify:(track|artist|album|playlist):[A-Za-z0-9]+$/;
+
+function spUri(kind, x){
+  if(!x) return null;
+  if(x.uri && PLAYABLE.test(x.uri) && x.uri.split(":")[1] === kind) return x.uri;
+  if(x.id && /^[A-Za-z0-9]{22}$/.test(x.id)) return "spotify:" + kind + ":" + x.id;
   return null;
 }
+function playAttr(uri){ return uri ? ' data-play="' + uri + '"' : ""; }
 
 function spotifyApi(){
   if(PLAYER.api) return PLAYER.api;
@@ -6277,10 +6308,10 @@ function spotifyApi(){
 
 /* The player without the API: it still plays, the listener just presses play. */
 function plainEmbed(uri){
-  var id = uri.split(":").pop();
+  var parts = uri.split(":");
   $("playerIn").innerHTML = '<iframe title="Spotify player" ' +
     'allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" ' +
-    'src="https://open.spotify.com/embed/track/' + encodeURIComponent(id) + '"></iframe>';
+    'src="https://open.spotify.com/embed/' + parts[1] + "/" + encodeURIComponent(parts[2]) + '"></iframe>';
 }
 
 function markPlaying(){
@@ -6337,6 +6368,7 @@ function tapPlay(row){
   /* Not while arranging pins: a tap there means pick this slot, not play it. */
   if(document.body.classList.contains("editing")) return;
   var uri = row.dataset.play;
+  if(!PLAYABLE.test(uri)) return;
   if(uri === PLAYER.uri && PLAYER.ctl){ PLAYER.ctl.togglePlay(); return; }
   playTrack(uri);
 }
@@ -6344,12 +6376,17 @@ document.addEventListener("click", function(e){
   if(e.target.closest("#playerX")){ closePlayer(); return; }
   var row = e.target.closest("[data-play]");
   if(!row || e.target.closest(".unpin")) return;
+  /* The now-playing card is a link to Spotify; with a player here it plays
+     on the page instead of leaving it. */
+  if(row.tagName === "A") e.preventDefault();
   tapPlay(row);
 });
 document.addEventListener("keydown", function(e){
   if(e.key !== "Enter" && e.key !== " ") return;
   var row = e.target.closest && e.target.closest("[data-play]");
-  if(!row || e.target !== row) return;
+  /* Buttons and links already turn Enter into a click; doing it here too
+     would play and then immediately pause. */
+  if(!row || e.target !== row || row.tagName === "BUTTON" || row.tagName === "A") return;
   e.preventDefault();
   tapPlay(row);
 });
@@ -6367,8 +6404,7 @@ function renderPins(p){
     var pin = tp[i];
     var demo = (!tAny && p.tracks[i]) ? p.tracks[i] : null;
     if(pin){
-      var pu = trackUri(pin);
-      th += '<div class="row pinbox"' + (pu ? ' data-play="' + pu + '"' : "") +
+      th += '<div class="row pinbox"' + playAttr(spUri("track", pin)) +
         ' tabindex="0" role="button">' +
         '<span class="idx">' + (i + 1) + "</span>" +
         "<div " + artAttr(pin, pin.name, hue) + "></div>" +
@@ -6393,7 +6429,7 @@ function renderPins(p){
     var apin = ap[j];
     var ademo = (!aAny && p.artists[j]) ? p.artists[j] : null;
     if(apin){
-      ah += '<div class="artist pinbox" tabindex="0" role="button">' +
+      ah += '<div class="artist pinbox" tabindex="0" role="button"' + playAttr(spUri("artist", apin)) + ">" +
         '<div class="ring"><div ' + artAttr(apin, apin.name, hue) + "></div></div>" +
         '<div class="an">' + esc(apin.name) + '</div><div class="ameta">' +
         (apin.your_hours ? esc(apin.your_hours) + "h" : "") + "</div>" +
@@ -6407,6 +6443,7 @@ function renderPins(p){
     }
   }
   $("artists").innerHTML = ah;
+  markPlaying();
 
   /* Albums have no sample data - the section only exists once you pin one, and
      in edit mode where its empty slots are the invitation. */
@@ -6917,6 +6954,10 @@ function plotChart(cv, plan){
       callbacks: {
         title: function(items){
           var it = items[0];
+          /* A song or album says whose it is: two lines, the title then the
+             artist. Only the axis is kept to the title, for room. */
+          var by = plan.kind !== "line" && plan.subs && plan.subs[it.dataIndex];
+          if(by) return [plan.labels[it.dataIndex], by];
           if(plan.kind !== "line") return plan.labels[it.dataIndex];
           return plan.series[it.datasetIndex].labels[it.dataIndex] || "";
         },

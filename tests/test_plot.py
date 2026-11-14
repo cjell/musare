@@ -354,3 +354,21 @@ def test_a_stored_shape_this_chart_cannot_take_falls_back():
         {"type": "heatmap"},
     )
     assert p["kind"] == "hbar"
+
+
+def test_the_artist_under_each_song_reaches_the_drawing():
+    from musicshare.spec.plot import plan as _plan
+
+    data = {
+        "labels": ["Stay", "Stay"],
+        "values": [3, 2],
+        "x_label": "track",
+        "y_label": "plays",
+        "chart": "bar",
+        "subs": ["Rihanna", "The Kid LAROI"],
+    }
+    assert _plan(data)["subs"] == ["Rihanna", "The Kid LAROI"]
+    data["subs"] = ["Rihanna"]
+    assert _plan(data)["subs"] == [], "never the wrong artist under a bar"
+    del data["subs"]
+    assert _plan(data)["subs"] == [], "a chart saved before artists has none"

@@ -375,7 +375,12 @@ def plan(p: dict[str, Any], style: ChartStyle | dict[str, Any] | None = None) ->
         default = "bar" if drawn_as_bars else "area"
     kind = st.type if st.type in allowed else default
 
+    # The artist under each song or album, for the hover. Carried only when it
+    # lines up with the labels, so a chart saved before it existed has none
+    # rather than the wrong ones.
+    subs = [str(x) for x in (p.get("subs") or [])]
     common = {
+        "subs": subs if len(subs) == len(labels) else [],
         "color": st.color if single else None,
         "style": {"type": kind, "color": st.color, "gridlines": st.gridlines, "values": st.values},
         "styles": {"types": allowed, "color": single, "gridlines": True, "values": kind == "bar"},

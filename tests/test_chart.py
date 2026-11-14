@@ -353,3 +353,18 @@ def test_a_window_says_what_it_covers():
     stepped = run(ChartSpec(range="today", dimension="hour_of_day"), back=1).window
     assert stepped and stepped != "Today", "a past day names itself"
     assert " - " in run(ChartSpec(range="30d", dimension="hour_of_day"), back=1).window
+
+
+@pytest.mark.parametrize("dimension", ["track", "album"])
+def test_songs_and_albums_carry_their_artist_for_the_hover(dimension):
+    """Counted per title and artist, so two songs sharing a title are two bars;
+    the title is the label and the artist travels beside it."""
+    d = run(ChartSpec(dimension=dimension, limit=20))
+    assert len(d.subs) == len(d.labels)
+    assert not any("\x1f" in x for x in d.labels + d.subs), "the key is split apart"
+    assert len(set(zip(d.labels, d.subs, strict=True))) == len(d.labels)
+    assert any(d.subs), "the artists are there"
+
+
+def test_other_charts_carry_no_artist():
+    assert run(ChartSpec(dimension="artist", limit=5)).subs == []

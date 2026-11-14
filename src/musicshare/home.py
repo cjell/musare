@@ -32,7 +32,7 @@ ART_CACHE = ROOT / "data" / "cache" / "art.json"
 # Bumped whenever what a cached feed means changes - a new field, a different
 # rule for choosing a picture - so an old file is rebuilt rather than served just
 # because no play has happened since.
-CACHE_VERSION = 9
+CACHE_VERSION = 10  # 10: artists carry a song to play
 
 MIN_MS = 30_000
 URI_RE = re.compile(r"^spotify:track:([A-Za-z0-9]+)$")
@@ -502,15 +502,23 @@ def on_repeat(limit: int = 5) -> list[dict[str, Any]]:
 
 
 def _played_tracks(names: list[str]) -> dict[str, str]:
-    """One track uri this listener actually played, per artist name."""
+    """The track this listener has played most, per artist name.
+
+    Tapping an artist on Home plays it, so it is their song for this listener
+    rather than an arbitrary one - and it is also a track that credits them,
+    which is what the picture is resolved from.
+    """
     if not names:
         return {}
     marks = ", ".join("?" for _ in names)
     rows = _q(
         f"""
-        select artist_name, any_value(track_uri)
-        from plays
-        where artist_name in ({marks}) and track_uri is not null
+        select artist_name, arg_max(track_uri, n) from (
+          select artist_name, track_uri, count(*) as n
+          from plays
+          where artist_name in ({marks}) and track_uri is not null
+          group by 1, 2
+        )
         group by 1
         """,
         list(names),
@@ -635,13 +643,15 @@ def build(refresh: bool = False) -> dict[str, Any]:
     found, found_songs = discoveries(10), song_discoveries(10)
     back, back_songs = back_in_rotation(10), songs_back_in_rotation(10)
     names = [a["name"] for a in up + down + found + back]
+    played = _played_tracks(names)
     art = _art(
         names,
         [t["uri"] for t in repeat + found_songs + up_songs + down_songs + back_songs],
-        played=_played_tracks(names),
+        played=played,
     )
     for a in up + down + found + back:
         a["image"] = art.get(f"ai:{a['name'].lower()}") or None
+        a["play"] = played.get(a["name"])
     for t in repeat + found_songs + up_songs + down_songs + back_songs:
         t["image"] = art.get(f"t:{t['uri']}") or None
 
