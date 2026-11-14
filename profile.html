@@ -1214,6 +1214,34 @@ details[open] summary .chev{transform:rotate(180deg)}
 .tab:hover{color:var(--ink-2)}
 .tab:focus-visible{outline:2px solid var(--accent);outline-offset:0}
 
+/* ---- player: Spotify's own embed, docked above the tab bar ---- */
+.player{
+  position:fixed;left:50%;transform:translateX(-50%);z-index:22;
+  bottom:calc(var(--tab-h) + env(safe-area-inset-bottom) + 8px);
+  width:100%;max-width:420px;padding:0 10px;
+}
+.player[hidden]{display:none}
+.player-in{
+  height:80px;border-radius:12px;overflow:hidden;background:var(--raise);
+  box-shadow:0 8px 24px rgba(0,0,0,.5);
+}
+.player-in iframe{display:block;width:100%;height:80px;border:0}
+.player-x{
+  position:absolute;top:-10px;right:2px;width:24px;height:24px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;
+  background:var(--raise);border:1px solid var(--line-2);color:var(--ink-2);
+  box-shadow:0 2px 8px rgba(0,0,0,.5);
+}
+.player-x:hover{color:var(--ink);border-color:var(--ink-3)}
+.player-x:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* Room for it: the end of the page, and the floating buttons, move up by the
+   player's height rather than hiding behind it. */
+.has-player .phone{padding-bottom:calc(96px + 88px)}
+.has-player .totop{bottom:calc(80px + 88px)}
+.has-player .editbar{bottom:calc(64px + env(safe-area-inset-bottom) + 12px + 88px)}
+.row[data-play]{cursor:pointer}
+.row.is-playing .tt{color:var(--accent)}
+
 /* ---- motion ---- */
 /* The entrance runs only under .playin, which is re-applied every time a screen
    or tab is shown. A bare `animation: ... both` here would stick at opacity 0
@@ -1989,6 +2017,13 @@ details[open] summary .chev{transform:rotate(180deg)}
         <div class="empty-s">Keep the ones worth keeping and they go on your profile.</div>
       </div>
     </div>
+  </div>
+
+  <div class="player" id="player" hidden>
+    <div class="player-in" id="playerIn"></div>
+    <button class="player-x" id="playerX" type="button" aria-label="Close player">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
   </div>
 
   <nav class="tabs" aria-label="Main">
@@ -6207,6 +6242,118 @@ document.addEventListener("click", function(e){
   renderPins(PROFILES[current]);
 });
 
+/* ---- tap a pinned track to play it ----
+   Spotify's own embedded player, through its iFrame API so one tap starts the
+   song instead of only loading a player to press play in. Signed in to Spotify
+   in this browser it is the whole track; signed out, a 30-second preview -
+   Spotify's rule, not ours. It loads from Spotify directly, so it costs nothing
+   against the app's API allowance, which the capture job already uses up.
+   A test on profile tracks only for now. */
+var PLAYER = { api: null, ctl: null, uri: null, loaded: null, making: false };
+
+function trackUri(t){
+  if(!t) return null;
+  if(t.uri && /^spotify:track:[A-Za-z0-9]+$/.test(t.uri)) return t.uri;
+  if(t.id && /^[A-Za-z0-9]{22}$/.test(t.id)) return "spotify:track:" + t.id;
+  return null;
+}
+
+function spotifyApi(){
+  if(PLAYER.api) return PLAYER.api;
+  PLAYER.api = new Promise(function(ok, fail){
+    var done = false;
+    window.onSpotifyIframeApiReady = function(api){ done = true; ok(api); };
+    var s = document.createElement("script");
+    s.src = "https://open.spotify.com/embed/iframe-api/v1";
+    s.async = true;
+    s.onerror = function(){ fail(new Error("spotify player did not load")); };
+    document.head.appendChild(s);
+    setTimeout(function(){ if(!done) fail(new Error("spotify player timed out")); }, 10000);
+  });
+  /* A failed load is tried again on the next tap rather than remembered. */
+  PLAYER.api.catch(function(){ PLAYER.api = null; });
+  return PLAYER.api;
+}
+
+/* The player without the API: it still plays, the listener just presses play. */
+function plainEmbed(uri){
+  var id = uri.split(":").pop();
+  $("playerIn").innerHTML = '<iframe title="Spotify player" ' +
+    'allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" ' +
+    'src="https://open.spotify.com/embed/track/' + encodeURIComponent(id) + '"></iframe>';
+}
+
+function markPlaying(){
+  var rows = document.querySelectorAll("[data-play]");
+  for(var i = 0; i < rows.length; i++)
+    rows[i].classList.toggle("is-playing", !!PLAYER.uri && rows[i].dataset.play === PLAYER.uri);
+}
+
+function playTrack(uri){
+  PLAYER.uri = uri;
+  $("player").hidden = false;
+  document.body.classList.add("has-player");
+  markPlaying();
+  if(PLAYER.ctl){
+    PLAYER.loaded = uri;
+    PLAYER.ctl.loadUri(uri);
+    PLAYER.ctl.play();
+    return;
+  }
+  /* A controller already on its way picks up whatever PLAYER.uri is by then. */
+  if(PLAYER.making) return;
+  PLAYER.making = true;
+  $("playerIn").innerHTML = '<div id="playerSlot"></div>';
+  spotifyApi().then(function(api){
+    api.createController($("playerSlot"), { uri: PLAYER.uri, width: "100%", height: 80 }, function(ctl){
+      PLAYER.making = false;
+      if(!PLAYER.uri){ try { ctl.destroy(); } catch(e){} return; }   /* closed meanwhile */
+      PLAYER.ctl = ctl;
+      PLAYER.loaded = PLAYER.uri;
+      ctl.addListener("ready", function(){
+        if(PLAYER.uri && PLAYER.uri !== PLAYER.loaded){
+          PLAYER.loaded = PLAYER.uri;
+          ctl.loadUri(PLAYER.loaded);
+        }
+        ctl.play();
+      });
+    });
+  }).catch(function(){
+    PLAYER.making = false;
+    if(PLAYER.uri) plainEmbed(PLAYER.uri);
+  });
+}
+
+function closePlayer(){
+  if(PLAYER.ctl){ try { PLAYER.ctl.destroy(); } catch(e){} }
+  PLAYER.ctl = null; PLAYER.uri = null; PLAYER.loaded = null;
+  $("playerIn").innerHTML = "";
+  $("player").hidden = true;
+  document.body.classList.remove("has-player");
+  markPlaying();
+}
+
+function tapPlay(row){
+  /* Not while arranging pins: a tap there means pick this slot, not play it. */
+  if(document.body.classList.contains("editing")) return;
+  var uri = row.dataset.play;
+  if(uri === PLAYER.uri && PLAYER.ctl){ PLAYER.ctl.togglePlay(); return; }
+  playTrack(uri);
+}
+document.addEventListener("click", function(e){
+  if(e.target.closest("#playerX")){ closePlayer(); return; }
+  var row = e.target.closest("[data-play]");
+  if(!row || e.target.closest(".unpin")) return;
+  tapPlay(row);
+});
+document.addEventListener("keydown", function(e){
+  if(e.key !== "Enter" && e.key !== " ") return;
+  var row = e.target.closest && e.target.closest("[data-play]");
+  if(!row || e.target !== row) return;
+  e.preventDefault();
+  tapPlay(row);
+});
+
 function renderPins(p){
   var editing = document.body.classList.contains("editing");
   var hue = p.artHue, self = current === 0;
@@ -6220,7 +6367,9 @@ function renderPins(p){
     var pin = tp[i];
     var demo = (!tAny && p.tracks[i]) ? p.tracks[i] : null;
     if(pin){
-      th += '<div class="row pinbox" tabindex="0" role="button">' +
+      var pu = trackUri(pin);
+      th += '<div class="row pinbox"' + (pu ? ' data-play="' + pu + '"' : "") +
+        ' tabindex="0" role="button">' +
         '<span class="idx">' + (i + 1) + "</span>" +
         "<div " + artAttr(pin, pin.name, hue) + "></div>" +
         '<div class="meta"><div class="tt">' + esc(pin.name) + '</div><div class="ta">' +
@@ -6237,6 +6386,7 @@ function renderPins(p){
     }
   }
   $("tracks").innerHTML = th;
+  markPlaying();
 
   var ap = pinList("artists"), aAny = ap.some(Boolean), ah = "";
   for(var j = 0; j < PIN_SLOTS.artists; j++){
