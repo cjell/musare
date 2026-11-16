@@ -68,7 +68,9 @@ def test_an_empty_slot_is_not_found(profiles):
 
 
 def test_a_slot_outside_the_pins_is_refused(profiles):
-    assert client.get("/api/chart/pinned?slot=2&user=bob").status_code == 422
+    assert (
+        client.get(f"/api/chart/pinned?slot={app_mod.CHART_PIN_SLOTS}&user=bob").status_code == 422
+    )
     assert client.get("/api/chart/pinned?slot=-1&user=bob").status_code == 422
 
 

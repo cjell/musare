@@ -1417,6 +1417,26 @@ details[open] summary .chev{transform:rotate(180deg)}
 /* A pinned chart on someone else's profile is a thing they made, not a control */
 .pl.chartpin{grid-column:1 / -1}
 .pl.chartpin .chartcard{padding:12px 12px 8px}
+/* Pinned charts sit on two columns: a wide one takes the row, two small ones
+   share it. Dense packing lets a later small chart fill the gap a lone small
+   one beside a wide one would leave, so any mix of sizes stays tidy. */
+#charts{grid-template-columns:1fr 1fr;grid-auto-flow:row dense;gap:10px}
+.pl.chartpin.small{grid-column:auto}
+.pl.chartpin.small .chartcard{padding:10px 10px 8px;height:100%}
+.pl.chartpin.small .chart-t{font-size:13px}
+.pl.chartpin.small .chart-sub,.pl.chartpin.small .chart-mode{font-size:8.5px;letter-spacing:.06em}
+/* A small chart is a preview: the tap opens it full size, where hover, the
+   artist names and tap-to-play are, so the drawing itself takes no taps. */
+.pl.chartpin.small .chart-canvas{pointer-events:none;margin-top:8px}
+.pl.chartpin.small .hm-name{flex-basis:38px}
+.pl.chartpin.small .hm-cell{height:13px}
+.pl.chartpin.small .hm-cell i{display:none}
+.pl.chartpin.small .pin-order{flex-wrap:wrap;row-gap:4px}
+.pl.chartpin .slot-sq{aspect-ratio:auto;height:96px}
+.chartcard.tap{cursor:pointer}
+.chartcard.tap:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.pin-size button[aria-pressed="true"]{color:var(--accent);cursor:default}
+.pl-chart{padding:0 4px 6px}
 
 .chart-keep{display:flex;flex-direction:column;gap:14px;margin-top:4px}
 /* Home's charts are always removable: Home is your own screen, not an edit mode,
@@ -5223,7 +5243,9 @@ $("chartKept").addEventListener("click", function(e){
 });
 
 function pinChartTo(slot, k){
-  setPin("charts", slot, chartRecord(k));
+  var was = pinList("charts")[slot], rec = chartRecord(k);
+  if(was && was.size) rec.size = was.size;
+  setPin("charts", slot, rec);
   PIN_TARGET = null;
   PIN_ASK = null;
   renderKept();
@@ -6015,6 +6037,40 @@ function openPlaylist(i){
   });
 }
 
+/* A small profile chart, full size: in the same sheet albums and playlists
+   open in, drawn the way a wide pin is - live or frozen, over the owner's
+   history - with the hover, the artist names and tap-to-play a preview leaves
+   out. */
+function openChart(q){
+  var rec = pinList("charts")[q];
+  if(!rec || !rec.data) return;
+  var d = rec.data, self = current === 0;
+  $("plName").textContent = d.title || "Chart";
+  $("plMeta").textContent = (d.y_label || "") + " by " + (d.x_label || "") +
+    (d.series && d.series.length ? " \u00B7 " + d.series.length + " compared" : "");
+  $("plCover").hidden = true;
+  $("plList").innerHTML = '<div class="pl-chart">' +
+    modeBar({ live: isLive(rec, "pin"), since: rec.frozenAt || rec.at, copy: !self && rec.spec ? q : null }) +
+    (d.table && d.table.length ? chartTable(d) : '<canvas class="chart-canvas" data-chart="open"></canvas>') +
+    (d.note ? '<div class="chart-note">' + esc(d.note) + "</div>" : "") + "</div>";
+  $("plOpen").hidden = false;
+  document.body.style.overflow = "hidden";
+  $("plClose").focus();
+  drawRecord(rec, "pin", document.querySelector('#plList [data-chart="open"]'),
+             self ? null : { slot: q, of: current });
+}
+document.addEventListener("click", function(e){
+  var c = e.target.closest("[data-chart-open]");
+  if(c && !e.target.closest("button")) openChart(+c.dataset.chartOpen);
+});
+document.addEventListener("keydown", function(e){
+  if(e.key !== "Enter" && e.key !== " ") return;
+  var c = e.target.closest && e.target.closest("[data-chart-open]");
+  if(!c || e.target !== c) return;
+  e.preventDefault();
+  openChart(+c.dataset.chartOpen);
+});
+
 function closePlaylist(){
   $("plOpen").hidden = true;
   document.body.style.overflow = "";
@@ -6116,7 +6172,7 @@ $("badges").addEventListener("click", function(e){
    Pinned items are references, not copies: an id, a name, a picture URL. They
    live beside the rest of the personalization in localStorage, so testing costs
    nobody an account. When auth exists they move to Postgres unchanged. */
-var PIN_SLOTS = { tracks: 5, artists: 8, albums: 6, charts: 2, playlists: 6 };
+var PIN_SLOTS = { tracks: 5, artists: 8, albums: 6, charts: 6, playlists: 6 };
 var PIN_KIND = { tracks: "track", artists: "artist", albums: "album", playlists: "playlist" };
 
 function esc(v){
@@ -6244,15 +6300,39 @@ function renderShelf(){
 }
 
 /* Move a pinned chart up or down a slot, into an empty one or past another. */
-function pinOrderBar(q){
-  var last = PIN_SLOTS.charts - 1;
+function pinOrderBar(q, size){
+  var last = PIN_SLOTS.charts - 1, small = size === "small";
+  /* Half a card has no room for the words, so a small chart gets arrows. */
+  var up = small ? "\u2191" : "Move up", down = small ? "\u2193" : "Move down";
+  function sizeBtn(v, label){
+    var on = (small ? "small" : "wide") === v;
+    return '<button type="button" data-pin-size="' + v + '" data-idx="' + q + '" aria-pressed="' + on + '">' +
+      label + "</button>";
+  }
   return '<div class="chart-mode pin-order"><span class="m">Slot ' + (q + 1) + " of " +
     PIN_SLOTS.charts + "</span><span>" +
-    (q > 0 ? '<button type="button" data-pin-move="-1" data-idx="' + q + '">Move up</button>' : "") +
+    (q > 0 ? '<button type="button" data-pin-move="-1" data-idx="' + q + '" aria-label="Move up">' + up + "</button>" : "") +
     (q > 0 && q < last ? " &middot; " : "") +
-    (q < last ? '<button type="button" data-pin-move="1" data-idx="' + q + '">Move down</button>' : "") +
-    "</span></div>";
+    (q < last ? '<button type="button" data-pin-move="1" data-idx="' + q + '" aria-label="Move down">' + down + "</button>" : "") +
+    "</span></div>" +
+    '<div class="chart-mode pin-size"><span class="m">Size</span><span>' +
+    sizeBtn("wide", "Wide") + " &middot; " + sizeBtn("small", "Small") + "</span></div>";
 }
+/* Wide takes the row; small is half of it, beside another small one. The size
+   belongs to the pin, so it moves with the chart when the order changes. */
+document.addEventListener("click", function(e){
+  var b = e.target.closest("[data-pin-size]");
+  if(!b || current !== 0 || b.getAttribute("aria-pressed") === "true") return;
+  var list = pinList("charts"), rec = list[+b.dataset.idx];
+  if(!rec) return;
+  if(b.dataset.pinSize === "small") rec.size = "small";
+  else delete rec.size;
+  var c = cust();
+  if(!c.pins) c.pins = {};
+  c.pins.charts = list;
+  saveCustom();
+  renderPins(PROFILES[current]);
+});
 document.addEventListener("click", function(e){
   var b = e.target.closest("[data-pin-move]");
   if(!b || current !== 0) return;
@@ -6470,17 +6550,21 @@ function renderPins(p){
   for(var q = 0; q < PIN_SLOTS.charts; q++){
     var cpin = cp[q];
     if(cpin && cpin.data){
-      var mine = editing && self;
-      ch += '<div class="pl chartpin pinbox">' +
+      var mine = editing && self, small = cpin.size === "small";
+      ch += '<div class="pl chartpin pinbox' + (small ? " small" : "") + '">' +
         chartCard(cpin.data, { unpin: self ? unpinBtn("charts", q) : "", key: "pin" + q,
+          /* A small chart's Copy waits in the full-size view, so the card holds
+             no button and the whole of it can be the tap that opens it. */
           mode: { live: isLive(cpin, "pin"), since: cpin.frozenAt || cpin.at,
-                  copy: !self && cpin.spec ? q : null },
+                  copy: !self && cpin.spec && !small ? q : null },
+          open: small && !mine ? q : null,
           /* Styling and order belong to editing your own profile, so the resting
              profile - yours or a friend's - stays just the charts. */
           style: mine ? { scope: "pin", id: cpin.id, style: cpin.style } : null,
-          actions: mine ? pinOrderBar(q) : "" }) + "</div>";
+          actions: mine ? pinOrderBar(q, cpin.size) : "" }) + "</div>";
     } else if(editing && self){
-      ch += '<div class="pl chartpin">' + slotBtn("charts", q, "slot-sq") + "</div>";
+      /* Empty slots take half a row, so six of them are not a wall of boxes. */
+      ch += '<div class="pl chartpin small">' + slotBtn("charts", q, "slot-sq") + "</div>";
     }
   }
   $("charts").innerHTML = ch;
@@ -6800,6 +6884,17 @@ function plotChart(cv, plan){
   }
   cv.hidden = false;
   if(plan.kind === "table") return;
+  /* A small profile chart is a preview of the full one: the top five of a
+     ranking, no value axis, no legend, labels cut short. Tapping it opens the
+     whole chart. */
+  var compact = !!cv.closest(".chartpin.small");
+  if(compact && plan.kind === "hbar" && plan.labels.length > 5){
+    var top = function(a){ return a && a.length === plan.labels.length ? a.slice(0, 5) : a; };
+    plan = Object.assign({}, plan, {
+      labels: top(plan.labels), values: top(plan.values), tick_labels: top(plan.tick_labels),
+      value_labels: top(plan.value_labels), subs: top(plan.subs), uris: top(plan.uris)
+    });
+  }
   /* Nothing in that window yet is an answer, and a blank box does not say it. */
   if(plan.kind === "empty"){
     cv.hidden = true;
@@ -6841,7 +6936,8 @@ function plotChart(cv, plan){
   if(plan.color && STYLE_HEX[plan.color]){ accent = STYLE_HEX[plan.color]; tint = hexAlpha(accent, 0.16); }
 
   cv.width = cv.clientWidth || (cv.parentNode && cv.parentNode.clientWidth) || 320;
-  cv.height = plan.height || 150;
+  cv.height = compact ? (plan.kind === "hbar" ? plan.labels.length * 19 + 6 : 96) : (plan.height || 150);
+  if(compact) font = { family: font.family, size: 8 };
 
   var valueAxis = {
     min: 0, max: plan.y.max,
@@ -6946,6 +7042,7 @@ function plotChart(cv, plan){
   }
   cfg.options.responsive = false;
   cfg.options.animation = false;
+  if(compact) compactScales(cfg, plan);
   /* A bar of a song, an album or an artist plays when tapped: the song, or
      the one of theirs played most in what the chart counted (plan.uris). */
   var tunes = (plan.kind === "bar" || plan.kind === "hbar") && plan.uris && plan.uris.length ? plan.uris : null;
@@ -6990,7 +7087,34 @@ function plotChart(cv, plan){
       }
     }
   };
+  if(compact){
+    cfg.options.plugins.legend.display = false;
+    cfg.options.plugins.tooltip = { enabled: false };
+    cfg.options.layout = { padding: { top: 2, right: plan.kind === "hbar" ? 26 : 2 } };
+  }
   new Chart(cv, cfg);
+}
+
+/* What a small chart drops: the value axis and its gridlines, and most of the
+   category labels - the first and last of a line, a few of a column chart, and
+   names cut short beside sideways bars. */
+function compactScales(cfg, plan){
+  var sc = cfg.options.scales, flat = plan.kind === "hbar";
+  var val = flat ? sc.x : sc.y, cat = flat ? sc.y : sc.x;
+  val.display = false;
+  if(plan.kind === "line"){
+    var ends = plan.x.ticks.length > 1 ? [plan.x.ticks[0], plan.x.ticks[plan.x.ticks.length - 1]] : plan.x.ticks;
+    cat.afterBuildTicks = tickAt(ends);
+    cat.ticks.callback = tickText(ends);
+  } else if(flat){
+    cat.ticks.callback = function(v, i){
+      var t = plan.tick_labels[i] || "";
+      return t.length > 10 ? t.slice(0, 9) + "\u2026" : t;
+    };
+  } else {
+    cat.ticks.autoSkip = true;
+    cat.ticks.maxTicksLimit = 4;
+  }
 }
 
 /* ---------- live or frozen ----------
@@ -7158,7 +7282,11 @@ document.addEventListener("click", function(e){
 
 function chartCard(d, opts){
   opts = opts || {};
-  return '<div class="chartcard">' +
+  var open = opts.open != null
+    ? ' tap" data-chart-open="' + esc(opts.open) + '" tabindex="0" role="button" aria-label="' +
+      esc((d.title || "Chart") + ", open full size") + '"'
+    : '"';
+  return '<div class="chartcard' + open + ">" +
     (opts.unpin || "") +
     '<div class="chart-t">' + esc(d.title) + "</div>" +
     '<div class="chart-sub">' + esc(d.y_label) + " by " + esc(d.x_label) +

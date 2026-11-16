@@ -742,7 +742,7 @@ def chart_run(
 
 
 # Matches PIN_SLOTS.charts in the page.
-CHART_PIN_SLOTS = 2
+CHART_PIN_SLOTS = 6
 
 
 @app.get("/api/chart/pinned", dependencies=[Depends(needs_history), Depends(heavy_slot)])
