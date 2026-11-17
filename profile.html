@@ -1243,6 +1243,13 @@ details[open] summary .chev{transform:rotate(180deg)}
 .has-player .editbar{bottom:calc(64px + env(safe-area-inset-bottom) + 12px + 88px)}
 .has-player .pl-card{padding-bottom:calc(16px + 88px + env(safe-area-inset-bottom))}
 .has-player .sheet{margin-bottom:88px}
+/* A chart opened full size is one picture, not a list to scroll, so it sits
+   in the middle of the screen as a card rather than rising from the bottom.
+   Albums and playlists keep the sheet. Clear of the player when it is open. */
+.pl-open.centre{align-items:center;padding:16px 12px}
+.pl-open.centre .pl-card{border-radius:16px;border:1px solid var(--line-2);max-height:80vh;padding-bottom:16px}
+.has-player .pl-open.centre{padding-bottom:104px}
+.has-player .pl-open.centre .pl-card{padding-bottom:16px;max-height:calc(100vh - 140px)}
 [data-play]{cursor:pointer}
 .row.is-playing .tt,.pl-tr.is-playing .tn,.now.is-playing #nowTrack{color:var(--accent)}
 .rise.is-playing .rn,.artist.is-playing .an{color:var(--accent)}
@@ -5957,6 +5964,7 @@ function loadPlaylists(i){
    same object with a different fetch and no per-track art, because every track
    on it shares the cover already sitting above them. */
 function openSheet(title, meta, cover, load){
+  $("plOpen").classList.remove("centre");
   $("plName").textContent = title;
   $("plMeta").textContent = meta || "";
   var cov = $("plCover");
@@ -6049,6 +6057,7 @@ function openChart(q){
   $("plMeta").textContent = (d.y_label || "") + " by " + (d.x_label || "") +
     (d.series && d.series.length ? " \u00B7 " + d.series.length + " compared" : "");
   $("plCover").hidden = true;
+  $("plOpen").classList.add("centre");
   $("plList").innerHTML = '<div class="pl-chart">' +
     modeBar({ live: isLive(rec, "pin"), since: rec.frozenAt || rec.at, copy: !self && rec.spec ? q : null }) +
     (d.table && d.table.length ? chartTable(d) : '<canvas class="chart-canvas" data-chart="open"></canvas>') +
