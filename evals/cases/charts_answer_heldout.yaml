@@ -1,0 +1,119 @@
+# Held-out set for answers that are not charts.
+#
+# Written before the `answer`, `tracks` and `albums` fields existed and before a
+# word of their descriptions - the training cases for that work are in
+# charts.yaml. Run ONCE, after the descriptions are done.
+#
+# Two decisions, each with its trap:
+#
+#   which kind of answer   "how many times have I played X" is one number;
+#                          "how many hours each month" is still a chart, because
+#                          the giveaway "each" asks for many numbers, not one.
+#                          "when did I first hear X" is a date, not a count.
+#
+#   where a name goes      a song goes in tracks and a record in albums, while
+#                          an act stays in artists. A song named together with
+#                          its artist fills both.
+#
+# The negatives at the end are charts that mention one song or record - the new
+# filters apply to charts too, and naming a song must not by itself make the
+# answer a number.
+
+# ------------------------------------------------------------------ counts
+- input: how many times have I listened to Fears
+  expect: {answer: number, metric: plays, tracks: [Fears], artists: []}
+  tags: [number, track]
+
+- input: how many plays does Bags by Clairo have
+  expect: {answer: number, metric: plays, tracks: [Bags], artists: [Clairo]}
+  tags: [number, track, with-artist]
+
+- input: how many times did I play Pink + White last month
+  expect: {answer: number, metric: plays, tracks: [Pink + White], range: 30d}
+  tags: [number, track, range]
+
+- input: what's my play count for the album Blonde
+  expect: {answer: number, metric: plays, albums: [Blonde], tracks: []}
+  tags: [number, album]
+
+# ------------------------------------------------------------------- hours
+- input: how much have I listened to Deftones this year
+  expect: {answer: number, metric: hours, artists: [Deftones], range: this_year}
+  tags: [number, artist, hours]
+
+- input: how long have I spent listening to In Rainbows
+  expect: {answer: number, metric: hours, albums: [In Rainbows]}
+  tags: [number, album, hours, idiom]
+
+- input: how many hours did I listen to music this month
+  expect: {answer: number, metric: hours, range: {in: [30d, this_year]}, artists: []}
+  tags: [number, total, hours]
+
+- input: total time on spotify in 2022
+  expect: {answer: number, metric: hours, year: 2022}
+  tags: [number, total, year, idiom]
+
+# ----------------------------------------------------------------- variety
+- input: how many different artists did I listen to this week
+  expect: {answer: number, metric: distinct_artists, range: 7d}
+  tags: [number, distinct]
+
+- input: how many Radiohead songs have I heard
+  expect: {answer: number, metric: distinct_tracks, artists: [Radiohead]}
+  tags: [number, distinct, artist]
+
+# -------------------------------------------------------------------- rate
+- input: how often do I skip Mr. Brightside
+  expect: {answer: number, metric: skip_rate, tracks: [Mr. Brightside]}
+  tags: [number, rate, track]
+
+# -------------------------------------------------------------------- when
+- input: when did I first listen to Fears
+  expect: {answer: first_played, tracks: [Fears]}
+  tags: [when, first, track]
+
+- input: when was the first time I heard Phoebe Bridgers
+  expect: {answer: first_played, artists: [Phoebe Bridgers], tracks: []}
+  tags: [when, first, artist]
+
+- input: last time I listened to Sade
+  expect: {answer: last_played, artists: [Sade]}
+  tags: [when, last, artist]
+
+- input: when did I last play the album Nevermind
+  expect: {answer: last_played, albums: [Nevermind]}
+  tags: [when, last, album]
+
+# ---------------------------------------------- still charts (negatives)
+- input: my top songs this month
+  expect: {answer: chart, dimension: track, range: 30d}
+  tags: [negative, ranked]
+
+- input: how many hours do I listen each month
+  expect: {answer: chart, dimension: date, grain: month}
+  tags: [negative, each]
+
+- input: Fears plays by month
+  expect: {answer: chart, tracks: [Fears], dimension: date, grain: month, metric: plays}
+  tags: [negative, track-filter]
+
+- input: what times of day do I play Fears
+  expect: {answer: chart, tracks: [Fears], dimension: hour_of_day}
+  tags: [negative, track-filter]
+
+- input: top songs off Blonde
+  expect: {answer: chart, albums: [Blonde], dimension: track}
+  tags: [negative, album-filter]
+
+- input: deftones vs nirvana over the years
+  expect: {answer: chart, series: artist, artists: [deftones, nirvana]}
+  tags: [negative, series]
+
+# ---------------------------------------------------------------- refused
+- input: how many times has my brother listened to Fears
+  expect: {understood: false}
+  tags: [refuse, someone-else]
+
+- input: how many times will I play Fears next week
+  expect: {understood: false}
+  tags: [refuse, future]

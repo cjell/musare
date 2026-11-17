@@ -72,6 +72,27 @@ class ChartSpec(BaseModel):
             "of the axes. Six words at most."
         ),
     )
+    answer: Literal["chart", "number", "first_played", "last_played"] = Field(
+        default="chart",
+        description=(
+            "What shape the answer takes. 'chart' for anything that is many numbers - "
+            "a ranking, a trend, a breakdown - which is most requests. "
+            "'number' when the question has a single number for an answer: 'how many "
+            "times have I played X', 'how much have I listened to Y this year', 'how "
+            "many hours this month', 'how many different artists this week', 'how "
+            "often do I skip X'. The number is the metric over everything the filters "
+            "leave, so set metric to say which number. "
+            "A word like each, every, per or by attached to a period or a category "
+            "asks for many numbers and is a chart: 'how many hours each month' is a "
+            "chart, 'how many hours this month' is a number. A question about which "
+            "ones - 'my top songs', 'my favourite album' - is a ranking, so a chart. "
+            "'first_played' and 'last_played' when the question asks when: 'when did "
+            "I first hear X', 'the last time I played Y'. "
+            "With 'number', 'first_played' and 'last_played', dimension, grain, "
+            "series, per_period, cumulative, sort and limit are not used; leave them "
+            "at their defaults."
+        ),
+    )
     metric: Literal["hours", "plays", "distinct_tracks", "distinct_artists", "skip_rate"] = Field(
         default="hours",
         description=(
@@ -145,6 +166,26 @@ class ChartSpec(BaseModel):
             "Restrict to these artists, exactly as the user wrote them, when the "
             "question is about specific ones. Empty otherwise. Never invent names and "
             "never expand a genre or mood into a list."
+        ),
+    )
+    tracks: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Restrict to these songs, exactly as the user wrote the titles, when the "
+            "question is about specific ones: 'how many times have I played Fears', "
+            "'Fears by month'. Empty otherwise. A song named with its artist - 'Bags "
+            "by Clairo' - puts the title here and the artist in artists. An act is "
+            "never a song: a bare band or singer's name goes in artists. Never invent "
+            "titles."
+        ),
+    )
+    albums: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Restrict to these records, exactly as the user wrote the titles, when the "
+            "question is about a specific album: 'my plays of Blonde', 'top songs off "
+            "In Rainbows'. Empty otherwise. As with tracks, a named artist goes in "
+            "artists, and nothing is invented."
         ),
     )
     genres: list[Genre] = Field(

@@ -693,6 +693,8 @@ def _chart_payload(d: ChartData) -> dict[str, object]:
         "subs": d.subs,
         # What tapping each bar plays, "" where nothing does.
         "uris": d.uris,
+        # A question with one number for an answer: the number and its card.
+        "stat": d.stat,
         # Empty for an ordinary chart; when present it is the data and
         # `values` is empty. The page branches on which one has content.
         "series": [{"name": ln.name, "values": ln.values} for ln in d.series],

@@ -1440,6 +1440,42 @@ details[open] summary .chev{transform:rotate(180deg)}
 .pl.chartpin.small .hm-cell i{display:none}
 .pl.chartpin.small .pin-order{flex-wrap:wrap;row-gap:4px}
 .pl.chartpin .slot-sq{aspect-ratio:auto;height:96px}
+
+/* A question with one number for an answer: the number, the sentence the
+   server wrote around it, and a few facts underneath. Nothing here is drawn. */
+.chart-stat{margin-top:12px}
+.stat-big{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.stat-big b{
+  font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:46px;
+  line-height:1;letter-spacing:-.03em;color:var(--accent)
+}
+.stat-big.date b{font-size:30px;letter-spacing:-.02em}
+.stat-big span{
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink-2)
+}
+.stat-s{font-size:13.5px;line-height:1.45;margin-top:10px;color:var(--ink)}
+.chart-stat.missing .stat-s{color:var(--ink-2);margin-top:4px}
+.stat-facts{
+  display:grid;grid-template-columns:1fr 1fr;gap:10px 14px;margin-top:14px;
+  padding-top:12px;border-top:1px solid var(--line)
+}
+.stat-f span{
+  display:block;font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3)
+}
+.stat-f b{display:block;font-size:13px;font-weight:500;margin-top:3px}
+.stat-play{
+  display:inline-block;margin-top:10px;font-family:"IBM Plex Mono",monospace;font-size:9.5px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--accent)
+}
+.chart-stat.is-playing .stat-play{color:var(--ink-2)}
+.chart-stat[data-play]:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
+.pl.chartpin.small .chart-stat{margin-top:8px}
+.pl.chartpin.small .stat-big b{font-size:34px}
+.pl.chartpin.small .stat-big.date b{font-size:19px}
+.pl.chartpin.small .stat-big span{font-size:9px}
+.pl.chartpin.small .stat-s{font-size:11.5px;margin-top:6px}
 .chartcard.tap{cursor:pointer}
 .chartcard.tap:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .pin-size button[aria-pressed="true"]{color:var(--accent);cursor:default}
@@ -5035,7 +5071,14 @@ var lastChart = null;
 /* Title is excluded on purpose: the same chart phrased two ways is one chart,
    and the caption is the part most likely to differ. */
 function specId(spec){
-  var keys = Object.keys(spec).filter(function(k){ return k !== "title"; }).sort();
+  /* Fields added later count only when set, so a chart kept before they
+     existed has the same id as the same question asked today. */
+  var keys = Object.keys(spec).filter(function(k){
+    if(k === "title") return false;
+    if(k === "answer") return spec[k] && spec[k] !== "chart";
+    if(k === "tracks" || k === "albums") return !!(spec[k] && spec[k].length);
+    return true;
+  }).sort();
   return "c" + seedOf(keys.map(function(k){
     return k + ":" + JSON.stringify(spec[k]);
   }).join("|")).toString(36);
@@ -5210,7 +5253,11 @@ $("chartResult").addEventListener("click", function(e){
   if(!e.target.closest("#chartKeep") || !lastChart) return;
   var note = $("chartNote");
   note.className = "ask-note";
-  var added = addKept(chartRecord(lastChart));
+  var rec = chartRecord(lastChart);
+  /* A count is only worth keeping if it keeps counting: a pinned "75 plays"
+     should be 76 after the next one. A chart stays a snapshot until asked. */
+  if(lastChart.data && lastChart.data.chart === "number" && lastChart.spec) rec.live = true;
+  var added = addKept(rec);
   note.textContent = added
     ? "Kept. Pin it below to put it on your profile."
     : "You already kept this one.";
@@ -6054,8 +6101,7 @@ function openChart(q){
   if(!rec || !rec.data) return;
   var d = rec.data, self = current === 0;
   $("plName").textContent = d.title || "Chart";
-  $("plMeta").textContent = (d.y_label || "") + " by " + (d.x_label || "") +
-    (d.series && d.series.length ? " \u00B7 " + d.series.length + " compared" : "");
+  $("plMeta").textContent = chartSub(d);
   $("plCover").hidden = true;
   $("plOpen").classList.add("centre");
   $("plList").innerHTML = '<div class="pl-chart">' +
@@ -6725,7 +6771,7 @@ var STYLE_DATA = {};
 function styleBar(d, s){
   var styles = d.plan && d.plan.styles;
   /* A table has no drawing to style, and an empty chart has nothing in it. */
-  if((d.table && d.table.length) || (d.plan && !styles && /^(table|empty)$/.test(d.plan.kind))) return "";
+  if((d.table && d.table.length) || (d.plan && !styles && /^(table|empty|number)$/.test(d.plan.kind))) return "";
   /* A plan with no options otherwise is one saved before styling existed - the
      first charts anyone pinned. The button shows, and opening it asks for a
      fresh plan, the same way a chart with no plan at all does. */
@@ -6879,6 +6925,29 @@ function heatGrid(plan){
     '<div class="hm-key">darkest is ' + esc(plan.peak_label) + " " + esc(plan.y.unit) + "</div></div>";
 }
 
+/* The answer to a question with one number, or one date, for an answer. The
+   server counted it and wrote the sentence; this only lays them out. A song,
+   album or artist plays when tapped - except on a small profile pin, where the
+   tap opens the full card instead and the sentence gives way to the title. */
+function statCard(st, compact){
+  var play = !compact && st.uri && PLAYABLE.test(st.uri)
+    ? playAttr(st.uri) + ' tabindex="0" role="button" aria-label="' + esc(st.sentence + " Play it.") + '"'
+    : "";
+  var dated = st.answer === "first_played" || st.answer === "last_played";
+  var big = st.big
+    ? '<div class="stat-big' + (dated ? " date" : "") + '"><b>' + esc(st.big) + "</b>" +
+      (st.unit ? "<span>" + esc(st.unit) + "</span>" : "") + "</div>"
+    : "";
+  var facts = compact ? [] : (st.facts || []);
+  return '<div class="chart-stat' + (st.found === false ? " missing" : "") + '"' + play + ">" + big +
+    (compact && big ? "" : '<div class="stat-s">' + esc(st.sentence || "") + "</div>") +
+    (facts.length ? '<div class="stat-facts">' + facts.map(function(f){
+      return '<div class="stat-f"><span>' + esc(f[0]) + "</span><b>" + esc(f[1]) + "</b></div>";
+    }).join("") + "</div>" : "") +
+    (play ? '<span class="stat-play">\u25B6 Play</span>' : "") +
+    "</div>";
+}
+
 function plotChart(cv, plan){
   var old = window.Chart && Chart.getChart(cv);
   if(old) old.destroy();
@@ -6886,12 +6955,24 @@ function plotChart(cv, plan){
      has numbers now - so whatever the last drawing left beside the canvas goes
      before this one decides anything. */
   var sib = cv.nextElementSibling;
-  while(sib && (sib.classList.contains("chart-heat") || sib.classList.contains("chart-empty"))){
+  while(sib && (sib.classList.contains("chart-heat") || sib.classList.contains("chart-empty") ||
+                 sib.classList.contains("chart-stat"))){
     var after = sib.nextElementSibling;
     sib.remove();
     sib = after;
   }
   cv.hidden = false;
+  /* One number is laid out, not drawn - see statCard. */
+  if(plan.kind === "number"){
+    cv.hidden = true;
+    cv.insertAdjacentHTML("afterend", statCard(plan.stat || {}, !!cv.closest(".chartpin.small")));
+    /* The profile's colour, as a drawn chart takes it: the full-size sheet sits
+       outside .phone, where --accent is still the default. */
+    var tone = getComputedStyle(document.querySelector(".phone")).getPropertyValue("--accent").trim();
+    if(tone && cv.nextElementSibling) cv.nextElementSibling.style.setProperty("--accent", tone);
+    markPlaying();
+    return;
+  }
   if(plan.kind === "table") return;
   /* A small profile chart is a preview of the full one: the top five of a
      ranking, no value axis, no legend, labels cut short. Tapping it opens the
@@ -7289,6 +7370,14 @@ document.addEventListener("click", function(e){
   if(b && !b.disabled) copyChart(b);
 });
 
+/* What a chart counts, under its title. A number has no axes, so it says the
+   window it covers instead. */
+function chartSub(d){
+  if(d.chart === "number") return (d.stat && d.stat.period) || "";
+  return (d.y_label || "") + " by " + (d.x_label || "") +
+    (d.series && d.series.length ? " \u00B7 " + d.series.length + " compared" : "");
+}
+
 function chartCard(d, opts){
   opts = opts || {};
   var open = opts.open != null
@@ -7298,8 +7387,7 @@ function chartCard(d, opts){
   return '<div class="chartcard' + open + ">" +
     (opts.unpin || "") +
     '<div class="chart-t">' + esc(d.title) + "</div>" +
-    '<div class="chart-sub">' + esc(d.y_label) + " by " + esc(d.x_label) +
-      (d.series && d.series.length ? " \u00B7 " + d.series.length + " compared" : "") + "</div>" +
+    '<div class="chart-sub">' + esc(chartSub(d)) + "</div>" +
     (opts.mode ? modeBar(opts.mode) : "") +
     (d.table && d.table.length
       ? chartTable(d)

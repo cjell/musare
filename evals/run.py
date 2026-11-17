@@ -80,6 +80,8 @@ SUITES: dict[str, Suite] = {
     "charts-refine-heldout": Suite(
         REFINE, "charts_refine_heldout.yaml", validate_chart, refine=True
     ),
+    # Written before `answer`, `tracks` and `albums` existed; see its header.
+    "charts-answer-heldout": Suite(CHARTS, "charts_answer_heldout.yaml", validate_chart),
 }
 
 

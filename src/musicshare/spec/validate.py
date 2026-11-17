@@ -63,7 +63,12 @@ def validate_chart(spec: ChartSpec) -> list[SpecProblem]:
     problems: list[SpecProblem] = []
 
     # Today over time is drawn by hour (chartrun.effective), so it needs no grain.
-    if spec.dimension == "date" and spec.grain is None and spec.range != "today":
+    if (
+        spec.answer == "chart"
+        and spec.dimension == "date"
+        and spec.grain is None
+        and spec.range != "today"
+    ):
         problems.append(SpecProblem("grain", "a chart over time needs a bucket size"))
     if spec.year is not None and spec.year < DATA_FIRST_YEAR:
         problems.append(SpecProblem("year", f"history starts in {DATA_FIRST_YEAR}"))
@@ -71,6 +76,15 @@ def validate_chart(spec: ChartSpec) -> list[SpecProblem]:
         problems.append(SpecProblem("artists", f"{len(spec.artists)} named, limit {MAX_ARTISTS}"))
     if len(spec.genres) > MAX_GENRES:
         problems.append(SpecProblem("genres", f"{len(spec.genres)} named, limit {MAX_GENRES}"))
+    for name, got in (("tracks", spec.tracks), ("albums", spec.albums)):
+        if len(got) > MAX_ARTISTS:
+            problems.append(SpecProblem(name, f"{len(got)} named, limit {MAX_ARTISTS}"))
+
+    # A single number or date has no axis, so nothing below applies to it: the
+    # shape fields are not read, and a stray grain left beside 'number' is not
+    # a chart that cannot be drawn.
+    if spec.answer != "chart":
+        return problems
 
     # Two lines need a shared axis to run along. On a ranked dimension there is
     # none - the third bar of one artist and the third bar of another are

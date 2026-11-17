@@ -214,9 +214,16 @@ class ChartData:
     # What tapping each bar plays - see PLAYABLE_BARS. Aligned to the labels,
     # with "" for a bar that has nothing to play. Empty for every other chart.
     uris: list[str] = field(default_factory=list)
+    # The answer to a question with one number - or one date - for an answer,
+    # in place of everything above: see `_answer`. None for every chart.
+    stat: dict[str, Any] | None = None
 
     @property
     def empty(self) -> bool:
+        # A count of nothing is still an answer: "you have not played it this
+        # week" is what was asked.
+        if self.stat is not None:
+            return False
         return not self.values and not self.table and not any(ln.values for ln in self.series)
 
 
@@ -316,6 +323,11 @@ def _where(
         marks = ", ".join("?" for _ in spec.artists)
         clauses.append(f"lower(artist_name) in ({marks})")
         params += [a.strip().lower() for a in spec.artists]
+    for kind, names in (("track", spec.tracks), ("album", spec.albums)):
+        if names:
+            clause, bound = _titled(kind, names, bool(spec.artists))
+            clauses.append(clause)
+            params += bound
     if spec.genres:
         # The model chose from an enum and the widening ran over a file this
         # build wrote, so none of these strings came from a user - they are bound
@@ -336,6 +348,49 @@ def _where(
     if spec.dimension == "genre" or spec.series == "genre":
         clauses.append("g.genre is not null")
     return " and ".join(clauses), params
+
+
+# A title as typed against a title as stored. Case, curly apostrophes and the
+# tails the catalogue adds - " - Remastered 2011", "(feat. X)", "[Live]" - do
+# not decide whether "fears" means Fears, so all of them are dropped from both
+# sides by the same expression. Versions of one song are counted together.
+def _norm(col: str) -> str:
+    return (
+        f"trim(regexp_replace(regexp_replace(lower({col}), '[{CURLY}]', '''', 'g'), "
+        r"'\s*(\(|\[| - ).*$', ''))"
+    )
+
+
+# Left and right single quotes, as typed by a phone keyboard.
+CURLY = chr(0x2018) + chr(0x2019)
+
+TITLE_COLS = {"track": "track_name", "album": "album_name"}
+
+
+def _titled(kind: str, names: list[str], has_artist: bool) -> tuple[str, list[Any]]:
+    """Plays of the named songs or records, as one clause with its parameters.
+
+    A title is not unique - several acts have a song called Fears - and without
+    an artist named alongside it the question means the one this person plays.
+    So each title is pinned to the artist with the most plays under it; the
+    answer says which, and names the others (`_namesakes`). With an artist named,
+    the artist clause already does the narrowing.
+    """
+    col = TITLE_COLS[kind]
+    parts, params = [], []
+    for name in names:
+        name = name.strip()
+        if has_artist:
+            parts.append(f"{_norm(col)} = {_norm('?')}")
+            params.append(name)
+        else:
+            parts.append(
+                f"({_norm(col)} = {_norm('?')} and artist_name = ("
+                f"select artist_name from plays where {_norm(col)} = {_norm('?')} "
+                "group by 1 order by count(*) desc, 1 limit 1))"
+            )
+            params += [name, name]
+    return "(" + " or ".join(parts) + ")", params
 
 
 def _label(spec: ChartSpec, k: Any) -> str:
@@ -516,6 +571,9 @@ def run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
             chart_for(spec.dimension, spec.series, spec.per_period, spec.cumulative),
             note="not a question about listening",
         )
+
+    if spec.answer != "chart":
+        return _answer(spec)
 
     metric_sql, needs_min, y_label = METRICS[spec.metric]
     where, params = _where(spec, needs_min, back)
@@ -889,3 +947,316 @@ def _split(
     labels = [_label(spec, k) for k in keys]
     series = [Line(name=c, values=[cells.get((k, c), gap) for k in keys]) for c in chosen]
     return labels, [], series, sql.strip(), []
+
+
+# ---------------------------------------------------------------- one number
+#
+# "How many times have I played Fears" has one number for an answer, and a bar
+# chart of one bar is a chart of the wrong thing. The model only says which
+# question this is - answer, metric, filters - and everything a reader sees is
+# counted here and worded by template, so no number on the card came from the
+# model.
+
+PERIODS = {
+    "all": ("", "All time"),
+    "today": (" today", "Today"),
+    "7d": (" in the last 7 days", "Last 7 days"),
+    "30d": (" in the last 30 days", "Last 30 days"),
+    "90d": (" in the last 90 days", "Last 90 days"),
+    "6mo": (" in the last 6 months", "Last 6 months"),
+    "12mo": (" in the last 12 months", "Last 12 months"),
+    "this_year": (" this year", "This year"),
+}
+
+KIND_WORD = {"track": "song", "album": "album"}
+
+
+def _period(spec: ChartSpec) -> tuple[str, str]:
+    """The window as part of a sentence, and as a label on its own."""
+    if spec.year is not None:
+        return f" in {spec.year}", str(spec.year)
+    return PERIODS.get(spec.range, ("", ""))
+
+
+def _day_text(d: date) -> str:
+    return f"{MONTHS[d.month - 1]} {d.day}, {d.year}"
+
+
+def _ago(d: date, today: date) -> str:
+    days = (today - d).days
+    if days <= 0:
+        return "today"
+    if days == 1:
+        return "yesterday"
+    if days < 45:
+        return f"{days} days ago"
+    months = round(days / 30.44)
+    if months < 18:
+        return f"{months} months ago"
+    return f"{round(days / 365.25)} years ago"
+
+
+def _hours_text(h: float) -> tuple[str, str]:
+    """Hours as a number and its unit: minutes under an hour, so nothing reads 0.3."""
+    if h < 1:
+        m = round(h * 60)
+        return str(m), "minute" if m == 1 else "minutes"
+    if h < 10:
+        return f"{h:.1f}", "hours"
+    return f"{round(h):,}", "hours"
+
+
+def _count(n: int, one: str, many: str) -> str:
+    return f"{n:,} {one if n == 1 else many}"
+
+
+def _subject(spec: ChartSpec, con: duckdb.DuckDBPyConnection) -> tuple[str, list[str], list[str]]:
+    """What the question is about, in its catalogue spelling; the names asked
+    for that were never played; and what else goes by a title that was."""
+    found: list[str] = []
+    missing: list[str] = []
+    also: list[str] = []
+    has_artist = bool(spec.artists)
+    for kind, names in (("track", spec.tracks), ("album", spec.albums)):
+        col = TITLE_COLS[kind]
+        for name in names:
+            clause, params = _titled(kind, [name], has_artist)
+            if has_artist:
+                marks = ", ".join("?" for _ in spec.artists)
+                clause += f" and lower(artist_name) in ({marks})"
+                params += [a.strip().lower() for a in spec.artists]
+            row = con.execute(
+                f"select {col}, artist_name from plays where {clause} "
+                "group by 1, 2 order by count(*) desc limit 1",
+                params,
+            ).fetchone()
+            if not row:
+                missing.append(f'{KIND_WORD[kind]} called "{name.strip()}"')
+                continue
+            found.append(f"{row[0]} by {row[1]}")
+            if has_artist:
+                continue
+            others = con.execute(
+                f"select artist_name from plays where {_norm(col)} = {_norm('?')} "
+                "and artist_name <> ? group by 1 order by count(*) desc limit 3",
+                [name.strip(), row[1]],
+            ).fetchall()
+            if others:
+                also.append(
+                    f"Other {KIND_WORD[kind]}s called {row[0]}: by "
+                    + ", ".join(o[0] for o in others)
+                    + ". Name the artist to count theirs."
+                )
+    if not (spec.tracks or spec.albums):
+        for name in spec.artists:
+            row = con.execute(
+                "select artist_name from plays where lower(artist_name) = ? "
+                "group by 1 order by count(*) desc limit 1",
+                [name.strip().lower()],
+            ).fetchone()
+            if row:
+                found.append(row[0])
+            else:
+                missing.append(f'artist called "{name.strip()}"')
+    if spec.genres:
+        kinds = " and ".join(str(g) for g in spec.genres)
+        found = [f"{' and '.join(found)} ({kinds} only)"] if found else [kinds]
+    return " and ".join(found), missing, also
+
+
+def _answer(spec: ChartSpec) -> ChartData:
+    """One number, or one date, about whatever the filters leave."""
+    con = _connect(spec)
+    frm = _from(spec)
+    where, params = _where(spec, False)
+    listened = f"ms_played >= {MIN_MS}"
+    row = con.execute(
+        f"""
+        select
+          count(*) filter (where {listened}),
+          coalesce(sum(ms_played), 0) / 3600000.0,
+          count(distinct track_uri) filter (where {listened}),
+          count(distinct artist_name) filter (where {listened}),
+          avg(case when skipped then 1.0 when not skipped then 0.0 end) * 100,
+          count(*) filter (where skipped is not null),
+          cast(min({LOCAL_TS}) filter (where {listened}) as date),
+          cast(max({LOCAL_TS}) filter (where {listened}) as date)
+        from {frm}
+        where {where}
+        """,
+        params,
+    ).fetchone()
+    plays, hours, n_tracks, n_artists, skip, rated, first, last = row
+    plays, rated = int(plays or 0), int(rated or 0)
+    today = con.execute(
+        f"select cast((current_timestamp AT TIME ZONE '{LOCAL}') as date)"
+    ).fetchone()[0]
+    subject, missing, also = _subject(spec, con)
+    in_period, period_label = _period(spec)
+    it = subject or "anything"
+    hrs, hrs_unit = _hours_text(float(hours or 0))
+
+    stat: dict[str, Any] = {
+        "answer": spec.answer,
+        "metric": spec.metric,
+        "period": period_label,
+        "subject": subject,
+        "found": not missing,
+        "value": None,
+        "big": "",
+        "unit": "",
+        "sentence": "",
+        "facts": [],
+        "uri": "",
+    }
+
+    if missing:
+        stat["sentence"] = f"No {' or '.join(missing)} in your listening."
+    elif spec.answer in ("first_played", "last_played"):
+        when = first if spec.answer == "first_played" else last
+        verb = "first" if spec.answer == "first_played" else "last"
+        if when is None:
+            stat["sentence"] = f"You haven't played {it}{in_period}."
+        else:
+            stat.update(big=_day_text(when), unit=_ago(when, today))
+            stat["sentence"] = (
+                f"You {verb} played {subject}{in_period} on {_day_text(when)}."
+                if subject
+                else f"Your listening{in_period} {'starts' if verb == 'first' else 'ends'} "
+                f"on {_day_text(when)}."
+            )
+    # A play under half a minute is a mis-tap, not a listen: it counts towards
+    # time, and nothing else.
+    elif not plays and (spec.metric != "hours" or not hours):
+        stat.update(value=0, big="0", unit=METRICS[spec.metric][2])
+        stat["sentence"] = f"You haven't played {it}{in_period}."
+    elif spec.metric == "plays":
+        stat.update(value=plays, big=f"{plays:,}", unit="play" if plays == 1 else "plays")
+        stat["sentence"] = (
+            f"You've played {subject} {_count(plays, 'time', 'times')}{in_period}."
+            if subject
+            else f"You've played {_count(plays, 'song', 'songs')}{in_period}."
+        )
+    elif spec.metric == "hours":
+        stat.update(value=round(float(hours or 0), 2), big=hrs, unit=hrs_unit)
+        stat["sentence"] = (
+            f"You've listened to {subject} for {hrs} {hrs_unit}{in_period}."
+            if subject
+            else f"You've listened for {hrs} {hrs_unit}{in_period}."
+        )
+    elif spec.metric == "distinct_tracks":
+        n = int(n_tracks or 0)
+        stat.update(value=n, big=f"{n:,}", unit="song" if n == 1 else "different songs")
+        by = " by " if spec.artists and not (spec.tracks or spec.albums) else " from "
+        of = f"{by}{subject}" if subject else ""
+        stat["sentence"] = f"You've played {_count(n, 'song', 'different songs')}{of}{in_period}."
+    elif spec.metric == "distinct_artists":
+        n = int(n_artists or 0)
+        stat.update(value=n, big=f"{n:,}", unit="artist" if n == 1 else "different artists")
+        of = f" in {subject}" if subject else ""
+        stat["sentence"] = (
+            f"You've listened to {_count(n, 'artist', 'different artists')}{of}{in_period}."
+        )
+    elif not rated:
+        # Whether a play was skipped comes only from the Spotify data download;
+        # plays captured since then do not say. 0% would be a guess.
+        stat["sentence"] = (
+            f"No skip data for {it}{in_period} - skips come from your Spotify data download."
+        )
+    else:  # skip_rate
+        pct = round(float(skip or 0))
+        stat.update(value=pct, big=f"{pct}%", unit="skipped")
+        stat["sentence"] = (
+            f"You skip {subject} {pct}% of the time{in_period}."
+            if subject
+            else f"You skip {pct}% of what you play{in_period}."
+        )
+
+    if not missing and (plays or hours):
+        stat["facts"] = _facts(
+            spec, con, frm, where, params, plays, hrs, hrs_unit, first, last, rated
+        )
+        if spec.tracks or spec.albums or spec.artists:
+            top = con.execute(
+                f"select track_uri from {frm} where {where} and track_uri like 'spotify:track:%' "
+                "group by 1 order by count(*) desc limit 1",
+                params,
+            ).fetchone()
+            stat["uri"] = top[0] if top else ""
+
+    notes = list(also)
+    if spec.metric == "skip_rate" and spec.answer == "number" and 0 < rated < MIN_SAMPLE:
+        notes.append(f"Only {_count(rated, 'play', 'plays')} to go on, so read it loosely.")
+    unit = METRICS[spec.metric][2]
+    return ChartData(
+        labels=[],
+        values=[],
+        x_label="",
+        y_label=unit,
+        title=spec.title or stat["sentence"].rstrip(".") or unit,
+        chart="number",
+        total_rows=plays,
+        note=" ".join(notes) or None,
+        stat=stat,
+    )
+
+
+def _facts(
+    spec: ChartSpec,
+    con: duckdb.DuckDBPyConnection,
+    frm: str,
+    where: str,
+    params: list[Any],
+    plays: int,
+    hrs: str,
+    hrs_unit: str,
+    first: date | None,
+    last: date | None,
+    rated: int,
+) -> list[list[str]]:
+    """The few lines under the number: whatever the headline did not already say."""
+    out: list[list[str]] = []
+    about = bool(spec.tracks or spec.albums or spec.artists or spec.genres)
+    if not (spec.answer == "number" and spec.metric == "plays"):
+        out.append(["Plays", f"{plays:,}"])
+    if not (spec.answer == "number" and spec.metric == "hours"):
+        out.append(["Time", f"{hrs} {hrs_unit}"])
+    # When something was first and last heard says something about a song or an
+    # artist. About everything, over a window, it only repeats the window's ends,
+    # so a total gets its variety instead.
+    if not about:
+        n_artists, n_tracks = con.execute(
+            f"select count(distinct artist_name), count(distinct track_uri) "
+            f"from {frm} where {where} and ms_played >= {MIN_MS}",
+            params,
+        ).fetchone()
+        if spec.metric != "distinct_artists":
+            out.append(["Artists", f"{n_artists:,}"])
+        if spec.metric != "distinct_tracks":
+            out.append(["Songs", f"{n_tracks:,}"])
+    if about and first is not None and spec.answer != "first_played":
+        out.append(["First played", _day_text(first)])
+    if about and last is not None and spec.answer != "last_played" and last != first:
+        out.append(["Last played", _day_text(last)])
+    if spec.metric == "skip_rate" and spec.answer == "number":
+        out.append(["Out of", _count(rated, "play", "plays")])
+    # The busiest month, when the plays span enough months for one to stand out.
+    if about and first is not None and last is not None and (last - first).days > 62:
+        top = con.execute(
+            f"""
+            select date_trunc('month', {LOCAL_TS}) as m, count(*) as n
+            from {frm}
+            where {where} and ms_played >= {MIN_MS}
+            group by 1 order by 2 desc, 1 desc limit 1
+            """,
+            params,
+        ).fetchone()
+        if top:
+            m = top[0]
+            out.append(
+                [
+                    "Busiest month",
+                    f"{MONTHS[m.month - 1]} {m.year} · {_count(top[1], 'play', 'plays')}",
+                ]
+            )
+    return out[:4]

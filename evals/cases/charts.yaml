@@ -339,3 +339,53 @@
 - input: my listening by month this year
   expect: {per_period: false, dimension: date, grain: month}
   tags: [per_period, negative]
+
+# One number or one date rather than a chart, and the song and album filters.
+# Tuned against; the held-out set for this is charts_answer_heldout.yaml.
+- input: how many times have I played Ivy
+  expect: {answer: number, metric: plays, tracks: [Ivy]}
+  tags: [answer, number, track]
+
+- input: play count for Motion Sickness by Phoebe Bridgers
+  expect: {answer: number, metric: plays, tracks: [Motion Sickness], artists: [Phoebe Bridgers]}
+  tags: [answer, number, track, with-artist]
+
+- input: how much Frank Ocean have I listened to
+  expect: {answer: number, metric: hours, artists: [Frank Ocean]}
+  tags: [answer, number, artist]
+
+- input: how many hours of music did I play in 2021
+  expect: {answer: number, metric: hours, year: 2021}
+  tags: [answer, number, total]
+
+- input: how many songs have I listened to today
+  expect: {answer: number, range: today, metric: {in: [plays, distinct_tracks]}}
+  tags: [answer, number, total, today]
+
+- input: how many different artists have I listened to this year
+  expect: {answer: number, metric: distinct_artists, range: this_year}
+  tags: [answer, number, distinct]
+
+- input: how many times have I played the album Igor
+  expect: {answer: number, metric: plays, albums: [Igor]}
+  tags: [answer, number, album]
+
+- input: when did I first listen to Mitski
+  expect: {answer: first_played, artists: [Mitski]}
+  tags: [answer, when]
+
+- input: when did I last listen to Ivy
+  expect: {answer: last_played, tracks: [Ivy]}
+  tags: [answer, when, track]
+
+- input: how many hours do I listen per week
+  expect: {answer: chart, dimension: date, grain: week}
+  tags: [answer, negative, each]
+
+- input: Ivy plays over the last year by month
+  expect: {answer: chart, tracks: [Ivy], dimension: date, grain: month}
+  tags: [answer, negative, track-filter]
+
+- input: my most played songs from Blonde
+  expect: {answer: chart, albums: [Blonde], dimension: track}
+  tags: [answer, negative, album-filter]
