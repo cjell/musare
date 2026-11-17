@@ -572,6 +572,8 @@ def run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
             note="not a question about listening",
         )
 
+    if spec.answer == "top":
+        return _top(spec)
     if spec.answer != "chart":
         return _answer(spec)
 
@@ -1260,3 +1262,196 @@ def _facts(
                 ]
             )
     return out[:4]
+
+
+# ----------------------------------------------------------------- one winner
+#
+# "My favourite Drake album" names one album, and a chart of one bar is a
+# chart of the wrong thing. The ranking is the chart's own query - the same
+# filters, the same metric, the same floor under a rate - asked for two rows,
+# so the winner and the runner-up behind it. The card then reads the way the
+# number cards do, with the winner's own facts underneath.
+
+THING = {
+    "artist": "artist",
+    "album": "album",
+    "track": "song",
+    "genre": "genre",
+    "platform": "device",
+    "hour_of_day": "time of day",
+    "day_of_week": "day of the week",
+}
+GRAIN_THING = {"day": "day", "week": "week", "month": "month", "year": "year"}
+DAY_NAMES = {
+    "Mon": "Monday",
+    "Tue": "Tuesday",
+    "Wed": "Wednesday",
+    "Thu": "Thursday",
+    "Fri": "Friday",
+    "Sat": "Saturday",
+    "Sun": "Sunday",
+}
+ENTITY = frozenset({"artist", "album", "track"})
+
+
+def _winner_name(spec: ChartSpec, label: str) -> str:
+    """A bucket as a person would say it, not as an axis prints it."""
+    if spec.dimension == "hour_of_day":
+        h = int(label)
+        return f"{(h % 12) or 12}{'am' if h < 12 else 'pm'}"
+    if spec.dimension == "day_of_week":
+        return DAY_NAMES.get(label, label)
+    if spec.dimension == "date":
+        d = date.fromisoformat(label[:10])
+        grain = spec.grain or "month"
+        if grain == "year":
+            return str(d.year)
+        if grain == "month":
+            return f"{MONTHS[d.month - 1]} {d.year}"
+        if grain == "week":
+            return f"Week of {_day_text(d)}"
+        return _day_text(d)
+    return label
+
+
+def _amount(spec: ChartSpec, v: float) -> str:
+    """The winning figure, as words that follow its name."""
+    if spec.metric == "hours":
+        n, unit = _hours_text(float(v))
+        return f"{n} {unit}"
+    if spec.metric == "plays":
+        return _count(int(v), "play", "plays")
+    if spec.metric == "distinct_tracks":
+        return _count(int(v), "song", "different songs")
+    if spec.metric == "distinct_artists":
+        return _count(int(v), "artist", "different artists")
+    return f"skipped {round(v)}% of the time"
+
+
+def _top(spec: ChartSpec) -> ChartData:
+    """The single winner, the one behind it, and the winner's own facts."""
+    ranked = spec.dimension not in ORDERED
+    asked = spec.model_copy(
+        update={
+            "answer": "chart",
+            "series": "none",
+            "per_period": False,
+            "cumulative": False,
+            # An ordered axis comes back in its own order, every bucket, and the
+            # winner is picked below; a ranking is asked for its top two.
+            "limit": 2 if ranked else spec.limit,
+        }
+    )
+    d = run(asked)
+    order = sorted(range(len(d.values)), key=lambda i: d.values[i], reverse=spec.sort != "asc")
+    order = [
+        i for i in order if d.values[i] is not None and (d.values[i] > 0 or spec.sort == "asc")
+    ]
+
+    _, period_label = _period(spec)
+    in_period = _period(spec)[0]
+    thing = (
+        GRAIN_THING.get(spec.grain or "month", "period")
+        if spec.dimension == "date"
+        else THING.get(spec.dimension, spec.dimension)
+    )
+    lead = "least played" if spec.sort == "asc" else "top"
+    if spec.metric == "skip_rate":
+        lead = "least skipped" if spec.sort == "asc" else "most skipped"
+
+    stat: dict[str, Any] = {
+        "answer": "top",
+        "metric": spec.metric,
+        "period": period_label,
+        "subject": "",
+        "found": bool(order),
+        "value": None,
+        "big": "",
+        "unit": "",
+        "sentence": "",
+        "facts": [],
+        "uri": "",
+    }
+    note = d.note
+    if not order:
+        _, missing, _ = _subject(spec, _connect(spec))
+        stat["found"] = False
+        stat["sentence"] = (
+            f"No {' or '.join(missing)} in your listening."
+            if missing
+            else f"Nothing to rank{in_period}."
+        )
+    else:
+        i = order[0]
+        name = _winner_name(spec, d.labels[i])
+        by = d.subs[i] if d.subs and i < len(d.subs) else ""
+        # Narrowed to one artist, it reads "your top Drake album is Views" -
+        # in the catalogue's spelling of Drake, not the question's.
+        whose = f"{by} " if by and len(spec.artists) == 1 else ""
+        named = f"{name} by {by}" if by and not whose else name
+        stat.update(
+            value=d.values[i],
+            big=name,
+            unit=f"by {by}" if by else "",
+            subject=named,
+            uri=d.uris[i] if d.uris and i < len(d.uris) else "",
+        )
+        # Narrowed to one record, it reads "your top song off Blonde".
+        off = ""
+        if spec.dimension == "track" and len(spec.albums) == 1:
+            off = f" off {_album_title(spec, spec.albums[0])}"
+        stat["sentence"] = (
+            f"Your {lead} {whose}{thing}{off}{in_period} is {named} - {_amount(spec, d.values[i])}."
+        )
+        facts: list[list[str]] = []
+        if spec.dimension in ENTITY:
+            facts = _winner_facts(spec, name, by)
+        if len(order) > 1:
+            j = order[1]
+            nxt = _winner_name(spec, d.labels[j])
+            facts.append(["Next", f"{nxt} · {_amount(spec, d.values[j])}"])
+        stat["facts"] = facts
+
+    return ChartData(
+        labels=[],
+        values=[],
+        x_label="",
+        y_label=d.y_label,
+        title=spec.title or stat["sentence"].split(" - ")[0].rstrip("."),
+        chart="number",
+        total_rows=d.total_rows,
+        note=note,
+        stat=stat,
+    )
+
+
+def _album_title(spec: ChartSpec, typed: str) -> str:
+    """A record's name as the catalogue spells it, rather than as it was typed."""
+    row = (
+        _connect(spec)
+        .execute(
+            f"select album_name from plays where {_norm('album_name')} = {_norm('?')} "
+            "group by 1 order by count(*) desc limit 1",
+            [typed.strip()],
+        )
+        .fetchone()
+    )
+    return row[0] if row else typed.strip()
+
+
+def _winner_facts(spec: ChartSpec, name: str, by: str) -> list[list[str]]:
+    """The winner's own plays, time and dates, worked out the way a number
+    question about it would be - over the same window and filters."""
+    update: dict[str, Any] = {"answer": "number", "metric": "plays"}
+    if spec.dimension == "artist":
+        update["artists"] = [name]
+    elif spec.dimension == "album":
+        update.update(albums=[name], artists=[by] if by else spec.artists)
+    else:
+        update.update(tracks=[name], artists=[by] if by else spec.artists)
+    st = _answer(spec.model_copy(update=update)).stat or {}
+    facts = [["Plays", f"{st['value']:,}"]] if st.get("value") is not None else []
+    # Time and the dates, without the busiest month: the card already has its
+    # runner-up, and four lines is what fits.
+    keep = {"Time", "First played", "Last played"}
+    return facts + [f for f in st.get("facts", []) if f[0] in keep][:2]

@@ -64,7 +64,7 @@ def validate_chart(spec: ChartSpec) -> list[SpecProblem]:
 
     # Today over time is drawn by hour (chartrun.effective), so it needs no grain.
     if (
-        spec.answer == "chart"
+        spec.answer in ("chart", "top")
         and spec.dimension == "date"
         and spec.grain is None
         and spec.range != "today"

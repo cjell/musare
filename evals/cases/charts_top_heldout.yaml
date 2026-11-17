@@ -1,0 +1,74 @@
+# Held-out set for the single winner as an answer.
+#
+# Written before the 'top' answer existed and before its description - the two
+# questions that asked for it ("what is my favorite drake album", "what is my
+# favorite faye webster song") came back as one-bar charts, and they are not in
+# here: the cases below ask the same kind of thing in other words. Run ONCE,
+# after the description is done.
+#
+# The trap is the number of winners. "My favourite album" names one, and the
+# answer is that album. "My favourite albums", "top 5 songs" and "my number one
+# artist every year" name several - the last one a winner per period, which is
+# the per-period table and stays a chart.
+
+# ------------------------------------------------------------------ winners
+- input: what's my most played Kendrick album
+  expect: {answer: top, dimension: album, artists: [Kendrick], limit: 1}
+  tags: [top, album, artist-filter]
+
+- input: which Frank Ocean song do I play the most
+  expect: {answer: top, dimension: track, artists: [Frank Ocean], limit: 1}
+  tags: [top, track, artist-filter]
+
+- input: who is my favourite artist
+  expect: {answer: top, dimension: artist, limit: 1, range: all}
+  tags: [top, artist]
+
+- input: my top artist this year
+  expect: {answer: top, dimension: artist, range: this_year}
+  tags: [top, artist, range]
+
+- input: what was my number one song in 2022
+  expect: {answer: top, dimension: track, year: 2022}
+  tags: [top, track, year]
+
+- input: what genre do I listen to most
+  expect: {answer: top, dimension: genre}
+  tags: [top, genre]
+
+- input: what song off Blonde have I played the most
+  expect: {answer: top, dimension: track, albums: [Blonde]}
+  tags: [top, track, album-filter]
+
+- input: what time of day do I listen to music the most
+  expect: {answer: top, dimension: hour_of_day}
+  tags: [top, hour]
+
+- input: which day of the week do I listen most
+  expect: {answer: top, dimension: day_of_week}
+  tags: [top, day]
+
+- input: the song I've been playing most this week
+  expect: {answer: top, dimension: track, range: 7d}
+  tags: [top, track, idiom]
+
+- input: which song do I skip the most
+  expect: {answer: top, dimension: track, metric: skip_rate}
+  tags: [top, rate]
+
+# -------------------------------------------------- several (negatives)
+- input: my favourite Kendrick albums
+  expect: {answer: chart, dimension: album, artists: [Kendrick]}
+  tags: [negative, plural]
+
+- input: top 5 Frank Ocean songs
+  expect: {answer: chart, dimension: track, limit: 5, artists: [Frank Ocean]}
+  tags: [negative, plural]
+
+- input: my number one artist every year
+  expect: {answer: chart, per_period: true, series: artist, limit: 1}
+  tags: [negative, per-period]
+
+- input: how many times have I listened to Kendrick
+  expect: {answer: number, metric: plays, artists: [Kendrick]}
+  tags: [negative, number]

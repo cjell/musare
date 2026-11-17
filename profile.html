@@ -1450,6 +1450,10 @@ details[open] summary .chev{transform:rotate(180deg)}
   line-height:1;letter-spacing:-.03em;color:var(--accent)
 }
 .stat-big.date b{font-size:30px;letter-spacing:-.02em}
+/* A winner's name is a headline of any length - Nothing Was The Same - so it
+   wraps rather than running off the card. */
+.stat-big.name b{font-size:30px;line-height:1.08;letter-spacing:-.02em;overflow-wrap:anywhere}
+.stat-big.name{row-gap:6px}
 .stat-big span{
   font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.08em;
   text-transform:uppercase;color:var(--ink-2)
@@ -1473,7 +1477,7 @@ details[open] summary .chev{transform:rotate(180deg)}
 .chart-stat[data-play]:focus-visible{outline:2px solid var(--accent);outline-offset:3px;border-radius:6px}
 .pl.chartpin.small .chart-stat{margin-top:8px}
 .pl.chartpin.small .stat-big b{font-size:34px}
-.pl.chartpin.small .stat-big.date b{font-size:19px}
+.pl.chartpin.small .stat-big.date b,.pl.chartpin.small .stat-big.name b{font-size:19px}
 .pl.chartpin.small .stat-big span{font-size:9px}
 .pl.chartpin.small .stat-s{font-size:11.5px;margin-top:6px}
 .chartcard.tap{cursor:pointer}
@@ -6934,8 +6938,9 @@ function statCard(st, compact){
     ? playAttr(st.uri) + ' tabindex="0" role="button" aria-label="' + esc(st.sentence + " Play it.") + '"'
     : "";
   var dated = st.answer === "first_played" || st.answer === "last_played";
+  var shape = dated ? " date" : st.answer === "top" ? " name" : "";
   var big = st.big
-    ? '<div class="stat-big' + (dated ? " date" : "") + '"><b>' + esc(st.big) + "</b>" +
+    ? '<div class="stat-big' + shape + '"><b>' + esc(st.big) + "</b>" +
       (st.unit ? "<span>" + esc(st.unit) + "</span>" : "") + "</div>"
     : "";
   var facts = compact ? [] : (st.facts || []);

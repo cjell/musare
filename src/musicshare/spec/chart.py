@@ -72,11 +72,19 @@ class ChartSpec(BaseModel):
             "of the axes. Six words at most."
         ),
     )
-    answer: Literal["chart", "number", "first_played", "last_played"] = Field(
+    answer: Literal["chart", "number", "first_played", "last_played", "top"] = Field(
         default="chart",
         description=(
             "What shape the answer takes. 'chart' for anything that is many numbers - "
             "a ranking, a trend, a breakdown - which is most requests. "
+            "'top' when the question asks for one winner and only one: 'my favourite "
+            "album', 'what's my most played Drake song', 'who is my top artist this "
+            "year', 'what time of day do I listen most', 'which song do I skip the "
+            "most'. Set dimension to what is being ranked, metric to what it is "
+            "ranked by, and limit to 1. The giveaway is a singular - one album, one "
+            "song, one artist. A plural or a count above one - 'my favourite albums', "
+            "'top 5 songs' - is a chart. So is a winner per period - 'my number one "
+            "artist every year' - which is per_period. "
             "'number' when the question has a single number for an answer: 'how many "
             "times have I played X', 'how much have I listened to Y this year', 'how "
             "many hours this month', 'how many different artists this week', 'how "
@@ -85,7 +93,8 @@ class ChartSpec(BaseModel):
             "A word like each, every, per or by attached to a period or a category "
             "asks for many numbers and is a chart: 'how many hours each month' is a "
             "chart, 'how many hours this month' is a number. A question about which "
-            "ones - 'my top songs', 'my favourite album' - is a ranking, so a chart. "
+            "ones - 'my top songs' - is a ranking, so a chart, or 'top' when it asks "
+            "for the single one. "
             "'first_played' and 'last_played' when the question asks when: 'when did "
             "I first hear X', 'the last time I played Y'. "
             "With 'number', 'first_played' and 'last_played', dimension, grain, "

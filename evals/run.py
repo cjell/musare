@@ -82,6 +82,8 @@ SUITES: dict[str, Suite] = {
     ),
     # Written before `answer`, `tracks` and `albums` existed; see its header.
     "charts-answer-heldout": Suite(CHARTS, "charts_answer_heldout.yaml", validate_chart),
+    # Written before the 'top' answer existed; see its header.
+    "charts-top-heldout": Suite(CHARTS, "charts_top_heldout.yaml", validate_chart),
 }
 
 

@@ -190,3 +190,43 @@ def test_a_number_ignores_the_shape_fields():
 def test_old_specs_still_parse_as_charts():
     spec = ChartSpec.model_validate({"dimension": "artist", "metric": "hours"})
     assert spec.answer == "chart" and spec.tracks == [] and spec.albums == []
+
+
+# ---------------------------------------------------------------- one winner
+
+
+def test_the_top_song_names_the_winner_and_the_runner_up(history):
+    d = ask(answer="top", dimension="track", limit=1, metric="plays")
+    assert d.chart == "number" and d.stat["answer"] == "top"
+    assert (d.stat["big"], d.stat["unit"]) == ("Fears", "by MTNS")
+    assert d.stat["sentence"] == "Your top song is Fears by MTNS - 12 plays."
+    facts = dict(d.stat["facts"])
+    assert facts["Next"] == "Height · 4 plays"
+    assert facts["Plays"] == "15", "the winner's own count takes in its other versions"
+    assert d.stat["uri"] == "spotify:track:aaaaaaaaaaaaaaaaaaaaa1"
+
+
+def test_narrowed_to_one_artist_it_reads_as_theirs(history):
+    d = ask(answer="top", dimension="album", artists=["mtns"], limit=1, metric="plays")
+    assert d.stat["sentence"] == "Your top MTNS album is Salvage - 15 plays."
+
+
+def test_narrowed_to_one_album_it_says_so(history):
+    d = ask(answer="top", dimension="track", albums=["salvage"], limit=1, metric="plays")
+    assert d.stat["sentence"].startswith("Your top song off Salvage is Fears by MTNS")
+
+
+def test_a_time_of_day_is_said_the_way_people_say_it(history):
+    d = ask(answer="top", dimension="hour_of_day", limit=1, metric="plays")
+    assert d.stat["big"].endswith(("am", "pm"))
+
+
+def test_a_winner_among_nobody(history):
+    d = ask(answer="top", dimension="album", artists=["nobody at all"], limit=1)
+    assert d.stat["found"] is False
+    assert d.stat["sentence"] == 'No artist called "nobody at all" in your listening.'
+
+
+def test_a_top_answer_over_dates_still_needs_a_bucket():
+    spec = ChartSpec(answer="top", dimension="date")
+    assert [p.field for p in validate_chart(spec)] == ["grain"]

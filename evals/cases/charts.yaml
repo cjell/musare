@@ -389,3 +389,33 @@
 - input: my most played songs from Blonde
   expect: {answer: chart, albums: [Blonde], dimension: track}
   tags: [answer, negative, album-filter]
+
+# The single winner as an answer. The first two are the questions that came
+# back as one-bar charts. Held-out set: charts_top_heldout.yaml.
+- input: what is my favorite drake album?
+  expect: {answer: top, dimension: album, artists: [drake], limit: 1}
+  tags: [answer, top, album]
+
+- input: what is my favorite faye webster song
+  expect: {answer: top, dimension: track, artists: [faye webster], limit: 1}
+  tags: [answer, top, track]
+
+- input: my favourite album
+  expect: {answer: top, dimension: album, limit: 1}
+  tags: [answer, top, album]
+
+- input: most listened to artist last month
+  expect: {answer: top, dimension: artist, range: 30d}
+  tags: [answer, top, artist]
+
+- input: what hour do I play the most music
+  expect: {answer: top, dimension: hour_of_day}
+  tags: [answer, top, hour]
+
+- input: my favorite songs
+  expect: {answer: chart, dimension: track}
+  tags: [answer, negative, plural]
+
+- input: top 3 drake albums
+  expect: {answer: chart, dimension: album, limit: 3, artists: [drake]}
+  tags: [answer, negative, plural]
