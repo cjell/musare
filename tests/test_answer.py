@@ -230,3 +230,95 @@ def test_a_winner_among_nobody(history):
 def test_a_top_answer_over_dates_still_needs_a_bucket():
     spec = ChartSpec(answer="top", dimension="date")
     assert [p.field for p in validate_chart(spec)] == ["grain"]
+
+
+# ------------------------------------------------------------- reading names
+
+NAMED = [
+    ("Lover, You Should've Come Over", "Jeff Buckley", "Grace", 30),
+    ("Lover, You Should've Come Over - Live", "Jeff Buckley", "Live", 5),
+    ("Thinking About You", "Faye Webster", "Atlanta Millionaires Club", 20),
+    ("Thinking About You", "Radiohead", "Pablo Honey", 2),
+    ("good kid", "Kendrick Lamar", "good kid, m.A.A.d city", 40),
+    ("The Thing", "Kendrick Lamar Tribute Band", "Covers", 3),
+    ("Kyoto", "Phoebe Bridgers", "Punisher", 12),
+    ("Mrs. Robinson", "Simon & Garfunkel", "Bookends", 6),
+]
+
+
+@pytest.fixture
+def named(monkeypatch):
+    con = duckdb.connect()
+    con.execute("install icu; load icu;")
+    con.execute(
+        "create table plays (played_at timestamp, track_uri varchar, track_name varchar, "
+        "artist_name varchar, album_name varchar, ms_played bigint, platform varchar, "
+        "skipped boolean)"
+    )
+    rows, i = [], 0
+    for track, artist, album, n in NAMED:
+        for _ in range(n):
+            rows.append(
+                (
+                    datetime(2024, 1, 1) + timedelta(days=i),
+                    f"spotify:track:{i:022d}",
+                    track,
+                    artist,
+                    album,
+                    200_000,
+                    "ios",
+                    False,
+                )
+            )
+            i += 1
+    con.executemany("insert into plays values (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    monkeypatch.setattr(chartrun, "_connect", lambda spec=None: con)
+    return con
+
+
+def test_punctuation_does_not_decide_a_title(named):
+    d = ask(answer="number", metric="plays", tracks=["lover you should've come over"])
+    assert d.stat["value"] == 35, "with its live version, and nothing to report"
+    assert not d.note
+
+
+@pytest.mark.parametrize(
+    "typed, artist",
+    [
+        ("kendrik lamar", "Kendrick Lamar"),
+        ("phobe bridgers", "Phoebe Bridgers"),
+        ("kendrick", "Kendrick Lamar"),
+        ("simon and garfunkel", "Simon & Garfunkel"),
+    ],
+)
+def test_a_name_is_read_as_the_one_played(named, typed, artist):
+    d = ask(answer="number", metric="plays", artists=[typed])
+    assert d.stat["subject"] == artist
+    exact = typed == "simon and garfunkel"
+    assert bool(d.note) is not exact, "anything but an exact match says what it was read as"
+
+
+def test_a_partial_name_goes_to_the_one_played_most(named):
+    """'kendrick' is a whole word of two acts here; the one played more wins."""
+    d = ask(answer="number", metric="plays", artists=["kendrick"])
+    assert d.stat["value"] == 40
+
+
+def test_a_partial_title_with_its_artist(named):
+    d = ask(answer="number", metric="plays", tracks=["thinking about"], artists=["radiohead"])
+    assert d.stat["value"] == 2
+    assert d.note == 'Read "thinking about" as Thinking About You.'
+
+
+@pytest.mark.parametrize("typed", ["the", "kyo", "zzqx", "bridgers phoebe"])
+def test_some_names_are_not_guessed_at(named, typed):
+    """Too short to read as part of a name, or too far from any spelling."""
+    d = ask(answer="number", metric="plays", artists=[typed])
+    assert d.stat["found"] is False
+
+
+def test_charts_read_names_too(named):
+    d = ask(
+        dimension="date", grain="month", metric="plays", tracks=["lover you shouldve come over"]
+    )
+    assert sum(d.values) == 35

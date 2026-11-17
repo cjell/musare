@@ -350,19 +350,23 @@ def _where(
     return " and ".join(clauses), params
 
 
-# A title as typed against a title as stored. Case, curly apostrophes and the
-# tails the catalogue adds - " - Remastered 2011", "(feat. X)", "[Live]" - do
-# not decide whether "fears" means Fears, so all of them are dropped from both
-# sides by the same expression. Versions of one song are counted together.
+# A name as typed against a name as stored. Case, punctuation, "&" for "and",
+# and the tails the catalogue adds - " - Remastered 2011", "(feat. X)", "[Live]"
+# - do not decide whether "lover you shouldve come over" means Lover, You
+# Should've Come Over, so all of them are dropped from both sides by the same
+# expression. Versions of one song are counted together. A title that starts
+# with a bracket keeps it: "(What's the Story) Morning Glory?" is not empty.
+# Punctuation is the ASCII class plus curly quotes, so a title in another
+# script keeps its letters.
+CURLY = chr(0x2018) + chr(0x2019) + chr(0x201C) + chr(0x201D)
+
+
 def _norm(col: str) -> str:
-    return (
-        f"trim(regexp_replace(regexp_replace(lower({col}), '[{CURLY}]', '''', 'g'), "
-        r"'\s*(\(|\[| - ).*$', ''))"
-    )
+    x = f"replace(lower({col}), '&', ' and ')"
+    x = rf"regexp_replace({x}, '^(.+?)\s*(\(|\[|\s-\s).*$', '\1')"
+    x = f"regexp_replace({x}, '[[:punct:]{CURLY}]', '', 'g')"
+    return rf"trim(regexp_replace({x}, '\s+', ' ', 'g'))"
 
-
-# Left and right single quotes, as typed by a phone keyboard.
-CURLY = chr(0x2018) + chr(0x2019)
 
 TITLE_COLS = {"track": "track_name", "album": "album_name"}
 
@@ -551,6 +555,17 @@ def steppable(spec: ChartSpec) -> bool:
 
 
 def run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
+    """The numbers for a chart - after reading the names in it as the ones in
+    this history (`resolve`), and saying so wherever a name was read as another.
+    """
+    spec, fixes = resolve(spec)
+    d = _run(spec, back, scale_over)
+    if fixes:
+        d.note = " ".join([*fixes, *([d.note] if d.note else [])])
+    return d
+
+
+def _run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
     """The numbers for a chart.
 
     `back` steps to an earlier window - the day before, the seven days before
@@ -1038,15 +1053,21 @@ def _subject(spec: ChartSpec, con: duckdb.DuckDBPyConnection) -> tuple[str, list
             found.append(f"{row[0]} by {row[1]}")
             if has_artist:
                 continue
-            others = con.execute(
+            rows = con.execute(
                 f"select artist_name from plays where {_norm(col)} = {_norm('?')} "
-                "and artist_name <> ? group by 1 order by count(*) desc limit 3",
+                "and artist_name <> ? group by 1 order by count(*) desc limit 8",
                 [name.strip(), row[1]],
             ).fetchall()
+            # The catalogue spells some acts more than one way - a stray space,
+            # a different dash - so the same name can come back twice.
+            others: list[str] = []
+            for (o,) in rows:
+                if o.strip().lower() not in {x.lower() for x in [row[1], *others]}:
+                    others.append(o.strip())
             if others:
                 also.append(
                     f"Other {KIND_WORD[kind]}s called {row[0]}: by "
-                    + ", ".join(o[0] for o in others)
+                    + "; ".join(others[:3])
                     + ". Name the artist to count theirs."
                 )
     if not (spec.tracks or spec.albums):
@@ -1455,3 +1476,103 @@ def _winner_facts(spec: ChartSpec, name: str, by: str) -> list[list[str]]:
     # runner-up, and four lines is what fits.
     keep = {"Time", "First played", "Last played"}
     return facts + [f for f in st.get("facts", []) if f[0] in keep][:2]
+
+
+# ------------------------------------------------------------ reading names
+#
+# A name has to be found in this history before anything can be counted for
+# it, and people do not type names the way the catalogue spells them: "kendrick"
+# for Kendrick Lamar, "faye webstr", a title without its comma. The model cannot
+# fix that - it has never seen this library - so it is fixed here, against what
+# was actually played, in order of how sure the match is:
+#
+#   exact     the same once case, punctuation and version tails are gone
+#   partial   every word typed is a whole word of the name, in order -
+#             "kendrick" in Kendrick Lamar, "thinking about" in Thinking About You
+#   close     a spelling a few letters off, for names of four letters or more
+#
+# Within a tier the one played most wins. Anything matched other than exactly
+# is reported on the answer, so a wrong guess is visible rather than silently
+# counted.
+
+MIN_PARTIAL = 4
+MIN_CLOSE = 4
+CLOSE_ENOUGH = 0.9
+
+NAME_COLS = {"artist": "artist_name", "track": "track_name", "album": "album_name"}
+
+
+def _closest(
+    con: duckdb.DuckDBPyConnection, kind: str, typed: str, artists: list[str]
+) -> tuple[str, bool] | None:
+    """The played name `typed` most likely means, and whether it was exact."""
+    col = NAME_COLS[kind]
+    scope, params = f"{col} is not null", []
+    if artists and kind != "artist":
+        marks = ", ".join("?" for _ in artists)
+        scope += f" and lower(artist_name) in ({marks})"
+        params += [a.lower() for a in artists]
+    row = con.execute(
+        f"""
+        with names as (
+          select {col} as name, {_norm(col)} as k, count(*) as n
+          from plays where {scope} group by 1
+        ), q as (select {_norm("?")} as q)
+        select name, k = q as exact,
+          case
+            when k = q then 3
+            when length(q) >= {MIN_PARTIAL}
+                 and (' ' || k || ' ') like ('% ' || q || ' %') then 2
+            else 1
+          end as tier,
+          jaro_winkler_similarity(k, q) as near,
+          n
+        from names, q
+        where q <> '' and (
+          k = q
+          or (length(q) >= {MIN_PARTIAL} and (' ' || k || ' ') like ('% ' || q || ' %'))
+          or (length(q) >= {MIN_CLOSE} and jaro_winkler_similarity(k, q) >= {CLOSE_ENOUGH})
+        )
+        order by tier desc, case when tier = 1 then near else 0 end desc, n desc, name
+        limit 1
+        """,
+        [*params, typed.strip()],
+    ).fetchone()
+    return (row[0], bool(row[1])) if row else None
+
+
+def resolve(spec: ChartSpec) -> tuple[ChartSpec, list[str]]:
+    """The spec with each name as this history spells it, and a line for every
+    name that was read as something other than itself.
+
+    Artists first, because a song named with its artist is looked for among
+    that artist's songs. A name with no match at all is left as typed, and the
+    answer then says nothing by that name was played.
+    """
+    if not (spec.artists or spec.tracks or spec.albums):
+        return spec, []
+    con = _connect(spec)
+    fixes: list[str] = []
+    update: dict[str, list[str]] = {}
+
+    def read(kind: str, names: list[str], artists: list[str]) -> list[str]:
+        out = []
+        for typed in names:
+            hit = _closest(con, kind, typed, artists)
+            if not hit:
+                out.append(typed)
+                continue
+            name, exact = hit
+            if not exact:
+                fixes.append(f'Read "{typed.strip()}" as {name}.')
+            out.append(name)
+        return out
+
+    if spec.artists:
+        update["artists"] = read("artist", spec.artists, [])
+    artists = update.get("artists", [])
+    if spec.tracks:
+        update["tracks"] = read("track", spec.tracks, artists)
+    if spec.albums:
+        update["albums"] = read("album", spec.albums, artists)
+    return spec.model_copy(update=update), fixes
