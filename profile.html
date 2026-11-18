@@ -6428,6 +6428,9 @@ function renderCompares(){
         '<div class="chart-t">' + t + '<button class="t-ren" type="button" data-ren-scope="cmp" data-ren-id="' +
         esc(c.id) + '" aria-label="Rename this comparison">' + RENAME_PENCIL + "</button></div>" +
         '<div class="chart-sub">You vs ' + other + '<span data-cmp-span></span></div>' +
+        /* Always live: worked out from both histories each time it is looked at,
+           never kept, so removing it really does end it. Marked like a live chart. */
+        '<div class="chart-mode"><span class="m live"><i></i>Live</span></div>' +
         '<div data-cmp-body><div class="chart-note">Working it out...</div></div></div>';
     }
     var line, acts;
