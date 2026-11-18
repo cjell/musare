@@ -1427,6 +1427,60 @@ details[open] summary .chev{transform:rotate(180deg)}
 .hm-key{font-size:9px;color:var(--ink-3);margin-top:5px}
 .chart-acts{display:flex;gap:8px;margin-top:12px}
 .chart-acts .btn{flex:1;height:34px;font-size:12.5px}
+/* Four actions on a kept chart now - two rows of two rather than four slivers. */
+.chart-keep .chart-acts{flex-wrap:wrap}
+.chart-keep .chart-acts .btn{flex:1 1 40%}
+
+/* ---- comparing a chart with someone ----
+   Two answers to one question, set beside each other in the way the answer
+   reads best: two cards, two lists, or one chart with a line each. */
+.bell i{display:none}
+.bell.has-new i{display:block}
+.cmp-two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
+.cmp-col{min-width:0}
+.cmp-who{
+  font-family:"IBM Plex Mono",monospace;font-size:9px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-2);margin-bottom:4px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.cmp-col .chart-stat{margin-top:2px}
+.cmp-col .stat-big b{font-size:34px}
+.cmp-col .stat-big.name b,.cmp-col .stat-big.date b{font-size:18px}
+.cmp-col .stat-big span{font-size:9px}
+.cmp-col .chart-recent{margin-top:2px}
+.cmp-f{font-size:11px;color:var(--ink-2);margin-top:5px}
+.cmp-f b{font-weight:500;color:var(--ink)}
+.cmp-r{display:flex;gap:6px;align-items:center;padding:5px 0;border-top:1px solid var(--line)}
+.cmp-r:first-child{border-top:0}
+.cmp-r .n{flex:0 0 14px;font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3)}
+.cmp-r .mx{min-width:0;flex:1 1 auto}
+.cmp-r .tn{display:block;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmp-r .ta2{display:block;font-size:9.5px;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmp-r .v{flex:none;font-family:"IBM Plex Mono",monospace;font-size:9px;color:var(--ink-3)}
+.cmp-r.shared .tn{color:var(--accent)}
+.cmp-r[data-play]{cursor:pointer}
+.cmp-common{font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3);margin-top:10px}
+.cmp-common b{color:var(--accent);font-weight:500}
+.cmp-stack .cmp-who{margin:14px 0 -4px}
+.cmp-stack .chartcard{border:0;padding:0;background:none}
+.cmp-why{font-size:12px;color:var(--ink-3);margin-top:6px}
+.cmp-pend{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.cmp-pend .who{font-size:12.5px;line-height:1.35}
+.cmp-pend .t{display:block;font-size:11px;color:var(--ink-3);margin-top:2px}
+.cmp-pend .acts{display:flex;gap:6px;flex:none}
+.cmp-pend .btn{height:30px;font-size:11.5px;padding:0 10px}
+.inbox-r{padding:10px 4px;border-top:1px solid var(--line)}
+.inbox-r:first-child{border-top:0}
+.inbox-r .who{font-size:13px;line-height:1.4}
+.inbox-r .t{font-size:11.5px;color:var(--ink-2);margin-top:2px}
+.inbox-r .acts{display:flex;gap:8px;margin-top:9px}
+.inbox-r .btn{flex:1;height:32px;font-size:12px}
+.cmp-person .av{
+  width:32px;height:32px;border-radius:50%;background:var(--line-2) center/cover no-repeat;flex:0 0 auto;
+  display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--ink-2)
+}
+.cmp-person{cursor:pointer}
+.cmp-sent{font-size:12.5px;line-height:1.45;color:var(--ink-2);padding:6px 4px}
 /* Changing a chart in place, under the chart being changed. */
 .refine{margin-top:12px}
 .chart-steps{
@@ -2112,6 +2166,11 @@ details[open] summary .chev{transform:rotate(180deg)}
       <section class="sec anim" id="chartKeptSec" hidden>
         <div class="sec-label"><span>Kept</span><span class="aux" id="keptAux"></span></div>
         <div class="chart-keep" id="chartKept"></div>
+      </section>
+
+      <section class="sec anim" id="cmpSec" hidden>
+        <div class="sec-label"><span>Compared</span><span class="aux" id="cmpAux"></span></div>
+        <div class="chart-keep" id="cmpList"></div>
       </section>
 
       <div class="empty">
@@ -3646,6 +3705,8 @@ function loadAccounts(){
       var mine = all.filter(function(u){ return u.id === ME.id; })[0];
       ME_HAS_HISTORY = !mine || mine.has_history !== false;
       var others = all.filter(function(u){ return u.id !== ME.id; });
+      CMP.people = others;
+      cmpLoad();
       PROFILES = [profileFor(ME)].concat(others.map(profileFor));
       loadLocal();
       renderPeople();
@@ -4778,7 +4839,7 @@ function showScreen(which){
     loadShows();   /* fetches once, then the cache serves it */
     playIn($("showsBeen").hidden ? $("showsUpcoming") : $("showsBeen"));
   }
-  else if(which === "charts"){ renderKept(); playIn($("screenCharts")); }
+  else if(which === "charts"){ renderKept(); cmpLoad(); playIn($("screenCharts")); }
   else { paint(); playIn($("screenProfile")); }
 }
 
@@ -5088,6 +5149,7 @@ function renderKept(){
         (isPinned ? "On your profile" : "Pin to profile") + "</button>" +
         '<button class="btn btn-ghost" type="button" data-home="' + esc(k.id) + '"' +
         (onHome ? " disabled" : "") + ">" + (onHome ? "On Home" : "Pin to Home") + "</button>" +
+        '<button class="btn btn-ghost" type="button" data-cmp-kept="' + esc(k.id) + '">Compare</button>' +
         '<button class="btn btn-ghost" type="button" data-drop="' + esc(k.id) + '">Remove</button>' +
         "</div>" + (PIN_ASK === k.id ? replaceChooser(k.id) : "")
     });
@@ -5136,7 +5198,8 @@ function showChartResult(d, q, spec, history, style){
     actions: '<div class="chart-q">' + esc(q) + "</div>" +
       '<div class="chart-acts">' +
       '<button class="btn btn-primary" type="button" id="chartKeep">Keep</button>' +
-      '<button class="btn btn-ghost" type="button" id="chartAgain">Ask again</button></div>' +
+      '<button class="btn btn-ghost" type="button" id="chartAgain">Ask again</button>' +
+      '<button class="btn btn-ghost" type="button" id="chartCompare">Compare</button></div>' +
       '<div class="ask refine"><input id="chartChange" type="text" autocomplete="off" maxlength="400"' +
       ' placeholder="Not quite? Say what to change" aria-label="Change this chart">' +
       '<button type="button" id="chartChangeGo">Change</button></div>' +
@@ -6167,8 +6230,273 @@ document.addEventListener("keydown", function(e){
   openChart(+c.dataset.chartOpen);
 });
 
+/* ================= comparing with someone =================
+   A chart sent to another person. Nothing of theirs is run until they accept
+   (see compare.py); then it is live for both, under Compared in Charts, until
+   either removes it. The bell says when one is waiting on you. */
+var RENAME_PENCIL = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg>';
+var CMP = { items: [], waiting: 0, me: null, people: [], pick: null, runs: {} };
+var CMP_TTL = 60 * 1000;
+
+function cmpLoad(){
+  return fetch("/api/compare").then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(d){
+      if(!d) return;
+      CMP.items = d.items || [];
+      CMP.waiting = d.waiting || 0;
+      CMP.me = d.me;
+      paintBell();
+      renderCompares();
+      if(!$("plOpen").hidden && $("plOpen").dataset.panel === "inbox") openInbox();
+    }).catch(function(){});
+}
+
+function paintBell(){
+  var b = $("bellBtn");
+  b.classList.toggle("has-new", CMP.waiting > 0);
+  b.setAttribute("aria-label", CMP.waiting ? "Notifications, " + CMP.waiting + " new" : "Notifications");
+}
+
+function cmpTitle(c){ return c.name || c.title || "Comparison"; }
+function them(c){ return c.mine ? c.to : c.from; }
+
+/* The sheet albums open in, holding a short list instead of tracks. */
+function openPanel(kind, title, meta, html){
+  $("plOpen").classList.remove("centre");
+  $("plOpen").dataset.panel = kind;
+  $("plName").textContent = title;
+  $("plMeta").textContent = meta || "";
+  $("plCover").hidden = true;
+  $("plList").innerHTML = html;
+  if($("plOpen").hidden){
+    $("plOpen").hidden = false;
+    document.body.style.overflow = "hidden";
+    $("plClose").focus();
+  }
+}
+
+/* ---- the bell: requests waiting on you ---- */
+function openInbox(){
+  var wait = CMP.items.filter(function(c){ return !c.mine && c.status === "pending"; });
+  var html = wait.length ? wait.map(function(c){
+    return '<div class="inbox-r"><div class="who"><b>' + esc(c.from.name) + "</b> wants to compare</div>" +
+      '<div class="t">' + esc(cmpTitle(c)) + (c.q ? " \u00B7 \u201C" + esc(c.q) + "\u201D" : "") + "</div>" +
+      '<div class="acts"><button class="btn btn-primary" type="button" data-cmp-yes="' + esc(c.id) + '">Accept</button>' +
+      '<button class="btn btn-ghost" type="button" data-cmp-no="' + esc(c.id) + '">Decline</button></div></div>';
+  }).join("") : '<div class="cmp-sent">Nothing new. To compare a chart with someone, ' +
+    "tap Compare under it in Charts.</div>";
+  openPanel("inbox", "Notifications", wait.length ? "Accepting runs the same question over your listening." : "", html);
+}
+$("bellBtn").addEventListener("click", function(){ cmpLoad().then(openInbox); openInbox(); });
+
+/* ---- choosing who to compare with ---- */
+function openCmpPicker(src){
+  CMP.pick = src;
+  var people = (CMP.people || []).filter(function(u){ return u.id !== CMP.me && u.has_history !== false; });
+  var html = people.length ? people.map(function(u){
+    var av = u.image ? ' style="background-image:url(' + esc(u.image) + ')"' : "";
+    return '<div class="pl-tr cmp-person" role="button" tabindex="0" data-cmp-to="' + esc(u.id) + '">' +
+      '<span class="av"' + av + ">" + (u.image ? "" : esc((u.name || "?").charAt(0))) + "</span>" +
+      '<span class="mx"><span class="tn">' + esc(u.name || u.id) + "</span></span></div>";
+  }).join("") : '<div class="cmp-sent">Nobody else here has listening history yet.</div>';
+  openPanel("pick", "Compare with", src.title || "", html);
+}
+
+function sendCompare(to){
+  var src = CMP.pick;
+  if(!src) return;
+  var who = (CMP.people.filter(function(u){ return u.id === to; })[0] || {}).name || "them";
+  $("plList").innerHTML = '<div class="cmp-sent">Sending...</div>';
+  fetch("/api/compare", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to: to, spec: src.spec, q: src.q || "", name: src.name || null })
+  }).then(function(r){ return r.json().then(function(b){ return { ok: r.ok, b: b }; }); })
+    .then(function(res){
+      $("plList").innerHTML = '<div class="cmp-sent">' + (res.ok
+        ? "Sent to " + esc(who) + ". Once they accept, it shows up under Compared in Charts."
+        : "Could not send: " + esc((res.b && res.b.detail) || "try again")) + "</div>";
+      cmpLoad();
+    }).catch(function(){
+      $("plList").innerHTML = '<div class="cmp-sent">Could not send - the server did not answer.</div>';
+    });
+}
+
+document.addEventListener("click", function(e){
+  var t;
+  if((t = e.target.closest("#chartCompare")) && lastChart){
+    openCmpPicker({ spec: lastChart.spec, q: lastChart.q, name: lastChart.name,
+                    title: lastChart.name || (lastChart.data && lastChart.data.title) });
+    return;
+  }
+  if((t = e.target.closest("[data-cmp-kept]"))){
+    var k = keptList().filter(function(x){ return x.id === t.dataset.cmpKept; })[0];
+    if(k) openCmpPicker({ spec: k.spec, q: k.q, name: k.name, title: chartName(k) });
+    return;
+  }
+  if((t = e.target.closest("[data-cmp-to]"))){ sendCompare(t.dataset.cmpTo); return; }
+  if((t = e.target.closest("[data-cmp-yes]")) || (t = e.target.closest("[data-cmp-no]"))){
+    var yes = !!t.dataset.cmpYes, cid = t.dataset.cmpYes || t.dataset.cmpNo;
+    t.disabled = true;
+    fetch("/api/compare/" + encodeURIComponent(cid) + (yes ? "/accept" : "/decline"), { method: "POST" })
+      .then(function(){ return cmpLoad(); });
+    return;
+  }
+  if((t = e.target.closest("[data-cmp-del]"))){
+    var c = CMP.items.filter(function(x){ return x.id === t.dataset.cmpDel; })[0];
+    var ask = c && c.status === "accepted"
+      ? "Remove this comparison? It ends for both of you." : null;
+    if(ask && !window.confirm(ask)) return;
+    fetch("/api/compare/" + encodeURIComponent(t.dataset.cmpDel), { method: "DELETE" })
+      .then(function(){ delete CMP.runs[t.dataset.cmpDel]; return cmpLoad(); });
+  }
+});
+document.addEventListener("keydown", function(e){
+  if(e.key !== "Enter" && e.key !== " ") return;
+  var t = e.target.closest && e.target.closest("[data-cmp-to]");
+  if(t && e.target === t){ e.preventDefault(); sendCompare(t.dataset.cmpTo); }
+});
+
+/* ---- Compared, in Charts ---- */
+function renderCompares(){
+  var list = CMP.items;
+  $("cmpSec").hidden = !list.length;
+  var live = list.filter(function(c){ return c.status === "accepted"; }).length;
+  $("cmpAux").textContent = live ? live + " live" : "";
+  $("cmpList").innerHTML = list.map(function(c){
+    var other = esc(them(c).name), t = esc(cmpTitle(c));
+    if(c.status === "accepted"){
+      return '<div class="chartcard cmp" data-cmp="' + esc(c.id) + '">' +
+        '<button class="chart-x" type="button" data-cmp-del="' + esc(c.id) + '" aria-label="Remove comparison">&#215;</button>' +
+        '<div class="chart-t">' + t + '<button class="t-ren" type="button" data-ren-scope="cmp" data-ren-id="' +
+        esc(c.id) + '" aria-label="Rename this comparison">' + RENAME_PENCIL + "</button></div>" +
+        '<div class="chart-sub">You vs ' + other + '<span data-cmp-span></span></div>' +
+        '<div data-cmp-body><div class="chart-note">Working it out...</div></div></div>';
+    }
+    var line, acts;
+    if(c.status === "pending" && c.mine){
+      line = "Waiting for " + other;
+      acts = '<button class="btn btn-ghost" type="button" data-cmp-del="' + esc(c.id) + '">Cancel</button>';
+    } else if(c.status === "pending"){
+      line = other + " wants to compare";
+      acts = '<button class="btn btn-primary" type="button" data-cmp-yes="' + esc(c.id) + '">Accept</button>' +
+        '<button class="btn btn-ghost" type="button" data-cmp-no="' + esc(c.id) + '">Decline</button>';
+    } else {
+      line = other + " declined";
+      acts = '<button class="btn btn-ghost" type="button" data-cmp-del="' + esc(c.id) + '">Remove</button>';
+    }
+    return '<div class="chartcard cmp-pend"><span class="who">' + line + '<span class="t">' + t + "</span></span>" +
+      '<span class="acts">' + acts + "</span></div>";
+  }).join("");
+  list.forEach(function(c){ if(c.status === "accepted") fillCompare(c.id); });
+}
+
+function fillCompare(cid){
+  var hit = CMP.runs[cid];
+  var p = hit && Date.now() - hit.at < CMP_TTL ? hit.p : null;
+  if(!p){
+    p = fetch("/api/compare/" + encodeURIComponent(cid) + "/run")
+      .then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
+    CMP.runs[cid] = { at: Date.now(), p: p };
+  }
+  p.then(function(res){
+    var card = document.querySelector('[data-cmp="' + cid + '"]');
+    if(!card) return;
+    var body = card.querySelector("[data-cmp-body]");
+    if(!res || !res.understood){
+      if(!res) delete CMP.runs[cid];
+      body.innerHTML = '<div class="chart-note">' + (res ? "This comparison no longer fits. Ask it again." :
+        "Could not work this out - the server did not answer.") + "</div>";
+      return;
+    }
+    var span = res.sides[0].data && res.sides[0].data.span;
+    if(span) card.querySelector("[data-cmp-span]").textContent = " \u00B7 " + span;
+    body.innerHTML = compareBody(res, cid);
+    if(res.kind === "lines" && res.merged){
+      /* The server names both sides; on your screen, the first one is you. */
+      var m = JSON.parse(JSON.stringify(res.merged));
+      if(m.series && m.series[0]) m.series[0].name = "You";
+      if(m.plan && m.plan.series && m.plan.series[0]) m.plan.series[0].name = "You";
+      drawChart(body.querySelector("canvas"), m);
+    } else if(res.kind === "stacked"){
+      res.sides.forEach(function(sd, i){
+        if(sd.data) drawChart(body.querySelector('[data-chart="cmp' + cid + "_" + i + '"]'), sd.data);
+      });
+    }
+    markPlaying();
+  });
+}
+
+function sideName(res, i){ return i === 0 ? "You" : res.sides[i].person.name; }
+
+function compareBody(res, cid){
+  function col(i, inner){
+    var sd = res.sides[i];
+    return '<div class="cmp-col"><div class="cmp-who">' + esc(sideName(res, i)) + "</div>" +
+      (sd.data ? inner(sd.data) : '<div class="cmp-why">' + esc(sd.person.name + " has " + (sd.why || "nothing to show")) + "</div>") +
+      "</div>";
+  }
+  if(res.kind === "numbers"){
+    return '<div class="cmp-two">' + [0, 1].map(function(i){
+      return col(i, function(d){
+        var st = d.stat || {};
+        return statCard(st, true) + (st.facts || []).slice(0, 2).map(function(f){
+          return '<div class="cmp-f">' + esc(f[0]) + " <b>" + esc(f[1]) + "</b></div>";
+        }).join("");
+      });
+    }).join("") + "</div>";
+  }
+  if(res.kind === "recent"){
+    return '<div class="cmp-two">' + [0, 1].map(function(i){
+      return col(i, function(d){
+        var st = Object.assign({}, d.stat || {});
+        st.rows = (st.rows || []).slice(0, 5);
+        return recentList(st, false);
+      });
+    }).join("") + "</div>";
+  }
+  if(res.kind === "lines"){
+    return res.merged ? '<canvas class="chart-canvas"></canvas>' :
+      '<div class="cmp-two">' + [0, 1].map(function(i){ return col(i, function(){ return ""; }); }).join("") + "</div>";
+  }
+  if(res.kind === "stacked"){
+    return '<div class="cmp-stack">' + res.sides.map(function(sd, i){
+      return '<div class="cmp-who">' + esc(sideName(res, i)) + "</div>" +
+        (sd.data ? chartCard(sd.data, { key: "cmp" + cid + "_" + i }) :
+          '<div class="cmp-why">' + esc(sd.person.name + " has " + (sd.why || "nothing to show")) + "</div>");
+    }).join("") + "</div>";
+  }
+  /* A ranking: two lists, and what is on both marked in each. */
+  function keyOf(d, j){ return ((d.labels[j] || "") + "\u001f" + ((d.subs || [])[j] || "")).toLowerCase(); }
+  var sets = res.sides.map(function(sd){
+    var out = {};
+    if(sd.data) (sd.data.labels || []).forEach(function(_, j){ out[keyOf(sd.data, j)] = true; });
+    return out;
+  });
+  var common = Object.keys(sets[0]).filter(function(k){ return sets[1][k]; }).length;
+  var unit = (res.sides[0].data && res.sides[0].data.y_label) || "";
+  var html = '<div class="cmp-two">' + [0, 1].map(function(i){
+    return col(i, function(d){
+      return (d.labels || []).map(function(lb, j){
+        var shared = sets[1 - i][keyOf(d, j)];
+        var uri = (d.uris || [])[j], play = uri && PLAYABLE.test(uri) ? playAttr(uri) + ' tabindex="0" role="button"' : "";
+        var v = d.values[j];
+        v = v == null ? "" : (Math.round(v * 10) / 10);
+        return '<div class="cmp-r' + (shared ? " shared" : "") + '"' + play + '><span class="n">' + (j + 1) +
+          '</span><span class="mx"><span class="tn">' + esc(lb) + "</span>" +
+          ((d.subs || [])[j] ? '<span class="ta2">' + esc(d.subs[j]) + "</span>" : "") +
+          '</span><span class="v">' + esc(v) + "</span></div>";
+      }).join("");
+    });
+  }).join("") + "</div>";
+  return html + '<div class="cmp-common">' + esc(unit) + " \u00B7 " +
+    (common ? "<b>" + common + " in common</b>" : "nothing in common") + "</div>";
+}
+
 function closePlaylist(){
   $("plOpen").hidden = true;
+  /* Whatever the sheet held is gone, so nothing refreshes it in the background. */
+  delete $("plOpen").dataset.panel;
   document.body.style.overflow = "";
 }
 
@@ -7482,6 +7810,12 @@ function chartName(rec){ return rec && (rec.name || (rec.data && rec.data.title)
 function renameChart(scope, id, name){
   name = (name || "").replace(/\s+/g, " ").trim().slice(0, 60) || null;
   function set(rec){ if(rec){ if(name) rec.name = name; else delete rec.name; } }
+  if(scope === "cmp"){
+    fetch("/api/compare/" + encodeURIComponent(id) + "/name", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name })
+    }).then(function(){ return cmpLoad(); });
+    return;
+  }
   if(scope === "live"){
     if(lastChart){ lastChart.name = name || undefined; }
     return;
@@ -7520,6 +7854,12 @@ document.addEventListener("click", function(e){
     if(done) return;
     done = true;
     if(save && input.value.trim() !== was) renameChart(scope, id, input.value);
+    if(scope === "cmp"){
+      /* The server keeps it; the list is drawn again when it answers. */
+      t.innerHTML = esc(input.value.trim() || was);
+      t.appendChild(b);
+      return;
+    }
     if(scope === "live"){
       /* Not kept yet, so nothing else shows it: just the title goes back. */
       var lc = lastChart || {};

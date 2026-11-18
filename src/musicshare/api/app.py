@@ -29,6 +29,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from musicshare import auth, taste, users
 from musicshare import card as card_mod
+from musicshare import compare as compare_mod
 from musicshare import genres as genrelib
 from musicshare import history as history_mod
 from musicshare import home as home_mod
@@ -42,7 +43,7 @@ from musicshare import upload as upload_mod
 from musicshare.config import settings
 from musicshare.spec import ChartSpec, plot, run_chart, validate, validate_chart
 from musicshare.spec.apply import familiar_enough
-from musicshare.spec.chartrun import ChartData
+from musicshare.spec.chartrun import ChartData, plain_title
 from musicshare.spec.filter import Familiarity
 from musicshare.spec.generate import (
     CHART_MODEL,
@@ -709,6 +710,136 @@ def _chart_payload(d: ChartData) -> dict[str, object]:
     # How to draw it, decided where it is tested - see spec/plot.py.
     out["plan"] = plot.plan(out)
     return out
+
+
+# ------------------------------------------------------------- comparisons
+#
+# Sending a chart to someone to compare: see compare.py for what is stored and
+# why nothing of theirs runs before they accept.
+
+
+def _me() -> str:
+    try:
+        return users.current()
+    except users.NoUser as e:
+        raise HTTPException(401, "sign in first") from e
+
+
+class CompareAsk(BaseModel):
+    to: str = Field(min_length=1, max_length=64)
+    spec: ChartSpec
+    q: str = Field(default="", max_length=400)
+    name: str | None = Field(default=None, max_length=compare_mod.MAX_NAME)
+
+
+class CompareName(BaseModel):
+    name: str | None = Field(default=None, max_length=compare_mod.MAX_NAME)
+
+
+@app.get("/api/compare")
+def compare_list() -> dict[str, object]:
+    """Every comparison this person is in, and how many wait on their answer."""
+    me = _me()
+    items = [compare_mod.view(r, me) for r in compare_mod.involving(me)]
+    waiting = sum(1 for v in items if not v["mine"] and v["status"] == "pending")
+    return {"me": me, "items": items, "waiting": waiting}
+
+
+@app.post("/api/compare")
+def compare_ask(body: CompareAsk) -> dict[str, object]:
+    me = _me()
+    problems = validate_chart(body.spec)
+    if problems or not body.spec.understood:
+        raise HTTPException(422, "that chart cannot be compared")
+    try:
+        rec = compare_mod.ask(
+            me, body.to, body.spec, body.q, body.name, title=plain_title(body.spec)
+        )
+    except compare_mod.CompareError as e:
+        raise HTTPException(422, str(e)) from e
+    return compare_mod.view(rec, me)
+
+
+def _decide(cid: str, accept: bool) -> dict[str, object]:
+    me = _me()
+    try:
+        return compare_mod.view(compare_mod.decide(cid, me, accept), me)
+    except compare_mod.CompareError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.post("/api/compare/{cid}/accept")
+def compare_accept(cid: str) -> dict[str, object]:
+    return _decide(cid, True)
+
+
+@app.post("/api/compare/{cid}/decline")
+def compare_decline(cid: str) -> dict[str, object]:
+    return _decide(cid, False)
+
+
+@app.post("/api/compare/{cid}/name")
+def compare_name(cid: str, body: CompareName) -> dict[str, object]:
+    me = _me()
+    try:
+        return compare_mod.view(compare_mod.rename(cid, me, body.name), me)
+    except compare_mod.CompareError as e:
+        raise HTTPException(404, str(e)) from e
+
+
+@app.delete("/api/compare/{cid}")
+def compare_remove(cid: str) -> dict[str, object]:
+    if not compare_mod.remove(cid, _me()):
+        raise HTTPException(404, "no such comparison")
+    return {"removed": cid}
+
+
+@app.get("/api/compare/{cid}/run", dependencies=[Depends(heavy_slot)])
+def compare_run(cid: str) -> dict[str, object]:
+    """Both answers to an accepted comparison, each from its own history.
+
+    The one asking is always first, so "you" is on the left whoever sent it.
+    Only the two people in it can run it, and only once it was accepted.
+    """
+    me = _me()
+    rec = compare_mod.get(cid)
+    if rec is None or me not in (rec["from"], rec["to"]):
+        raise HTTPException(404, "no such comparison")
+    if rec["status"] != "accepted":
+        raise HTTPException(409, f"this comparison is {rec['status']}")
+    try:
+        spec = ChartSpec.model_validate(rec["spec"])
+    except ValidationError:
+        return {"understood": False}
+    them = rec["to"] if me == rec["from"] else rec["from"]
+    sides: list[dict[str, object]] = []
+    payloads: list[dict[str, object] | None] = []
+    for uid in (me, them):
+        side: dict[str, object] = {"person": compare_mod.person(uid), "data": None, "why": None}
+        if not history_mod.has_any(uid):
+            side["why"] = "no listening history yet"
+        else:
+            with users.as_user(uid):
+                live_mod.pull_if_stale()
+                side["data"] = _chart_payload(run_chart(spec))
+        sides.append(side)
+        payloads.append(side["data"])  # type: ignore[arg-type]
+    kind = compare_mod.kind_of(spec, payloads)
+    merged = None
+    if kind == "lines" and all(payloads):
+        merged = compare_mod.merge_lines(
+            spec,
+            payloads,
+            [s["person"]["name"] for s in sides],  # type: ignore[index]
+        )
+    return {
+        "understood": True,
+        "kind": kind,
+        "sides": sides,
+        "merged": merged,
+        "title": rec.get("title") or plain_title(spec),
+        "name": rec.get("name"),
+    }
 
 
 @app.post("/api/chart/run", dependencies=[Depends(needs_history), Depends(heavy_slot)])
