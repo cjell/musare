@@ -322,3 +322,93 @@ def test_charts_read_names_too(named):
         dimension="date", grain="month", metric="plays", tracks=["lover you shouldve come over"]
     )
     assert sum(d.values) == 35
+
+
+# -------------------------------------------------------------- recent plays
+
+# Oldest first: (track, artist, seconds played). Played a minute apart.
+SEQUENCE = [
+    ("Ivy", "Frank Ocean", 200),
+    ("Fears", "MTNS", 200),
+    ("Fears", "MTNS", 200),
+    ("Nights", "Frank Ocean", 200),
+    ("Fears", "MTNS", 200),
+    ("Skipped", "Someone", 5),
+    ("Fears", "MTNS", 200),
+    ("Height", "MexikoDro", 200),
+]
+
+
+@pytest.fixture
+def sequence(monkeypatch):
+    con = duckdb.connect()
+    con.execute("install icu; load icu;")
+    con.execute(
+        "create table plays (played_at timestamp, track_uri varchar, track_name varchar, "
+        "artist_name varchar, album_name varchar, ms_played bigint, platform varchar, "
+        "skipped boolean)"
+    )
+    start = datetime(2024, 3, 1, 12)
+    con.executemany(
+        "insert into plays values (?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            (
+                start + timedelta(minutes=i),
+                f"spotify:track:{track.lower():a<22}",
+                track,
+                artist,
+                "Album",
+                secs * 1000,
+                "ios",
+                False,
+            )
+            for i, (track, artist, secs) in enumerate(SEQUENCE)
+        ],
+    )
+    monkeypatch.setattr(chartrun, "_connect", lambda spec=None: con)
+    return con
+
+
+def rows(d):
+    return [(r["name"], r["times"]) for r in d.stat["rows"]]
+
+
+def test_recent_plays_newest_first_with_runs_folded(sequence):
+    d = ask(answer="recent")
+    assert d.chart == "recent"
+    # The skip between the third and fourth Fears is not a listen, so those two
+    # are one run; the first pair is a run of its own.
+    assert rows(d) == [("Height", 1), ("Fears", 2), ("Nights", 1), ("Fears", 2), ("Ivy", 1)]
+    assert d.stat["rows"][0]["at"] == "2024-03-01T12:07:00Z"
+    assert d.stat["rows"][0]["uri"].startswith("spotify:track:")
+
+
+def test_recent_plays_stop_at_the_number_asked_for(sequence):
+    d = ask(answer="recent", limit=2)
+    assert rows(d) == [("Height", 1), ("Fears", 2)]
+    assert d.title == "Last 2 songs"
+
+
+def test_runs_are_runs_in_the_listening_not_in_the_filter(sequence):
+    """Filtered to Fears, the plays either side of Nights are still two runs."""
+    d = ask(answer="recent", tracks=["fears"])
+    assert rows(d) == [("Fears", 2), ("Fears", 2)]
+    assert d.title == "Recent plays of Fears by MTNS"
+
+
+def test_recent_plays_by_one_artist(sequence):
+    d = ask(answer="recent", artists=["frank ocean"])
+    assert rows(d) == [("Nights", 1), ("Ivy", 1)]
+    assert d.title == "Recent Frank Ocean songs", "ten were asked for and two exist"
+
+
+def test_recent_plays_of_nobody(sequence):
+    d = ask(answer="recent", artists=["nobody at all"])
+    assert d.stat["rows"] == [] and not d.empty
+    assert d.stat["sentence"] == 'No artist called "nobody at all" in your listening.'
+
+
+def test_the_plan_hands_the_list_over(sequence):
+    d = ask(answer="recent")
+    p = plan({"chart": d.chart, "stat": d.stat, "labels": [], "values": []})
+    assert p["kind"] == "recent" and p["stat"]["rows"]

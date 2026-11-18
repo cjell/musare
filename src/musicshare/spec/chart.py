@@ -72,11 +72,22 @@ class ChartSpec(BaseModel):
             "of the axes. Six words at most."
         ),
     )
-    answer: Literal["chart", "number", "first_played", "last_played", "top"] = Field(
+    answer: Literal["chart", "number", "first_played", "last_played", "top", "recent"] = Field(
         default="chart",
         description=(
             "What shape the answer takes. 'chart' for anything that is many numbers - "
             "a ranking, a trend, a breakdown - which is most requests. "
+            "'recent' for a list of the plays themselves, newest first, in the order "
+            "they happened: 'the last 10 songs I played', 'my recently played', 'what "
+            "have I been listening to', 'what did I play today', 'last 5 Drake songs I "
+            "played'. Set limit to how many, 10 unless a number is given; the filters "
+            "and range narrow which plays are listed. The list is newest first already, "
+            "so being recent is not a period: with no period named, range is 'all'. A "
+            "period that is named still applies - 'what I played this week' is a list "
+            "with range '7d', 'what did I play today' one with 'today'. This lists what "
+            "was played, not "
+            "what was played most - 'the songs I've played most lately' is a ranking, "
+            "so a chart. "
             "'top' when the question asks for one winner and only one: 'my favourite "
             "album', 'what's my most played Drake song', 'who is my top artist this "
             "year', 'what time of day do I listen most', 'which song do I skip the "

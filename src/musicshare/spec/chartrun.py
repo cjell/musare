@@ -589,6 +589,8 @@ def _run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
 
     if spec.answer == "top":
         return _top(spec)
+    if spec.answer == "recent":
+        return _recent(spec)
     if spec.answer != "chart":
         return _answer(spec)
 
@@ -1576,3 +1578,109 @@ def resolve(spec: ChartSpec) -> tuple[ChartSpec, list[str]]:
     if spec.albums:
         update["albums"] = read("album", spec.albums, artists)
     return spec.model_copy(update=update), fixes
+
+
+# ------------------------------------------------------------- recent plays
+#
+# "The last 10 songs I played" is not a total of anything: it is the plays
+# themselves, newest first. Same filters and window as any chart, the same
+# half-minute line between a listen and a mis-tap, and a song played several
+# times running is one row with its count, so a loop does not fill the list.
+
+MAX_RECENT = 40
+
+
+def _recent(spec: ChartSpec) -> ChartData:
+    """The latest plays, newest first, repeats in a row folded into one."""
+    con = _connect(spec)
+    frm = _from(spec)
+    where, params = _where(spec, True)
+    want = max(1, min(int(spec.limit), MAX_RECENT))
+    # A run is one song played several times in a row in the listening itself,
+    # so runs are found over every play first and the filters applied after:
+    # filtered first, a list of one song's plays would be one endless run. The
+    # count is each run's in full, however long the loop.
+    runs = f"""
+        with seq as (
+          select *,
+                 coalesce(track_uri, track_name || chr(31) || coalesce(artist_name, '')) as k
+          from plays
+          where ms_played >= {MIN_MS} and track_name is not null
+        ), marked as (
+          select *, case when k = lag(k) over (order by played_at desc) then 0 else 1 end as fresh
+          from seq
+        )
+        select *, sum(fresh) over (order by played_at desc rows unbounded preceding) as run
+        from marked
+    """
+    rows = con.execute(
+        f"""
+        with runs as ({runs})
+        select arg_max(track_name, played_at), arg_max(artist_name, played_at),
+               arg_max(coalesce(track_uri, ''), played_at),
+               strftime(max(played_at), '%Y-%m-%dT%H:%M:%SZ'), count(*)
+        from {frm.replace("plays p", "runs p", 1)}
+        where {where}
+        group by run
+        order by run
+        limit {want}
+        """,
+        params,
+    ).fetchall()
+    out = [
+        {
+            "name": name,
+            "artist": artist or "",
+            "uri": uri if uri.startswith("spotify:track:") else "",
+            "at": at,
+            "times": int(times),
+        }
+        for name, artist, uri, at, times in rows
+    ]
+
+    in_period, period_label = _period(spec)
+    who, missing = "", []
+    if spec.artists or spec.albums or spec.tracks or spec.genres:
+        who, missing, _ = _subject(spec, con)
+    things = "songs"
+    if len(spec.albums) == 1:
+        things = f"songs off {_album_title(spec, spec.albums[0])}"
+    elif spec.artists and who and not spec.tracks:
+        things = f"{who} songs"
+    # "Last 10 songs" when there are ten. A list of one song's plays, or one
+    # cut short by the window, is recent rather than a count it does not reach.
+    title = f"Last {len(out)} {things}" if len(out) == want > 1 else f"Recent {things}"
+    if spec.tracks and who:
+        title = f"Recent plays of {who}"
+    if out:
+        sentence = ""
+    elif missing:
+        sentence = f"No {' or '.join(missing)} in your listening."
+    elif who:
+        sentence = f"You haven't played {who}{in_period}."
+    else:
+        sentence = f"Nothing played{in_period}."
+    stat: dict[str, Any] = {
+        "answer": "recent",
+        "metric": "plays",
+        "period": period_label if spec.range != "all" or spec.year else "Recent plays",
+        "subject": who,
+        "found": bool(out),
+        "rows": out,
+        "sentence": sentence,
+        "value": len(out),
+        "big": "",
+        "unit": "",
+        "facts": [],
+        "uri": "",
+    }
+    return ChartData(
+        labels=[],
+        values=[],
+        x_label="",
+        y_label="plays",
+        title=spec.title or title,
+        chart="recent",
+        total_rows=len(rows),
+        stat=stat,
+    )

@@ -1,0 +1,50 @@
+# Held-out set for a list of recent plays.
+#
+# Written before the 'recent' answer existed and before its description. Run
+# ONCE, after the description is done.
+#
+# The trap is the word "most". "The last songs I played" is a list in the order
+# they were played; "the songs I've played most lately" is a ranking, and stays
+# a chart. A question about how many, or which one won, keeps its own answer.
+
+# ------------------------------------------------------------------ lists
+- input: show me the last 15 songs I listened to
+  expect: {answer: recent, limit: 15}
+  tags: [recent, count]
+
+- input: what have I been listening to just now
+  expect: {answer: recent}
+  tags: [recent, idiom]
+
+- input: my recently played
+  expect: {answer: recent}
+  tags: [recent, idiom]
+
+- input: last 5 Kendrick songs I played
+  expect: {answer: recent, limit: 5, artists: [Kendrick]}
+  tags: [recent, artist-filter]
+
+- input: what songs did I play today
+  expect: {answer: recent, range: today}
+  tags: [recent, today]
+
+- input: the most recent things I put on from Blonde
+  expect: {answer: recent, albums: [Blonde]}
+  tags: [recent, album-filter, idiom]
+
+# -------------------------------------------------------------- negatives
+- input: songs I've played the most lately
+  expect: {answer: chart, dimension: track, range: {in: [7d, 30d]}}
+  tags: [negative, ranking]
+
+- input: how many songs did I play today
+  expect: {answer: number, range: today}
+  tags: [negative, number]
+
+- input: what was the last time I played Ivy
+  expect: {answer: last_played, tracks: [Ivy]}
+  tags: [negative, when]
+
+- input: my top song this week
+  expect: {answer: top, dimension: track, range: 7d}
+  tags: [negative, top]

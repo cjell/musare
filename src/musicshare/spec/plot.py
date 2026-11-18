@@ -318,8 +318,8 @@ def plan(p: dict[str, Any], style: ChartStyle | dict[str, Any] | None = None) ->
     """The drawing, exactly, for one chart's numbers in one style."""
     st = style if isinstance(style, ChartStyle) else ChartStyle(**(style or {}))
     # One number is not drawn at all: the page lays out the card from the answer.
-    if p.get("chart") == "number" and isinstance(p.get("stat"), dict):
-        return {"kind": "number", "stat": p["stat"]}
+    if p.get("chart") in ("number", "recent") and isinstance(p.get("stat"), dict):
+        return {"kind": p["chart"], "stat": p["stat"]}
     if p.get("table"):
         return {"kind": "table"}
 

@@ -419,3 +419,24 @@
 - input: top 3 drake albums
   expect: {answer: chart, dimension: album, limit: 3, artists: [drake]}
   tags: [answer, negative, plural]
+
+# A list of the plays themselves. Held-out set: charts_recent_heldout.yaml.
+- input: the last 10 songs I've played
+  expect: {answer: recent, limit: 10}
+  tags: [answer, recent]
+
+- input: last 20 songs
+  expect: {answer: recent, limit: 20}
+  tags: [answer, recent]
+
+- input: what did I listen to most recently
+  expect: {answer: recent}
+  tags: [answer, recent, idiom]
+
+- input: the last few Frank Ocean songs I played
+  expect: {answer: recent, artists: [Frank Ocean]}
+  tags: [answer, recent, artist-filter]
+
+- input: my most played songs recently
+  expect: {answer: chart, dimension: track}
+  tags: [answer, negative, ranking]

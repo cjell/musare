@@ -1480,6 +1480,25 @@ details[open] summary .chev{transform:rotate(180deg)}
 .pl.chartpin.small .stat-big.date b,.pl.chartpin.small .stat-big.name b{font-size:19px}
 .pl.chartpin.small .stat-big span{font-size:9px}
 .pl.chartpin.small .stat-s{font-size:11.5px;margin-top:6px}
+
+/* Recent plays: the plays themselves, newest first, one row per run of a song.
+   Text rows like an album's track list - the history keeps no artwork. */
+.chart-recent{margin-top:10px}
+.rp-row{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--line)}
+.rp-row:first-child{border-top:0}
+.rp-row .mx{min-width:0;flex:1 1 auto}
+.rp-row .tn{display:block;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rp-row .ta2{display:block;font-size:10.5px;color:var(--ink-3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rp-r{flex:none;text-align:right;font-family:"IBM Plex Mono",monospace;font-size:9.5px;color:var(--ink-3)}
+.rp-x{display:block;color:var(--accent);margin-top:2px}
+.rp-row[data-play]{cursor:pointer}
+.rp-row[data-play]:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+.rp-row.is-playing .tn{color:var(--accent)}
+.pl.chartpin.small .chart-recent{margin-top:6px}
+.pl.chartpin.small .rp-row{padding:4px 0;gap:6px}
+.pl.chartpin.small .rp-row .tn{font-size:11px}
+.pl.chartpin.small .rp-row .ta2{font-size:9.5px}
+.pl.chartpin.small .rp-r{font-size:8.5px}
 .chartcard.tap{cursor:pointer}
 .chartcard.tap:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .pin-size button[aria-pressed="true"]{color:var(--accent);cursor:default}
@@ -5260,7 +5279,7 @@ $("chartResult").addEventListener("click", function(e){
   var rec = chartRecord(lastChart);
   /* A count is only worth keeping if it keeps counting: a pinned "75 plays"
      should be 76 after the next one. A chart stays a snapshot until asked. */
-  if(lastChart.data && lastChart.data.chart === "number" && lastChart.spec) rec.live = true;
+  if(lastChart.data && /^(number|recent)$/.test(lastChart.data.chart) && lastChart.spec) rec.live = true;
   var added = addKept(rec);
   note.textContent = added
     ? "Kept. Pin it below to put it on your profile."
@@ -6775,7 +6794,7 @@ var STYLE_DATA = {};
 function styleBar(d, s){
   var styles = d.plan && d.plan.styles;
   /* A table has no drawing to style, and an empty chart has nothing in it. */
-  if((d.table && d.table.length) || (d.plan && !styles && /^(table|empty|number)$/.test(d.plan.kind))) return "";
+  if((d.table && d.table.length) || (d.plan && !styles && /^(table|empty|number|recent)$/.test(d.plan.kind))) return "";
   /* A plan with no options otherwise is one saved before styling existed - the
      first charts anyone pinned. The button shows, and opening it asks for a
      fresh plan, the same way a chart with no plan at all does. */
@@ -6953,6 +6972,50 @@ function statCard(st, compact){
     "</div>";
 }
 
+/* When a play happened, the way a person would say it: minutes ago, a time
+   today, yesterday, a weekday this week, else the date. Worked out in the
+   viewer's own timezone from the moment the server gives. */
+var DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+var MON_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function clock(d){
+  var h = d.getHours(), m = d.getMinutes();
+  return ((h % 12) || 12) + ":" + (m < 10 ? "0" : "") + m + (h < 12 ? "am" : "pm");
+}
+function playedWhen(iso){
+  var d = new Date(iso);
+  if(isNaN(d)) return "";
+  var now = new Date(), secs = (now - d) / 1000;
+  if(secs < 60) return "just now";
+  if(secs < 3600) return Math.floor(secs / 60) + " min ago";
+  var day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var then = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  var back = Math.round((day - then) / 86400000);
+  if(back === 0) return clock(d);
+  if(back === 1) return "Yesterday " + clock(d);
+  if(back < 7) return DAY_SHORT[d.getDay()] + " " + clock(d);
+  return MON_SHORT[d.getMonth()] + " " + d.getDate() +
+    (d.getFullYear() !== now.getFullYear() ? ", " + d.getFullYear() : "");
+}
+
+/* The last plays as a list. Each row plays its song when tapped, except on a
+   small profile pin, which shows the newest few and opens the whole list. */
+var RECENT_SMALL = 4;
+function recentList(st, compact){
+  var rows = st.rows || [];
+  if(!rows.length){
+    return '<div class="chart-recent"><div class="stat-s">' + esc(st.sentence || "Nothing played yet.") + "</div></div>";
+  }
+  if(compact) rows = rows.slice(0, RECENT_SMALL);
+  return '<div class="chart-recent">' + rows.map(function(r){
+    var play = !compact && r.uri && PLAYABLE.test(r.uri)
+      ? playAttr(r.uri) + ' tabindex="0" role="button"' : "";
+    return '<div class="rp-row"' + play + '><span class="mx"><span class="tn">' + esc(r.name) +
+      '</span><span class="ta2">' + esc(r.artist) + '</span></span><span class="rp-r">' +
+      esc(playedWhen(r.at)) + (r.times > 1 ? '<span class="rp-x">\u00D7' + r.times + "</span>" : "") +
+      "</span></div>";
+  }).join("") + "</div>";
+}
+
 function plotChart(cv, plan){
   var old = window.Chart && Chart.getChart(cv);
   if(old) old.destroy();
@@ -6961,16 +7024,18 @@ function plotChart(cv, plan){
      before this one decides anything. */
   var sib = cv.nextElementSibling;
   while(sib && (sib.classList.contains("chart-heat") || sib.classList.contains("chart-empty") ||
-                 sib.classList.contains("chart-stat"))){
+                 sib.classList.contains("chart-stat") || sib.classList.contains("chart-recent"))){
     var after = sib.nextElementSibling;
     sib.remove();
     sib = after;
   }
   cv.hidden = false;
-  /* One number is laid out, not drawn - see statCard. */
-  if(plan.kind === "number"){
+  /* One number, or a list of plays, is laid out, not drawn - see statCard
+     and recentList. */
+  if(plan.kind === "number" || plan.kind === "recent"){
     cv.hidden = true;
-    cv.insertAdjacentHTML("afterend", statCard(plan.stat || {}, !!cv.closest(".chartpin.small")));
+    var lay = plan.kind === "recent" ? recentList : statCard;
+    cv.insertAdjacentHTML("afterend", lay(plan.stat || {}, !!cv.closest(".chartpin.small")));
     /* The profile's colour, as a drawn chart takes it: the full-size sheet sits
        outside .phone, where --accent is still the default. */
     var tone = getComputedStyle(document.querySelector(".phone")).getPropertyValue("--accent").trim();
@@ -7378,7 +7443,7 @@ document.addEventListener("click", function(e){
 /* What a chart counts, under its title. A number has no axes, so it says the
    window it covers instead. */
 function chartSub(d){
-  if(d.chart === "number") return (d.stat && d.stat.period) || "";
+  if(d.chart === "number" || d.chart === "recent") return (d.stat && d.stat.period) || "";
   return (d.y_label || "") + " by " + (d.x_label || "") +
     (d.series && d.series.length ? " \u00B7 " + d.series.length + " compared" : "");
 }

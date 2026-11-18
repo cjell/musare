@@ -85,9 +85,12 @@
   tags: [sort, inverted]
 
 # ------------------------------------------------------------------ refusals
+# Changed 2026-11-18, after this set had been read, so this case no longer counts
+# as held-out. It expected a refusal when every answer was a chart; once a single
+# winner could be the answer, "your top genre" is what the question asks for.
 - input: what genre am I
-  expect: {understood: false}
-  tags: [refusal, missing-data]
+  expect: {understood: true, answer: top, dimension: genre}
+  tags: [top, genre, revised]
 
 - input: how loud is the music I listen to
   expect: {understood: false}
