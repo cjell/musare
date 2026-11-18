@@ -1436,6 +1436,15 @@ details[open] summary .chev{transform:rotate(180deg)}
    reads best: two cards, two lists, or one chart with a line each. */
 .bell i{display:none}
 .bell.has-new i{display:block}
+/* How many requests wait on you, on the Compared tab itself. */
+.seg-n{
+  display:inline-block;min-width:16px;height:16px;padding:0 4px;margin-left:6px;border-radius:8px;
+  background:var(--accent);color:#120E1B;font-size:9.5px;line-height:16px;letter-spacing:0;
+  text-align:center;vertical-align:1px
+}
+.seg-n[hidden]{display:none}
+/* A request waiting on you leads the tab, outlined so it is not read past. */
+.cmp-pend.in{border-color:var(--accent-line);background:var(--accent-tint)}
 .cmp-two{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}
 .cmp-col{min-width:0}
 .cmp-who{
@@ -2140,9 +2149,13 @@ details[open] summary .chev{transform:rotate(180deg)}
       <div class="home-bar">
         <div class="wordmark">Charts</div>
       </div>
+      <div class="segs" id="chartSegs" role="tablist">
+        <button class="seg" type="button" role="tab" data-ct="mine" aria-pressed="true">My charts</button>
+        <button class="seg" type="button" role="tab" data-ct="cmp" aria-pressed="false">Compared<span class="seg-n" id="cmpCount" hidden></span></button>
+      </div>
     </div>
 
-    <div class="pad">
+    <div class="pad" id="chartsMine">
       <section class="sec anim">
         <div class="sec-label"><span>Ask</span></div>
         <div class="ask">
@@ -2168,17 +2181,27 @@ details[open] summary .chev{transform:rotate(180deg)}
         <div class="chart-keep" id="chartKept"></div>
       </section>
 
-      <section class="sec anim" id="cmpSec" hidden>
-        <div class="sec-label"><span>Compared</span><span class="aux" id="cmpAux"></span></div>
-        <div class="chart-keep" id="cmpList"></div>
-      </section>
-
       <div class="empty">
         <svg width="34" height="34" viewBox="0 0 24 24" fill="currentColor">
           <rect x="3" y="13" width="6" height="8"/><rect x="9" y="6" width="6" height="15"/><rect x="15" y="10" width="6" height="11"/>
         </svg>
         <div class="empty-t">Nothing charted yet</div>
         <div class="empty-s">Keep the ones worth keeping and they go on your profile.</div>
+      </div>
+    </div>
+
+    <div class="pad" id="chartsCmp" hidden>
+      <section class="sec anim" id="cmpSec" hidden>
+        <div class="sec-label"><span>Compared</span><span class="aux" id="cmpAux"></span></div>
+        <div class="chart-keep" id="cmpList"></div>
+      </section>
+
+      <div class="empty" id="cmpEmpty">
+        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <rect x="3" y="11" width="5" height="10"/><rect x="9.5" y="5" width="5" height="16"/><path d="M17 8h4M19 6v4"/>
+        </svg>
+        <div class="empty-t">Nothing compared yet</div>
+        <div class="empty-s">Tap Compare under any chart to send it to someone. Once they accept, both of you see it here.</div>
       </div>
     </div>
   </div>
@@ -5158,7 +5181,7 @@ function renderKept(){
   $("chartKeptSec").hidden = !l.length;
   $("keptAux").textContent = l.length ? l.length + " chart" + (l.length === 1 ? "" : "s") : "";
   /* The empty state only belongs here when there is genuinely nothing kept. */
-  var empty = document.querySelector("#screenCharts .empty");
+  var empty = document.querySelector("#chartsMine .empty");
   if(empty) empty.hidden = !!l.length;
 
   l.forEach(function(k, i){
@@ -6257,6 +6280,22 @@ function paintBell(){
   b.setAttribute("aria-label", CMP.waiting ? "Notifications, " + CMP.waiting + " new" : "Notifications");
 }
 
+/* Charts has two tabs: your own charts, and the ones compared with someone.
+   The one you were on is the one you come back to. */
+var CHART_TAB = "mine";
+function chartTab(which){
+  CHART_TAB = which === "cmp" ? "cmp" : "mine";
+  var btns = $("chartSegs").querySelectorAll(".seg");
+  for(var i = 0; i < btns.length; i++) btns[i].setAttribute("aria-pressed", String(btns[i].dataset.ct === CHART_TAB));
+  $("chartsMine").hidden = CHART_TAB !== "mine";
+  $("chartsCmp").hidden = CHART_TAB !== "cmp";
+  if(CHART_TAB === "cmp") cmpLoad();
+}
+$("chartSegs").addEventListener("click", function(e){
+  var b = e.target.closest("[data-ct]");
+  if(b) chartTab(b.dataset.ct);
+});
+
 function cmpTitle(c){ return c.name || c.title || "Comparison"; }
 function them(c){ return c.mine ? c.to : c.from; }
 
@@ -6337,9 +6376,17 @@ document.addEventListener("click", function(e){
   if((t = e.target.closest("[data-cmp-to]"))){ sendCompare(t.dataset.cmpTo); return; }
   if((t = e.target.closest("[data-cmp-yes]")) || (t = e.target.closest("[data-cmp-no]"))){
     var yes = !!t.dataset.cmpYes, cid = t.dataset.cmpYes || t.dataset.cmpNo;
+    var fromBell = !!t.closest("#plOpen");
     t.disabled = true;
     fetch("/api/compare/" + encodeURIComponent(cid) + (yes ? "/accept" : "/decline"), { method: "POST" })
-      .then(function(){ return cmpLoad(); });
+      .then(function(){ return cmpLoad(); })
+      .then(function(){
+        if(!(yes && fromBell)) return;
+        closePlaylist();
+        showScreen("charts");
+        chartTab("cmp");
+        window.scrollTo(0, 0);
+      });
     return;
   }
   if((t = e.target.closest("[data-cmp-del]"))){
@@ -6358,9 +6405,19 @@ document.addEventListener("keydown", function(e){
 });
 
 /* ---- Compared, in Charts ---- */
+function cmpRank(c){
+  if(c.status === "pending" && !c.mine) return 0;
+  if(c.status === "accepted") return 1;
+  return c.status === "pending" ? 2 : 3;
+}
 function renderCompares(){
-  var list = CMP.items;
+  var list = CMP.items.slice().sort(function(a, b){
+    return cmpRank(a) - cmpRank(b) || String(b.decided_at || b.at).localeCompare(String(a.decided_at || a.at));
+  });
   $("cmpSec").hidden = !list.length;
+  $("cmpEmpty").hidden = !!list.length;
+  $("cmpCount").hidden = !CMP.waiting;
+  $("cmpCount").textContent = CMP.waiting || "";
   var live = list.filter(function(c){ return c.status === "accepted"; }).length;
   $("cmpAux").textContent = live ? live + " live" : "";
   $("cmpList").innerHTML = list.map(function(c){
@@ -6385,7 +6442,9 @@ function renderCompares(){
       line = other + " declined";
       acts = '<button class="btn btn-ghost" type="button" data-cmp-del="' + esc(c.id) + '">Remove</button>';
     }
-    return '<div class="chartcard cmp-pend"><span class="who">' + line + '<span class="t">' + t + "</span></span>" +
+    var incoming = c.status === "pending" && !c.mine;
+    return '<div class="chartcard cmp-pend' + (incoming ? " in" : "") + '"><span class="who">' + line +
+      '<span class="t">' + t + "</span></span>" +
       '<span class="acts">' + acts + "</span></div>";
   }).join("");
   list.forEach(function(c){ if(c.status === "accepted") fillCompare(c.id); });
@@ -6409,7 +6468,8 @@ function fillCompare(cid){
         "Could not work this out - the server did not answer.") + "</div>";
       return;
     }
-    var span = res.sides[0].data && res.sides[0].data.span;
+    /* A stepped window (the last 7 or 30 days, today) names itself in `window`. */
+    var d0 = res.sides[0].data, span = d0 && (d0.span || d0.window);
     if(span) card.querySelector("[data-cmp-span]").textContent = " \u00B7 " + span;
     body.innerHTML = compareBody(res, cid);
     if(res.kind === "lines" && res.merged){
@@ -8101,6 +8161,7 @@ function chartsSlotGuard(kind, idx){
   if(kind !== "charts") return false;
   setEditing(false);
   showScreen("charts");
+  chartTab("mine");
   /* The slot that was tapped is the one the next pin fills. */
   PIN_TARGET = idx;
   var spare = keptList().some(function(k){ return pinnedIndex("charts", k.id) < 0; });
