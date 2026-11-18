@@ -440,3 +440,24 @@
 - input: my most played songs recently
   expect: {answer: chart, dimension: track}
   tags: [answer, negative, ranking]
+
+# Windows the range menu cannot say. Held-out set: charts_window_heldout.yaml.
+- input: my top songs from the last 2 years
+  expect: {last: 2, last_unit: year, dimension: track, range: all}
+  tags: [window, last]
+
+- input: top artists over the past 6 weeks
+  expect: {last: 6, last_unit: week, dimension: artist}
+  tags: [window, last]
+
+- input: my top albums from 2019 to 2021
+  expect: {from_year: 2019, to_year: 2021, dimension: album, year: null}
+  tags: [window, span]
+
+- input: what have I played the most since 2024
+  expect: {from_year: 2024, to_year: null}
+  tags: [window, span, since]
+
+- input: top songs from the last year
+  expect: {range: 12mo, last: null}
+  tags: [window, negative]

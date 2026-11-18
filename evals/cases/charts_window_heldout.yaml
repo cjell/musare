@@ -1,0 +1,60 @@
+# Held-out set for windows the old range menu could not say.
+#
+# Written before `last`, `last_unit`, `from_year` and `to_year` existed and
+# before their descriptions. Run ONCE, after the descriptions are done.
+#
+# The bug that prompted it: "my top songs from the last 2 years" had no option
+# to land on, and came back as all time under a title that still said two
+# years. A window the menu has kept its menu value - "last year" is still 12mo -
+# so the negatives check the new fields stay empty for those.
+
+# ------------------------------------------------------- last N of a unit
+- input: my top songs from the last 2 years
+  expect: {last: 2, last_unit: year, dimension: track}
+  tags: [last, year]
+
+- input: hours by month over the past 18 months
+  expect: {last: 18, last_unit: month, dimension: date, grain: month}
+  tags: [last, month]
+
+- input: top artists the last 3 weeks
+  expect: {last: 3, last_unit: week, dimension: artist}
+  tags: [last, week]
+
+- input: how many times have I played Fears in the last 5 days
+  expect: {answer: number, last: 5, last_unit: day, tracks: [Fears]}
+  tags: [last, day, number]
+
+- input: my favourite album of the last three years
+  expect: {answer: top, last: 3, last_unit: year, dimension: album}
+  tags: [last, year, top, words]
+
+# ------------------------------------------------------------- year spans
+- input: top artists from 2020 to 2022
+  expect: {from_year: 2020, to_year: 2022, year: null, dimension: artist}
+  tags: [span]
+
+- input: my most played songs since 2023
+  expect: {from_year: 2023, to_year: null, dimension: track}
+  tags: [span, since]
+
+- input: how much Drake did I listen to between 2019 and 2021
+  expect: {answer: number, from_year: 2019, to_year: 2021, artists: [Drake]}
+  tags: [span, number]
+
+# --------------------------------------------- still the menu (negatives)
+- input: top songs last year
+  expect: {range: 12mo, last: null, from_year: null}
+  tags: [negative, menu]
+
+- input: my top artists in 2021
+  expect: {year: 2021, from_year: null, last: null}
+  tags: [negative, single-year]
+
+- input: top songs this month
+  expect: {range: 30d, last: null}
+  tags: [negative, menu]
+
+- input: all time top artists
+  expect: {range: all, last: null, from_year: null}
+  tags: [negative, menu]

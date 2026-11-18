@@ -1348,6 +1348,18 @@ details[open] summary .chev{transform:rotate(180deg)}
   font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.1em;
   text-transform:uppercase;color:var(--ink-3);margin-top:5px;
 }
+/* Renaming a chart: a pencil beside the title, and the title as a text box
+   while it is being changed. Clearing it goes back to the plain title. */
+.t-ren{
+  background:none;border:0;padding:2px 0 2px 7px;cursor:pointer;color:var(--ink-3);
+  vertical-align:-1px;line-height:0
+}
+.t-ren:hover{color:var(--ink)}
+.t-ren:focus-visible{outline:2px solid var(--accent);outline-offset:1px;border-radius:3px}
+.t-in{
+  width:100%;font:inherit;color:var(--ink);background:transparent;border:0;
+  border-bottom:1px solid var(--accent);padding:0 0 2px;outline:none
+}
 /* Style: how a chart looks, chosen by the person. The options come from the
    chart's plan, so only the ones that fit this chart are ever offered. */
 .chart-stylebar{display:flex;justify-content:flex-end;margin-top:6px}
@@ -4958,6 +4970,7 @@ function renderHomeCharts(){
               '" aria-label="Remove from Home">&#215;</button>';
       if(res && res.understood && res.data && !res.empty){
         html += chartCard(res.data, { unpin: x, key: "home" + i,
+          name: p.name || p.title, rename: { scope: "home", id: p.id },
           /* A day that has ended is not live and cannot be frozen, so the
              live/frozen bar gives way to the date being read. */
           mode: back ? null : { live: isLive(p, "home"), since: p.frozenAt, toggle: true, scope: "home", id: p.id },
@@ -4973,7 +4986,7 @@ function renderHomeCharts(){
       var why = res === null ? "Needs the local server to update."
               : res.understood ? "Nothing to show yet."
               : "This chart no longer fits. Ask it again from Charts.";
-      html += '<div class="chartcard">' + x + '<div class="chart-t">' + esc(p.title || p.q) +
+      html += '<div class="chartcard">' + x + '<div class="chart-t">' + esc(p.name || p.title || p.q) +
               '</div><div class="chart-note">' + why + '</div><div class="chart-q">' +
               esc(p.q) + "</div></div>";
     });
@@ -5046,7 +5059,7 @@ function replaceChooser(id){
   return '<div class="chart-replace"><div class="chart-note">Your profile shows ' + PIN_SLOTS.charts +
     ' charts. Replace:</div><div class="chart-acts">' +
     pins.map(function(pc, i){
-      var name = pc ? ((pc.data && pc.data.title) || pc.q || "Chart " + (i + 1)) : "Empty slot";
+      var name = pc ? (chartName(pc) || "Chart " + (i + 1)) : "Empty slot";
       return '<button class="btn btn-ghost" type="button" data-replace="' + i + '" data-for="' +
         esc(id) + '">' + esc(name) + "</button>";
     }).join("") +
@@ -5063,6 +5076,8 @@ function renderKept(){
     var onHome = homeIds.indexOf(k.id) >= 0;
     return chartCard(k.data, {
       key: "kept" + i,
+      name: k.name,
+      rename: { scope: "kept", id: k.id },
       mode: { live: isLive(k, "kept"), since: k.frozenAt || k.at, toggle: true, scope: "kept", id: k.id },
       style: { scope: "kept", id: k.id, style: k.style },
       unpin: chartBadges([isPinned && "On profile", onHome && "On Home"]),
@@ -5115,6 +5130,7 @@ function showChartResult(d, q, spec, history, style){
   var n = lastChart.history.length;
   $("chartResult").innerHTML = chartCard(d, {
     key: "live",
+    rename: { scope: "live", id: "live" },
     unpin: '<button class="chart-x" type="button" id="chartDismiss" aria-label="Close this chart">&#215;</button>',
     style: { scope: "live", id: "live", style: lastChart.style },
     actions: '<div class="chart-q">' + esc(q) + "</div>" +
@@ -5193,7 +5209,8 @@ $("chartKept").addEventListener("click", function(e){
     note.textContent = "Home holds " + HOME_CHARTS_MAX + " charts. Remove one from Home first.";
     return;
   }
-  list.push({ id: k.id, spec: k.spec, q: k.q, title: (k.data && k.data.title) || k.q, style: k.style });
+  list.push({ id: k.id, spec: k.spec, q: k.q, title: (k.data && k.data.title) || k.q, style: k.style,
+              name: k.name || undefined });
   saveHomePins(list);
   note.textContent = "On Home now. It updates as you listen.";
   renderKept();
@@ -5265,7 +5282,8 @@ function showChartGallery(){
 }
 
 function chartRecord(c){
-  return { id: c.id, spec: c.spec, data: c.data, q: c.q, at: Date.now(), live: c.live, frozenAt: c.frozenAt, style: c.style };
+  return { id: c.id, spec: c.spec, data: c.data, q: c.q, at: Date.now(), live: c.live, frozenAt: c.frozenAt,
+           style: c.style, name: c.name || undefined };
 }
 
 $("chartResult").addEventListener("click", function(e){
@@ -6123,7 +6141,7 @@ function openChart(q){
   var rec = pinList("charts")[q];
   if(!rec || !rec.data) return;
   var d = rec.data, self = current === 0;
-  $("plName").textContent = d.title || "Chart";
+  $("plName").textContent = rec.name || d.title || "Chart";
   $("plMeta").textContent = chartSub(d);
   $("plCover").hidden = true;
   $("plOpen").classList.add("centre");
@@ -6631,6 +6649,7 @@ function renderPins(p){
       var mine = editing && self, small = cpin.size === "small";
       ch += '<div class="pl chartpin pinbox' + (small ? " small" : "") + '">' +
         chartCard(cpin.data, { unpin: self ? unpinBtn("charts", q) : "", key: "pin" + q,
+          name: cpin.name, rename: mine ? { scope: "pin", id: cpin.id } : null,
           /* A small chart's Copy waits in the full-size view, so the card holds
              no button and the whole of it can be the tap that opens it. */
           mode: { live: isLive(cpin, "pin"), since: cpin.frozenAt || cpin.at,
@@ -7377,6 +7396,8 @@ function setChartLive(scope, id){
     /* Freezing keeps exactly what was on screen. */
     rec.live = false;
     rec.frozenAt = Date.now();
+    if(!rec.name && rec.data && rec.data.title && LIVE_DATA[scope + ":" + id] &&
+       LIVE_DATA[scope + ":" + id].title !== rec.data.title) rec.name = rec.data.title;
     rec.data = LIVE_DATA[scope + ":" + id] || rec.data;
   } else {
     rec.live = true;
@@ -7392,7 +7413,10 @@ function setChartLive(scope, id){
   var c = cust();
   if(c.pins && c.pins.charts){
     c.pins.charts.forEach(function(pin){
-      if(pin && pin.id === id){ pin.live = rec.live; pin.frozenAt = rec.frozenAt; pin.data = rec.data; }
+      if(pin && pin.id === id){
+        pin.live = rec.live; pin.frozenAt = rec.frozenAt; pin.data = rec.data;
+        if(rec.name && !pin.name) pin.name = rec.name;
+      }
     });
     saveCustom();
   }
@@ -7445,18 +7469,94 @@ document.addEventListener("click", function(e){
 function chartSub(d){
   if(d.chart === "number" || d.chart === "recent") return (d.stat && d.stat.period) || "";
   return (d.y_label || "") + " by " + (d.x_label || "") +
-    (d.series && d.series.length ? " \u00B7 " + d.series.length + " compared" : "");
+    (d.series && d.series.length ? " \u00B7 " + d.series.length + " compared" : "") +
+    (d.span ? " \u00B7 " + d.span : "");
+}
+
+/* ---- renaming a chart ----
+   A chart's title is written from the question; a name is the person's own and
+   wins from then on. It belongs to the chart, not to one place it is shown, so
+   it follows the chart to wherever else it is kept, pinned or on Home. */
+function chartName(rec){ return rec && (rec.name || (rec.data && rec.data.title) || rec.title || rec.q) || ""; }
+
+function renameChart(scope, id, name){
+  name = (name || "").replace(/\s+/g, " ").trim().slice(0, 60) || null;
+  function set(rec){ if(rec){ if(name) rec.name = name; else delete rec.name; } }
+  if(scope === "live"){
+    if(lastChart){ lastChart.name = name || undefined; }
+    return;
+  }
+  var kl = keptList(), hit = false;
+  kl.forEach(function(r){ if(r.id === id){ set(r); hit = true; } });
+  if(hit) saveKept(kl);
+  var mine = CUSTOM[0] || {};
+  if(mine.pins && mine.pins.charts){
+    mine.pins.charts.forEach(function(r){ if(r && r.id === id) set(r); });
+  }
+  var hp = homePins(), onHome = false;
+  hp.forEach(function(r){ if(r.id === id){ set(r); onHome = true; } });
+  if(onHome) saveHomePins(hp);
+  saveCustom();
+  if(lastChart && lastChart.id === id) lastChart.name = name || undefined;
+}
+
+/* The pencil turns the title into a text box. Enter or leaving it saves;
+   Escape puts it back. Everything that shows the chart is drawn again after,
+   so the name is the same everywhere at once. */
+document.addEventListener("click", function(e){
+  var b = e.target.closest(".t-ren");
+  if(!b) return;
+  e.preventDefault();
+  e.stopPropagation();
+  var t = b.closest(".chart-t");
+  var was = t.firstChild && t.firstChild.nodeType === 3 ? t.firstChild.nodeValue : t.textContent;
+  var scope = b.dataset.renScope, id = b.dataset.renId;
+  t.innerHTML = '<input class="t-in" type="text" maxlength="60" aria-label="Chart name">';
+  var input = t.firstChild, done = false;
+  input.value = was;
+  input.focus();
+  input.select();
+  function finish(save){
+    if(done) return;
+    done = true;
+    if(save && input.value.trim() !== was) renameChart(scope, id, input.value);
+    if(scope === "live"){
+      /* Not kept yet, so nothing else shows it: just the title goes back. */
+      var lc = lastChart || {};
+      t.innerHTML = esc(lc.name || (lc.data && lc.data.title) || was);
+      t.appendChild(b);
+      return;
+    }
+    redrawNamed();
+  }
+  input.addEventListener("keydown", function(k){
+    if(k.key === "Enter"){ k.preventDefault(); finish(true); }
+    else if(k.key === "Escape"){ k.preventDefault(); finish(false); }
+  });
+  input.addEventListener("blur", function(){ finish(true); });
+});
+
+function redrawNamed(){
+  renderKept();
+  renderPins(PROFILES[current]);
+  homeChartsDrawn = null;
+  renderHomeCharts();
 }
 
 function chartCard(d, opts){
   opts = opts || {};
   var open = opts.open != null
     ? ' tap" data-chart-open="' + esc(opts.open) + '" tabindex="0" role="button" aria-label="' +
-      esc((d.title || "Chart") + ", open full size") + '"'
+      esc((opts.name || d.title || "Chart") + ", open full size") + '"'
     : '"';
+  var title = opts.name || d.title;
+  var ren = opts.rename
+    ? '<button class="t-ren" type="button" data-ren-scope="' + esc(opts.rename.scope) + '" data-ren-id="' +
+      esc(opts.rename.id) + '" aria-label="Rename this chart"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg></button>'
+    : "";
   return '<div class="chartcard' + open + ">" +
     (opts.unpin || "") +
-    '<div class="chart-t">' + esc(d.title) + "</div>" +
+    '<div class="chart-t">' + esc(title) + ren + "</div>" +
     '<div class="chart-sub">' + esc(chartSub(d)) + "</div>" +
     (opts.mode ? modeBar(opts.mode) : "") +
     (d.table && d.table.length

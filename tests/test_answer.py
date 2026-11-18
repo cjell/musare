@@ -412,3 +412,81 @@ def test_the_plan_hands_the_list_over(sequence):
     d = ask(answer="recent")
     p = plan({"chart": d.chart, "stat": d.stat, "labels": [], "values": []})
     assert p["kind"] == "recent" and p["stat"]["rows"]
+
+
+# ------------------------------------------------------- windows and titles
+
+DASH = chr(0x2013)
+
+
+@pytest.mark.parametrize(
+    "fields, title",
+    [
+        ({"dimension": "track"}, "Top songs"),
+        ({"dimension": "track", "artists": ["Drake"], "limit": 5}, "Top 5 Drake songs"),
+        ({"dimension": "track", "albums": ["Blonde"]}, "Top songs off Blonde"),
+        ({"dimension": "track", "metric": "skip_rate"}, "Most skipped songs"),
+        ({"dimension": "track", "sort": "asc"}, "Least played songs"),
+        ({"dimension": "date", "grain": "month"}, "Listening by month"),
+        ({"dimension": "date", "grain": "year", "artists": ["Drake"]}, "Drake by year"),
+        ({"dimension": "hour_of_day", "range": "today"}, "Today by hour"),
+        (
+            {"dimension": "date", "grain": "year", "series": "artist", "artists": ["A", "B"]},
+            "A vs B by year",
+        ),
+        (
+            {
+                "dimension": "date",
+                "grain": "year",
+                "series": "artist",
+                "per_period": True,
+                "limit": 3,
+            },
+            "Top 3 artists each year",
+        ),
+        ({"dimension": "date", "grain": "month", "cumulative": True}, "Listening, running total"),
+        ({"answer": "top", "dimension": "album", "artists": ["Drake"]}, "Top Drake album"),
+        ({"answer": "number", "metric": "plays", "tracks": ["Fears"]}, "Plays · Fears"),
+        ({"answer": "first_played", "artists": ["Sade"]}, "First play of Sade"),
+        ({"answer": "recent"}, "Recent plays"),
+    ],
+)
+def test_plain_titles(fields, title):
+    assert chartrun.plain_title(ChartSpec(**fields)) == title
+
+
+def test_a_window_of_the_last_few_years(history):
+    """The plays run from Jan 2024, nine days apart; the newest is the anchor."""
+    every = ask(answer="number", metric="plays").stat["value"]
+    recent = ask(answer="number", metric="plays", last=30, last_unit="day")
+    assert 0 < recent.stat["value"] < every
+    assert recent.stat["period"].startswith("Last 30 days (")
+
+
+def test_a_span_of_years(history):
+    d = ask(answer="number", metric="plays", from_year=2024, to_year=2024)
+    assert d.stat["value"] == ask(answer="number", metric="plays", year=2024).stat["value"]
+    assert d.stat["period"] == f"2024 {DASH} 2024"
+    assert ask(answer="number", metric="plays", from_year=2030).stat["value"] == 0
+
+
+def test_every_answer_says_its_window_in_dates(history):
+    d = ask(dimension="track")
+    assert d.span.startswith(f"All time (Jan 2024 {DASH} ")
+
+
+@pytest.mark.parametrize(
+    "fields, field",
+    [
+        ({"last": 2}, "last"),
+        ({"last_unit": "year"}, "last"),
+        ({"to_year": 2022}, "to_year"),
+        ({"from_year": 2023, "to_year": 2021}, "to_year"),
+    ],
+)
+def test_a_window_has_to_make_sense(fields, field):
+    assert field in [p.field for p in validate_chart(ChartSpec(**fields))]
+
+
+def test_windows_that_are_not_the_menu_do_not_step(history):
+    assert not chartrun.steppable(ChartSpec(range="7d", last=2, last_unit="week"))

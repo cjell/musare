@@ -136,8 +136,12 @@ def test_date_dimension_is_chronological():
     assert d.labels == sorted(d.labels)
 
 
-def test_title_falls_back_to_something_descriptive():
-    assert run(ChartSpec(title="", metric="hours", dimension="artist")).title == "hours by artist"
+def test_the_title_is_written_from_the_question_not_by_the_model():
+    """A title the model wrote is ignored; the one built from the fields is plain."""
+    assert (
+        run(ChartSpec(title="my vibe era", metric="hours", dimension="artist")).title
+        == "Top artists"
+    )
 
 
 def test_limit_cannot_exceed_the_schema_cap():

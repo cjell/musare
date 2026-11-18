@@ -76,6 +76,15 @@ def validate_chart(spec: ChartSpec) -> list[SpecProblem]:
         problems.append(SpecProblem("artists", f"{len(spec.artists)} named, limit {MAX_ARTISTS}"))
     if len(spec.genres) > MAX_GENRES:
         problems.append(SpecProblem("genres", f"{len(spec.genres)} named, limit {MAX_GENRES}"))
+    # A window is a number and its unit, or a first year and maybe a last.
+    if (spec.last is None) != (spec.last_unit is None):
+        problems.append(
+            SpecProblem("last", "a window of the last few needs both a count and a unit")
+        )
+    if spec.to_year is not None and spec.from_year is None:
+        problems.append(SpecProblem("to_year", "a span of years needs a first year"))
+    if spec.from_year is not None and spec.to_year is not None and spec.to_year < spec.from_year:
+        problems.append(SpecProblem("to_year", "the span ends before it starts"))
     for name, got in (("tracks", spec.tracks), ("albums", spec.albums)):
         if len(got) > MAX_ARTISTS:
             problems.append(SpecProblem(name, f"{len(got)} named, limit {MAX_ARTISTS}"))

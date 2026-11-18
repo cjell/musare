@@ -108,6 +108,8 @@ DIMENSIONS: dict[str, tuple[str, str]] = {
 }
 
 GRAINS = {"day": "day", "week": "week", "month": "month", "year": "year"}
+# What `last` counts, mapped rather than interpolated, like everything else here.
+UNITS = {"day": "day", "week": "week", "month": "month", "year": "year"}
 
 RANGES = {
     "7d": "interval 7 day",
@@ -217,6 +219,9 @@ class ChartData:
     # The answer to a question with one number - or one date - for an answer,
     # in place of everything above: see `_answer`. None for every chart.
     stat: dict[str, Any] | None = None
+    # What the window covers, in words and dates - "Last 2 years (Nov 2024 -
+    # Nov 2026)". Empty for a chart whose `window` already says it.
+    span: str = ""
 
     @property
     def empty(self) -> bool:
@@ -304,6 +309,16 @@ def _where(
         pass
     elif spec.year is not None:
         clauses.append(f"year({LOCAL_TS}) = {int(spec.year)}")
+    elif spec.from_year is not None:
+        clauses.append(f"year({LOCAL_TS}) >= {int(spec.from_year)}")
+        if spec.to_year is not None:
+            clauses.append(f"year({LOCAL_TS}) <= {int(spec.to_year)}")
+    elif spec.last is not None and spec.last_unit in UNITS:
+        # Anchored on the newest play, like the menu's relative windows.
+        clauses.append(
+            f"played_at >= (select max(played_at) from plays) - "
+            f"interval {int(spec.last)} {UNITS[spec.last_unit]}"
+        )
     elif spec.range == "today":
         clauses.append(_day(back))
     elif spec.range == "this_year":
@@ -551,7 +566,9 @@ def steppable(spec: ChartSpec) -> bool:
     A named year and the open-ended ranges do not: "all time" has no previous
     all time, and a year is already a fixed window the spec can name itself.
     """
-    return spec.year is None and (spec.range == "today" or spec.range in STEP_DAYS)
+    if spec.year is not None or spec.from_year is not None or spec.last is not None:
+        return False
+    return spec.range == "today" or spec.range in STEP_DAYS
 
 
 def run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
@@ -562,6 +579,18 @@ def run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
     d = _run(spec, back, scale_over)
     if fixes:
         d.note = " ".join([*fixes, *([d.note] if d.note else [])])
+    # The window in dates, so an answer over the wrong one is visible on it.
+    # A list of recent plays is newest first already; "all time" on it would
+    # only say that nothing narrowed it.
+    unwindowed = spec.range == "all" and spec.year is None and spec.from_year is None
+    if (
+        spec.understood
+        and not d.window
+        and not (spec.answer == "recent" and unwindowed and spec.last is None)
+    ):
+        d.span = _span(spec)
+        if d.stat is not None and d.span:
+            d.stat["period"] = d.span
     return d
 
 
@@ -668,7 +697,7 @@ def _run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
         values=values,
         x_label=x_label,
         y_label=y_label,
-        title=spec.title or f"{y_label} by {x_label}",
+        title=plain_title(spec),
         chart=chart,
         total_rows=total,
         note=_note(spec, rated, truncated=len(table) >= MAX_TABLE_ROWS),
@@ -994,6 +1023,17 @@ def _period(spec: ChartSpec) -> tuple[str, str]:
     """The window as part of a sentence, and as a label on its own."""
     if spec.year is not None:
         return f" in {spec.year}", str(spec.year)
+    if spec.from_year is not None:
+        if spec.to_year is None:
+            return f" since {spec.from_year}", f"Since {spec.from_year}"
+        return (
+            f" from {spec.from_year} to {spec.to_year}",
+            f"{spec.from_year} \u2013 {spec.to_year}",
+        )
+    if spec.last is not None and spec.last_unit:
+        n, unit = int(spec.last), spec.last_unit
+        words = f"{unit}" if n == 1 else f"{n} {unit}s"
+        return f" in the last {words}", f"Last {words}"
     return PERIODS.get(spec.range, ("", ""))
 
 
@@ -1218,7 +1258,7 @@ def _answer(spec: ChartSpec) -> ChartData:
         values=[],
         x_label="",
         y_label=unit,
-        title=spec.title or stat["sentence"].rstrip(".") or unit,
+        title=plain_title(spec),
         chart="number",
         total_rows=plays,
         note=" ".join(notes) or None,
@@ -1440,7 +1480,7 @@ def _top(spec: ChartSpec) -> ChartData:
         values=[],
         x_label="",
         y_label=d.y_label,
-        title=spec.title or stat["sentence"].split(" - ")[0].rstrip("."),
+        title=plain_title(spec),
         chart="number",
         total_rows=d.total_rows,
         note=note,
@@ -1679,8 +1719,167 @@ def _recent(spec: ChartSpec) -> ChartData:
         values=[],
         x_label="",
         y_label="plays",
-        title=spec.title or title,
+        title=title,
         chart="recent",
         total_rows=len(rows),
         stat=stat,
     )
+
+
+# ------------------------------------------------------------- the window
+#
+# Every answer says what it covers in dates as well as words. The bug this came
+# from was a window the menu could not say quietly becoming all time; a window
+# printed on the answer cannot be wrong without it showing.
+
+
+def _span(spec: ChartSpec) -> str:
+    """'Last 2 years (Nov 2024 - Nov 2026)', 'All time (Aug 2018 - Nov 2026)'."""
+    con = _connect(spec)
+    _, label = _period(spec)
+    newest, oldest = con.execute(
+        f"select cast(max({LOCAL_TS}) as date), cast(min({LOCAL_TS}) as date) from plays"
+    ).fetchone()
+    if newest is None:
+        return label
+    start, end = None, newest
+    if spec.year is not None:
+        return label
+    if spec.from_year is not None:
+        # "2020 - 2022" already says it; "Since 2023" gets where it runs to.
+        if spec.to_year is not None:
+            return label
+        start = max(date(int(spec.from_year), 1, 1), oldest)
+    elif spec.last is not None and spec.last_unit in UNITS:
+        start = con.execute(
+            f"select cast(max({LOCAL_TS}) - interval {int(spec.last)} "
+            f"{UNITS[spec.last_unit]} as date) from plays"
+        ).fetchone()[0]
+    elif spec.range in RANGES:
+        start = con.execute(
+            f"select cast(max({LOCAL_TS}) - {RANGES[spec.range]} as date) from plays"
+        ).fetchone()[0]
+    elif spec.range == "this_year":
+        start = date(newest.year, 1, 1)
+    elif spec.range == "all":
+        start = oldest
+    else:
+        return label
+    start = max(start, oldest)
+    return f"{label} ({_dates(start, end)})"
+
+
+def _dates(start: date, end: date) -> str:
+    """Two dates as briefly as reads clearly: months over long spans, days over short."""
+    if (end - start).days >= 60:
+        a, b = f"{MONTHS[start.month - 1]} {start.year}", f"{MONTHS[end.month - 1]} {end.year}"
+    elif start.year != end.year:
+        a, b = _day_text(start), _day_text(end)
+    else:
+        a, b = _pretty(start), _pretty(end)
+    return a if a == b else f"{a} \u2013 {b}"
+
+
+# ------------------------------------------------------------- plain titles
+#
+# A title says what the answer is, built from what was asked: "Top Drake
+# songs", "Listening by month", "Plays of Fears by MTNS". Nothing clever and
+# nothing the model wrote, so it is never odd and never wrong, and the window
+# lives on the line under it rather than in it. A person can rename any chart.
+
+PLURAL = {
+    "artist": "artists",
+    "album": "albums",
+    "track": "songs",
+    "genre": "genres",
+    "platform": "devices",
+}
+METRIC_WORD = {
+    "hours": "Hours",
+    "plays": "Plays",
+    "distinct_tracks": "Different songs",
+    "distinct_artists": "Different artists",
+    "skip_rate": "Skip rate",
+}
+
+
+def _named(spec: ChartSpec) -> str:
+    """The thing a question is narrowed to, as a short phrase - or nothing."""
+    if spec.tracks:
+        who = f" by {spec.artists[0]}" if len(spec.artists) == 1 else ""
+        return " and ".join(spec.tracks) + who
+    if spec.albums:
+        return " and ".join(spec.albums)
+    if spec.artists:
+        return " and ".join(spec.artists)
+    if spec.genres:
+        return " and ".join(str(g) for g in spec.genres)
+    return ""
+
+
+def plain_title(spec: ChartSpec) -> str:
+    """What the answer is, in a few plain words."""
+    spec = effective(spec)
+    named = _named(spec)
+    if spec.answer in ("first_played", "last_played"):
+        which = "First" if spec.answer == "first_played" else "Last"
+        return f"{which} play of {named}" if named else f"{which} play"
+    if spec.answer == "number":
+        return f"{METRIC_WORD[spec.metric]} \u00b7 {named}" if named else METRIC_WORD[spec.metric]
+    if spec.answer == "recent":
+        return f"Recent plays \u00b7 {named}" if named else "Recent plays"
+
+    ranked = spec.dimension in PLURAL
+    if spec.answer == "top" or (ranked and spec.limit == 1 and not spec.per_period):
+        thing = (
+            THING.get(spec.dimension, "") if spec.dimension != "date" else (spec.grain or "month")
+        )
+        return _ranked_title(spec, thing, single=True)
+    if spec.per_period:
+        many = (
+            PLURAL.get(spec.series, "") if spec.limit > 1 else THING.get(spec.series, spec.series)
+        )
+        lead = f"Top {spec.limit} {many}" if spec.limit > 1 else f"Top {many}"
+        return f"{lead} each {spec.grain or 'month'}"
+    if spec.series != "none":
+        if spec.series == "artist" and spec.artists:
+            names = " vs ".join(spec.artists)
+        elif spec.series == "genre" and spec.genres:
+            names = " vs ".join(str(g) for g in spec.genres)
+        else:
+            names = f"Top {PLURAL.get(spec.series, spec.series)}"
+        return f"{names} {_along(spec)}"
+    if ranked:
+        return _ranked_title(spec, PLURAL[spec.dimension], single=False)
+    lead = named or ("Today" if spec.range == "today" else "Listening")
+    if spec.cumulative:
+        return f"{lead}, running total"
+    return f"{lead} {_along(spec)}"
+
+
+def _along(spec: ChartSpec) -> str:
+    """'by month', 'by hour', 'by day of week' - what an ordered axis runs along."""
+    if spec.dimension == "date":
+        return f"by {spec.grain or 'month'}"
+    return {"hour_of_day": "by hour", "day_of_week": "by day of week"}.get(spec.dimension, "")
+
+
+def _ranked_title(spec: ChartSpec, thing: str, single: bool) -> str:
+    """'Top Drake songs', 'Most skipped songs', 'Top song off Blonde'."""
+    if spec.metric == "skip_rate":
+        lead = "Least skipped" if spec.sort == "asc" else "Most skipped"
+    elif spec.metric in ("distinct_tracks", "distinct_artists"):
+        lead = "Most varied"
+    else:
+        lead = "Least played" if spec.sort == "asc" else "Top"
+    whose = ""
+    if spec.dimension in ("track", "album") and len(spec.artists) == 1:
+        whose = f"{spec.artists[0]} "
+    tail = ""
+    if spec.dimension == "track" and len(spec.albums) == 1:
+        tail = f" off {spec.albums[0]}"
+    elif spec.dimension == "artist" and spec.genres:
+        whose = " and ".join(str(g) for g in spec.genres) + " "
+    if not single and spec.limit and spec.limit not in (1, 10):
+        lead = f"{lead} {spec.limit}"
+    return f"{lead} {whose}{thing}{tail}"

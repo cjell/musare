@@ -695,6 +695,8 @@ def _chart_payload(d: ChartData) -> dict[str, object]:
         "uris": d.uris,
         # A question with one number for an answer: the number and its card.
         "stat": d.stat,
+        # What the window covers, in words and dates.
+        "span": d.span,
         # Empty for an ordinary chart; when present it is the data and
         # `values` is empty. The page branches on which one has content.
         "series": [{"name": ln.name, "values": ln.values} for ln in d.series],

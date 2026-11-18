@@ -66,11 +66,9 @@ class ChartSpec(BaseModel):
     title: str = Field(
         default="",
         max_length=60,
-        description=(
-            "A short title in the user's own voice, as they might caption it on their "
-            "profile - 'my 2am problem', 'the year I found shoegaze'. Not a description "
-            "of the axes. Six words at most."
-        ),
+        # Titles are written from the other fields now (chartrun.plain_title), and
+        # a person can rename any chart. Kept so specs saved with one still parse.
+        description="Leave empty: the title is written from the other fields.",
     )
     answer: Literal["chart", "number", "first_played", "last_played", "top", "recent"] = Field(
         default="chart",
@@ -165,6 +163,8 @@ class ChartSpec(BaseModel):
             "How far back to look. 'all' is the whole history and is the right answer "
             "when no period is mentioned. Use 'this_year' for 'this year', and the "
             "relative options for 'last month', 'recently', 'the past week'. "
+            "A window not listed here - the last 2 years, the past 18 months, 2020 to "
+            "2022 - goes in last or from_year instead, and this stays 'all'. "
             "'today' is the listener's current calendar day, from midnight, and is "
             "only for questions about today itself - not for 'this week' or for "
             "habits across every day. A chart of today over time is drawn by hour, so "
@@ -178,6 +178,43 @@ class ChartSpec(BaseModel):
         description=(
             "A single calendar year, when the user names one - '2019', 'back in 2021'. "
             "Null otherwise. When set it replaces range entirely."
+        ),
+    )
+    last: int | None = Field(
+        default=None,
+        ge=1,
+        le=120,
+        description=(
+            "A window of the last so many days, weeks, months or years, for one the "
+            "range options cannot say: 'the last 2 years' is 2 with last_unit 'year', "
+            "'the past 18 months' 18 with 'month', 'the last 3 weeks' 3 with 'week'. "
+            "Numbers written as words count - 'the last three years' is 3. "
+            "Null whenever range already has the window: 'last year' and 'the past 12 "
+            "months' are range '12mo', 'this month' '30d', 'this week' '7d'. When set "
+            "it replaces range."
+        ),
+    )
+    last_unit: Literal["day", "week", "month", "year"] | None = Field(
+        default=None,
+        description="What `last` counts. Set exactly when last is set, null otherwise.",
+    )
+    from_year: int | None = Field(
+        default=None,
+        ge=DATA_FIRST_YEAR,
+        le=2100,
+        description=(
+            "The first year of a span of years: 'from 2020 to 2022' is 2020, 'since "
+            "2023' is 2023, 'between 2019 and 2021' is 2019. Null otherwise - a single "
+            "year named on its own goes in year, not here. When set it replaces range."
+        ),
+    )
+    to_year: int | None = Field(
+        default=None,
+        ge=DATA_FIRST_YEAR,
+        le=2100,
+        description=(
+            "The last year of that span, included: 'from 2020 to 2022' is 2022. Null "
+            "when the span runs to now - 'since 2023' - and whenever from_year is null."
         ),
     )
     artists: list[str] = Field(
