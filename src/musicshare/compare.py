@@ -1,15 +1,18 @@
-"""Comparing a chart with someone else: the request, the answer, and the result.
+"""Comparing a chart with others: the request, the answers, and the result.
 
-One person asks a question and sends it to another. Nothing of the other
-person's is run until they accept - a pinned chart is something they chose to
-show, but this is a new question over their history, so it waits for a yes.
-Once accepted it is live for both of them, and either can remove it, which
-ends it for both: consent that can be given can be taken back.
+One person asks a question and sends it to one or two others. Nothing of
+anyone else's is run until they accept - a pinned chart is something they chose
+to show, but this is a new question over their history, so it waits for a yes.
+Each person answers for themselves: the comparison is live as soon as one of
+them accepts, holds whoever has accepted, and says who it is still waiting on.
+Anyone asked can leave it, which takes only them out; the one who asked can
+remove it, which ends it for everyone. Consent that can be given can be taken
+back.
 
 The store is one JSON file on the app's own disk, beside the user records -
 the same volume, the same single machine - so there is nothing to migrate and
 a local server writes only to its own copy. Small by design: a request is a
-spec and two ids, never anybody's numbers. The numbers are worked out when
+spec and some ids, never anybody's numbers. The numbers are worked out when
 someone looks, from each person's own history.
 """
 
@@ -32,6 +35,8 @@ STORE = ROOT / "data" / "social" / "compares.json"
 # actually asking; a ceiling on someone filling another's inbox.
 MAX_PENDING = 20
 MAX_NAME = 60
+# People asked in one comparison, not counting the one asking: three in all.
+MAX_OTHERS = 2
 
 _lock = threading.Lock()
 
@@ -44,6 +49,21 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def _shape(rec: dict[str, Any]) -> dict[str, Any]:
+    """A record in its current form. The first comparisons were one-to-one, with
+    `to` a single id and one `status`; those read as a group of one."""
+    if isinstance(rec.get("to"), str):
+        uid = rec["to"]
+        rec["to"] = [uid]
+        rec["answers"] = {
+            uid: {"status": rec.pop("status", "pending"), "at": rec.pop("decided_at", None)}
+        }
+    rec.setdefault("answers", {})
+    for uid in rec["to"]:
+        rec["answers"].setdefault(uid, {"status": "pending", "at": None})
+    return rec
+
+
 def _read(path: Path | None) -> list[dict[str, Any]]:
     path = path or STORE
     if not path.exists():
@@ -52,7 +72,7 @@ def _read(path: Path | None) -> list[dict[str, Any]]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except ValueError:
         return []
-    return [r for r in data.get("compares", []) if isinstance(r, dict)]
+    return [_shape(r) for r in data.get("compares", []) if isinstance(r, dict)]
 
 
 def _write(path: Path | None, items: list[dict[str, Any]]) -> None:
@@ -64,12 +84,45 @@ def _write(path: Path | None, items: list[dict[str, Any]]) -> None:
     tmp.replace(path)
 
 
+def answer_of(rec: dict[str, Any], uid: str) -> str | None:
+    a = rec["answers"].get(uid)
+    return a["status"] if a else None
+
+
+def accepted(rec: dict[str, Any]) -> list[str]:
+    return [u for u in rec["to"] if answer_of(rec, u) == "accepted"]
+
+
+def waiting_on(rec: dict[str, Any]) -> list[str]:
+    return [u for u in rec["to"] if answer_of(rec, u) == "pending"]
+
+
+def status(rec: dict[str, Any]) -> str:
+    """Live once anyone has accepted; waiting while nobody has and someone
+    still might; declined when everyone asked has said no."""
+    if accepted(rec):
+        return "accepted"
+    if waiting_on(rec):
+        return "pending"
+    return "declined"
+
+
+def participants(rec: dict[str, Any]) -> list[str]:
+    """Whose answers are shown: the one who asked, and everyone who said yes."""
+    return [rec["from"], *accepted(rec)]
+
+
+def can_see(rec: dict[str, Any], uid: str) -> bool:
+    """The one who asked always; anyone asked unless they said no."""
+    return uid == rec["from"] or answer_of(rec, uid) in ("pending", "accepted")
+
+
 def involving(uid: str, path: Path | None = None) -> list[dict[str, Any]]:
-    """Every comparison this person sent or was sent, newest first - except
-    the ones turned down, which only the sender is told about."""
+    """Every comparison this person sent or was sent, newest first - except the
+    ones they turned down. Declines are told only to the one who asked."""
     with _lock:
         items = _read(path)
-    mine = [r for r in items if r["from"] == uid or (r["to"] == uid and r["status"] != "declined")]
+    mine = [r for r in items if can_see(r, uid)]
     return sorted(mine, key=lambda r: r["at"], reverse=True)
 
 
@@ -80,44 +133,49 @@ def get(cid: str, path: Path | None = None) -> dict[str, Any] | None:
 
 def ask(
     sender: str,
-    to: str,
+    to: list[str] | str,
     spec: ChartSpec,
     q: str = "",
     name: str | None = None,
     title: str = "",
     path: Path | None = None,
 ) -> dict[str, Any]:
-    """Send a comparison request. The same question to the same person while
-    one is still waiting is the request already sent, not a second one."""
-    if to == sender:
+    """Send a comparison request to one or two people. The same question to
+    the same people while it is still open is the request already sent."""
+    others = [to] if isinstance(to, str) else list(dict.fromkeys(to))
+    if not others:
+        raise CompareError("pick someone to compare with")
+    if len(others) > MAX_OTHERS:
+        raise CompareError(f"up to {MAX_OTHERS} people at once")
+    if sender in others:
         raise CompareError("that's you")
-    if not users.exists(to):
-        raise CompareError("no such person")
+    for uid in others:
+        if not users.exists(uid):
+            raise CompareError("no such person")
     spec_json = spec.model_dump(mode="json")
     with _lock:
         items = _read(path)
         for r in items:
             if (
                 r["from"] == sender
-                and r["to"] == to
+                and sorted(r["to"]) == sorted(others)
                 and r["spec"] == spec_json
-                and r["status"] != "declined"
+                and status(r) != "declined"
             ):
                 return r
-        waiting = sum(1 for r in items if r["from"] == sender and r["status"] == "pending")
-        if waiting >= MAX_PENDING:
-            raise CompareError(f"you have {waiting} requests waiting already")
+        open_ = sum(1 for r in items if r["from"] == sender and waiting_on(r))
+        if open_ >= MAX_PENDING:
+            raise CompareError(f"you have {open_} requests waiting already")
         rec = {
             "id": secrets.token_urlsafe(9),
             "from": sender,
-            "to": to,
+            "to": others,
+            "answers": {u: {"status": "pending", "at": None} for u in others},
             "spec": spec_json,
             "q": (q or "")[:400],
             "name": ((name or "").strip()[:MAX_NAME]) or None,
             "title": (title or "")[:120],
             "at": _now(),
-            "status": "pending",
-            "decided_at": None,
         }
         items.append(rec)
         _write(path, items)
@@ -125,36 +183,43 @@ def ask(
 
 
 def decide(cid: str, uid: str, accept: bool, path: Path | None = None) -> dict[str, Any]:
-    """Accept or decline - only the person it was sent to, and only once."""
+    """Accept or decline - each person asked, for themselves, and only once."""
     with _lock:
         items = _read(path)
         rec = next((r for r in items if r["id"] == cid), None)
-        if rec is None or rec["to"] != uid:
+        if rec is None or uid not in rec["to"]:
             raise CompareError("no such request")
-        if rec["status"] != "pending":
-            raise CompareError(f"already {rec['status']}")
-        rec["status"] = "accepted" if accept else "declined"
-        rec["decided_at"] = _now()
+        if answer_of(rec, uid) != "pending":
+            raise CompareError(f"already {answer_of(rec, uid)}")
+        rec["answers"][uid] = {"status": "accepted" if accept else "declined", "at": _now()}
         _write(path, items)
     return rec
 
 
 def remove(cid: str, uid: str, path: Path | None = None) -> bool:
-    """Either person ends it, for both. Withdrawing a request is the same act."""
+    """The one who asked ends it for everyone - withdrawing a request is the
+    same act. Anyone else leaves, which takes only them out of it."""
     with _lock:
         items = _read(path)
-        keep = [r for r in items if not (r["id"] == cid and uid in (r["from"], r["to"]))]
-        if len(keep) == len(items):
+        rec = next((r for r in items if r["id"] == cid), None)
+        if rec is None or not (uid == rec["from"] or uid in rec["to"]):
             return False
-        _write(path, keep)
+        if uid == rec["from"]:
+            items = [r for r in items if r["id"] != cid]
+        else:
+            rec["to"] = [u for u in rec["to"] if u != uid]
+            rec["answers"].pop(uid, None)
+            if not rec["to"]:
+                items = [r for r in items if r["id"] != cid]
+        _write(path, items)
     return True
 
 
 def rename(cid: str, uid: str, name: str | None, path: Path | None = None) -> dict[str, Any]:
-    """A comparison is named like any chart; either person can."""
+    """A comparison is named like any chart; anyone in it can."""
     with _lock:
         items = _read(path)
-        rec = next((r for r in items if r["id"] == cid and uid in (r["from"], r["to"])), None)
+        rec = next((r for r in items if r["id"] == cid and can_see(r, uid)), None)
         if rec is None:
             raise CompareError("no such comparison")
         rec["name"] = ((name or "").strip()[:MAX_NAME]) or None
@@ -168,27 +233,32 @@ def person(uid: str) -> dict[str, Any]:
 
 
 def view(rec: dict[str, Any], me: str) -> dict[str, Any]:
-    """A comparison as one of the two people sees it."""
+    """A comparison as one of the people in it sees it."""
+    mine = rec["from"] == me
     return {
         "id": rec["id"],
         "from": person(rec["from"]),
-        "to": person(rec["to"]),
-        "mine": rec["from"] == me,
-        "status": rec["status"],
+        "to": [person(u) for u in rec["to"]],
+        "with": [person(u) for u in participants(rec) if u != me],
+        "waiting": [person(u) for u in waiting_on(rec)],
+        "declined": [person(u) for u in rec["to"] if answer_of(rec, u) == "declined"],
+        "mine": mine,
+        # The comparison as a whole, and this person's own answer to it.
+        "status": status(rec),
+        "my_answer": None if mine else answer_of(rec, me),
         "spec": rec["spec"],
         "q": rec["q"],
         "name": rec.get("name"),
         "title": rec.get("title") or "",
         "at": rec["at"],
-        "decided_at": rec.get("decided_at"),
     }
 
 
 # ------------------------------------------------------------ side by side
 #
-# How two answers to one question are set beside each other depends on what
-# the answer is. A number or a winner is two cards; a ranking is two lists with
-# what they share marked; anything along an ordered axis - months, hours,
+# How two or three answers to one question are set beside each other depends
+# on what the answer is. A number or a winner is a card each; a ranking is a
+# list each with what they share marked; anything along an ordered axis - months, hours,
 # weekdays - is one chart with a line or a bar each. A chart that already
 # compares several things, or ranks inside every period, would be a comparison
 # of comparisons drawn on one axis, so those are shown one above the other.

@@ -1489,6 +1489,24 @@ details[open] summary .chev{transform:rotate(180deg)}
   display:flex;align-items:center;justify-content:center;font-size:12px;color:var(--ink-2)
 }
 .cmp-person{cursor:pointer}
+/* Picking one or two people: a tick on the chosen, the rest dimmed at two. */
+.cmp-person .tick{
+  width:18px;height:18px;border-radius:50%;border:1.5px solid var(--line-2);flex:0 0 auto;margin-left:auto
+}
+.cmp-person[aria-checked="true"] .tick{border-color:var(--accent);background:var(--accent);box-shadow:inset 0 0 0 3px var(--ground)}
+.cmp-person[aria-disabled="true"]{opacity:.4;cursor:default}
+.cmp-person:focus-visible{outline:2px solid var(--accent);outline-offset:-2px;border-radius:6px}
+.cmp-send{padding:12px 4px 4px}
+.cmp-send .btn{width:100%;height:38px}
+/* Three people: three narrower columns, smaller numbers, values tucked in. */
+.cmp-two.n3{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.cmp-two.n3 .stat-big b{font-size:24px}
+.cmp-two.n3 .stat-big.name b,.cmp-two.n3 .stat-big.date b{font-size:14px}
+.cmp-two.n3 .cmp-r{gap:4px}
+.cmp-two.n3 .cmp-r .n{flex-basis:10px}
+.cmp-two.n3 .cmp-r .tn{font-size:10.5px}
+.cmp-two.n3 .cmp-r .v{font-size:8.5px}
+.cmp-two.n3 .rp-row .tn{font-size:11px}
 .cmp-sent{font-size:12.5px;line-height:1.45;color:var(--ink-2);padding:6px 4px}
 /* Changing a chart in place, under the chart being changed. */
 .refine{margin-top:12px}
@@ -6258,7 +6276,7 @@ document.addEventListener("keydown", function(e){
    (see compare.py); then it is live for both, under Compared in Charts, until
    either removes it. The bell says when one is waiting on you. */
 var RENAME_PENCIL = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg>';
-var CMP = { items: [], waiting: 0, me: null, people: [], pick: null, runs: {}, seq: 0 };
+var CMP = { items: [], waiting: 0, me: null, people: [], pick: null, sel: [], runs: {}, seq: 0 };
 var CMP_TTL = 60 * 1000;
 
 function cmpLoad(){
@@ -6297,7 +6315,12 @@ $("chartSegs").addEventListener("click", function(e){
 });
 
 function cmpTitle(c){ return c.name || c.title || "Comparison"; }
-function them(c){ return c.mine ? c.to : c.from; }
+/* "Drew", "Drew and Sam" - people by name, as a sentence would list them. */
+function names(list){
+  var n = (list || []).map(function(p){ return p.name; });
+  return n.length > 1 ? n.slice(0, -1).join(", ") + " and " + n[n.length - 1] : (n[0] || "");
+}
+var CMP_MAX = 2;   /* people asked at once, besides you: three in all */
 
 /* The sheet albums open in, holding a short list instead of tracks. */
 function openPanel(kind, title, meta, html){
@@ -6314,11 +6337,19 @@ function openPanel(kind, title, meta, html){
   }
 }
 
+/* Who else was asked, said from where you stand: "with Sam" when the request
+   went to you and Sam, nothing when it was only you. */
+function alsoAsked(c){
+  var rest = (c.to || []).filter(function(p){ return p.id !== CMP.me; });
+  return rest.length ? " with you and " + names(rest) : "";
+}
+
 /* ---- the bell: requests waiting on you ---- */
 function openInbox(){
-  var wait = CMP.items.filter(function(c){ return !c.mine && c.status === "pending"; });
+  var wait = CMP.items.filter(function(c){ return c.my_answer === "pending"; });
   var html = wait.length ? wait.map(function(c){
-    return '<div class="inbox-r"><div class="who"><b>' + esc(c.from.name) + "</b> wants to compare</div>" +
+    return '<div class="inbox-r"><div class="who"><b>' + esc(c.from.name) + "</b> wants to compare" +
+      esc(alsoAsked(c)) + "</div>" +
       '<div class="t">' + esc(cmpTitle(c)) + (c.q ? " \u00B7 \u201C" + esc(c.q) + "\u201D" : "") + "</div>" +
       '<div class="acts"><button class="btn btn-primary" type="button" data-cmp-yes="' + esc(c.id) + '">Accept</button>' +
       '<button class="btn btn-ghost" type="button" data-cmp-no="' + esc(c.id) + '">Decline</button></div></div>';
@@ -6328,23 +6359,45 @@ function openInbox(){
 }
 $("bellBtn").addEventListener("click", function(){ cmpLoad().then(openInbox); openInbox(); });
 
-/* ---- choosing who to compare with ---- */
+/* ---- choosing who to compare with: one person, or two ---- */
 function openCmpPicker(src){
   CMP.pick = src;
+  CMP.sel = [];
+  paintPicker();
+}
+function paintPicker(){
+  var src = CMP.pick || {};
   var people = (CMP.people || []).filter(function(u){ return u.id !== CMP.me && u.has_history !== false; });
+  var full = CMP.sel.length >= CMP_MAX;
   var html = people.length ? people.map(function(u){
+    var on = CMP.sel.indexOf(u.id) >= 0, off = full && !on;
     var av = u.image ? ' style="background-image:url(' + esc(u.image) + ')"' : "";
-    return '<div class="pl-tr cmp-person" role="button" tabindex="0" data-cmp-to="' + esc(u.id) + '">' +
+    return '<div class="pl-tr cmp-person" role="checkbox" tabindex="0" aria-checked="' + on + '"' +
+      (off ? ' aria-disabled="true"' : "") + ' data-cmp-to="' + esc(u.id) + '">' +
       '<span class="av"' + av + ">" + (u.image ? "" : esc((u.name || "?").charAt(0))) + "</span>" +
-      '<span class="mx"><span class="tn">' + esc(u.name || u.id) + "</span></span></div>";
+      '<span class="mx"><span class="tn">' + esc(u.name || u.id) + '</span></span><span class="tick" aria-hidden="true"></span></div>';
   }).join("") : '<div class="cmp-sent">Nobody else here has listening history yet.</div>';
+  var chosen = people.filter(function(u){ return CMP.sel.indexOf(u.id) >= 0; });
+  if(people.length){
+    html += '<div class="cmp-send"><button class="btn btn-primary" type="button" id="cmpSend"' +
+      (chosen.length ? "" : " disabled") + ">" +
+      (chosen.length ? "Send to " + esc(names(chosen)) : "Pick up to " + CMP_MAX + " people") + "</button></div>";
+  }
   openPanel("pick", "Compare with", src.title || "", html);
 }
+function togglePick(id){
+  var i = CMP.sel.indexOf(id);
+  if(i >= 0) CMP.sel.splice(i, 1);
+  else if(CMP.sel.length < CMP_MAX) CMP.sel.push(id);
+  paintPicker();
+  var again = document.querySelector('[data-cmp-to="' + id + '"]');
+  if(again) again.focus();
+}
 
-function sendCompare(to){
-  var src = CMP.pick;
-  if(!src) return;
-  var who = (CMP.people.filter(function(u){ return u.id === to; })[0] || {}).name || "them";
+function sendCompare(){
+  var src = CMP.pick, to = CMP.sel.slice();
+  if(!src || !to.length) return;
+  var who = names(CMP.people.filter(function(u){ return to.indexOf(u.id) >= 0; })) || "them";
   $("plList").innerHTML = '<div class="cmp-sent">Sending...</div>';
   fetch("/api/compare", {
     method: "POST",
@@ -6353,7 +6406,8 @@ function sendCompare(to){
   }).then(function(r){ return r.json().then(function(b){ return { ok: r.ok, b: b }; }); })
     .then(function(res){
       $("plList").innerHTML = '<div class="cmp-sent">' + (res.ok
-        ? "Sent to " + esc(who) + ". Once they accept, it shows up under Compared in Charts."
+        ? "Sent to " + esc(who) + ". It shows up under Compared in Charts as soon as " +
+          (to.length > 1 ? "either of them accepts." : "they accept.")
         : "Could not send: " + esc((res.b && res.b.detail) || "try again")) + "</div>";
       cmpLoad();
     }).catch(function(){
@@ -6373,7 +6427,11 @@ document.addEventListener("click", function(e){
     if(k) openCmpPicker({ spec: k.spec, q: k.q, name: k.name, title: chartName(k) });
     return;
   }
-  if((t = e.target.closest("[data-cmp-to]"))){ sendCompare(t.dataset.cmpTo); return; }
+  if((t = e.target.closest("[data-cmp-to]"))){
+    if(t.getAttribute("aria-disabled") !== "true") togglePick(t.dataset.cmpTo);
+    return;
+  }
+  if(e.target.closest("#cmpSend")){ sendCompare(); return; }
   if((t = e.target.closest("[data-cmp-yes]")) || (t = e.target.closest("[data-cmp-no]"))){
     var yes = !!t.dataset.cmpYes, cid = t.dataset.cmpYes || t.dataset.cmpNo;
     var fromBell = !!t.closest("#plOpen");
@@ -6391,8 +6449,11 @@ document.addEventListener("click", function(e){
   }
   if((t = e.target.closest("[data-cmp-del]"))){
     var c = CMP.items.filter(function(x){ return x.id === t.dataset.cmpDel; })[0];
-    var ask = c && c.status === "accepted"
-      ? "Remove this comparison? It ends for both of you." : null;
+    /* The one who asked ends it for everyone; anyone else only leaves it. */
+    var ask = !c || c.status !== "accepted" ? null
+      : c.mine ? "Remove this comparison? It ends for everyone in it."
+      : (c.to || []).length > 1 ? "Leave this comparison? It carries on for the others."
+      : "Leave this comparison? It ends for both of you.";
     if(ask && !window.confirm(ask)) return;
     fetch("/api/compare/" + encodeURIComponent(t.dataset.cmpDel), { method: "DELETE" })
       .then(function(){ delete CMP.runs[t.dataset.cmpDel]; return cmpLoad(); });
@@ -6401,60 +6462,67 @@ document.addEventListener("click", function(e){
 document.addEventListener("keydown", function(e){
   if(e.key !== "Enter" && e.key !== " ") return;
   var t = e.target.closest && e.target.closest("[data-cmp-to]");
-  if(t && e.target === t){ e.preventDefault(); sendCompare(t.dataset.cmpTo); }
+  if(t && e.target === t){
+    e.preventDefault();
+    if(t.getAttribute("aria-disabled") !== "true") togglePick(t.dataset.cmpTo);
+  }
 });
 
 /* ---- Compared, in Charts ---- */
+function cmpLive(c){ return c.status === "accepted" && (c.mine || c.my_answer === "accepted"); }
 function cmpRank(c){
-  if(c.status === "pending" && !c.mine) return 0;
-  if(c.status === "accepted") return 1;
+  if(c.my_answer === "pending") return 0;
+  if(cmpLive(c)) return 1;
   return c.status === "pending" ? 2 : 3;
 }
 function renderCompares(){
   var list = CMP.items.slice().sort(function(a, b){
-    return cmpRank(a) - cmpRank(b) || String(b.decided_at || b.at).localeCompare(String(a.decided_at || a.at));
+    return cmpRank(a) - cmpRank(b) || String(b.at).localeCompare(String(a.at));
   });
   $("cmpSec").hidden = !list.length;
   $("cmpEmpty").hidden = !!list.length;
   $("cmpCount").hidden = !CMP.waiting;
   $("cmpCount").textContent = CMP.waiting || "";
-  var live = list.filter(function(c){ return c.status === "accepted"; }).length;
+  var live = list.filter(cmpLive).length;
   $("cmpAux").textContent = live ? live + " live" : "";
   $("cmpList").innerHTML = list.map(function(c){
-    var other = esc(them(c).name), t = esc(cmpTitle(c));
-    if(c.status === "accepted"){
+    var t = esc(cmpTitle(c));
+    if(c.my_answer === "pending"){
+      return '<div class="chartcard cmp-pend in"><span class="who">' + esc(c.from.name) + " wants to compare" +
+        esc(alsoAsked(c)) + '<span class="t">' + t + '</span></span><span class="acts">' +
+        '<button class="btn btn-primary" type="button" data-cmp-yes="' + esc(c.id) + '">Accept</button>' +
+        '<button class="btn btn-ghost" type="button" data-cmp-no="' + esc(c.id) + '">Decline</button></span></div>';
+    }
+    if(cmpLive(c)){
+      var also = (c.waiting || []).length ? " \u00B7 waiting for " + names(c.waiting) : "";
+      var leave = !c.mine;
       return '<div class="chartcard cmp" data-cmp="' + esc(c.id) + '">' +
-        '<button class="chart-x" type="button" data-cmp-del="' + esc(c.id) + '" aria-label="Remove comparison">&#215;</button>' +
+        '<button class="chart-x" type="button" data-cmp-del="' + esc(c.id) + '" aria-label="' +
+        (leave ? "Leave comparison" : "Remove comparison") + '">&#215;</button>' +
         '<div class="chart-t">' + t + '<button class="t-ren" type="button" data-ren-scope="cmp" data-ren-id="' +
         esc(c.id) + '" aria-label="Rename this comparison">' + RENAME_PENCIL + "</button></div>" +
-        '<div class="chart-sub">You vs ' + other + '<span data-cmp-span></span></div>' +
-        /* Always live: worked out from both histories each time it is looked at,
-           never kept, so removing it really does end it. Marked like a live chart. */
+        '<div class="chart-sub">You vs ' + esc(names(c.with)) + '<span data-cmp-span></span>' + esc(also) + "</div>" +
+        /* Always live: worked out from everyone's history each time it is looked
+           at, never kept, so removing it really does end it. Marked like a live chart. */
         '<div class="chart-mode"><span class="m live"><i></i>Live</span></div>' +
         '<div data-cmp-body><div class="chart-note">Working it out...</div></div></div>';
     }
     var line, acts;
-    if(c.status === "pending" && c.mine){
-      line = "Waiting for " + other;
+    if(c.status === "pending"){
+      line = "Waiting for " + esc(names(c.waiting));
       acts = '<button class="btn btn-ghost" type="button" data-cmp-del="' + esc(c.id) + '">Cancel</button>';
-    } else if(c.status === "pending"){
-      line = other + " wants to compare";
-      acts = '<button class="btn btn-primary" type="button" data-cmp-yes="' + esc(c.id) + '">Accept</button>' +
-        '<button class="btn btn-ghost" type="button" data-cmp-no="' + esc(c.id) + '">Decline</button>';
     } else {
-      line = other + " declined";
+      line = esc(names(c.declined)) + " declined";
       acts = '<button class="btn btn-ghost" type="button" data-cmp-del="' + esc(c.id) + '">Remove</button>';
     }
-    var incoming = c.status === "pending" && !c.mine;
-    return '<div class="chartcard cmp-pend' + (incoming ? " in" : "") + '"><span class="who">' + line +
-      '<span class="t">' + t + "</span></span>" +
+    return '<div class="chartcard cmp-pend"><span class="who">' + line + '<span class="t">' + t + "</span></span>" +
       '<span class="acts">' + acts + "</span></div>";
   }).join("");
   /* Worked out only while someone is looking - the Compared tab open - and
      one at a time from the top, each shown when it is ready. Run on every
      visit to the app, they queued up with Home and slowed both. */
   if(!cmpShowing()) return;
-  var ids = list.filter(function(c){ return c.status === "accepted"; }).map(function(c){ return c.id; });
+  var ids = list.filter(cmpLive).map(function(c){ return c.id; });
   var seq = ++CMP.seq;
   (function next(i){
     if(i >= ids.length || seq !== CMP.seq || !cmpShowing()) return;
@@ -6487,7 +6555,7 @@ function fillCompare(cid){
     if(span) card.querySelector("[data-cmp-span]").textContent = " \u00B7 " + span;
     body.innerHTML = compareBody(res, cid);
     if(res.kind === "lines" && res.merged){
-      /* The server names both sides; on your screen, the first one is you. */
+      /* The server names everyone; on your screen, the first one is you. */
       var m = JSON.parse(JSON.stringify(res.merged));
       if(m.series && m.series[0]) m.series[0].name = "You";
       if(m.plan && m.plan.series && m.plan.series[0]) m.plan.series[0].name = "You";
@@ -6503,35 +6571,35 @@ function fillCompare(cid){
 
 function sideName(res, i){ return i === 0 ? "You" : res.sides[i].person.name; }
 
+/* Two or three answers side by side: a column each, narrower for three, with
+   lists cut shorter so three still fit a phone. */
 function compareBody(res, cid){
+  var n = res.sides.length, three = n > 2;
+  var cols = '<div class="cmp-two' + (three ? " n3" : "") + '">';
   function col(i, inner){
     var sd = res.sides[i];
     return '<div class="cmp-col"><div class="cmp-who">' + esc(sideName(res, i)) + "</div>" +
       (sd.data ? inner(sd.data) : '<div class="cmp-why">' + esc(sd.person.name + " has " + (sd.why || "nothing to show")) + "</div>") +
       "</div>";
   }
+  function each(inner){ return cols + res.sides.map(function(_, i){ return col(i, inner); }).join("") + "</div>"; }
   if(res.kind === "numbers"){
-    return '<div class="cmp-two">' + [0, 1].map(function(i){
-      return col(i, function(d){
-        var st = d.stat || {};
-        return statCard(st, true) + (st.facts || []).slice(0, 2).map(function(f){
-          return '<div class="cmp-f">' + esc(f[0]) + " <b>" + esc(f[1]) + "</b></div>";
-        }).join("");
-      });
-    }).join("") + "</div>";
+    return each(function(d){
+      var st = d.stat || {};
+      return statCard(st, true) + (st.facts || []).slice(0, three ? 1 : 2).map(function(f){
+        return '<div class="cmp-f">' + esc(f[0]) + " <b>" + esc(f[1]) + "</b></div>";
+      }).join("");
+    });
   }
   if(res.kind === "recent"){
-    return '<div class="cmp-two">' + [0, 1].map(function(i){
-      return col(i, function(d){
-        var st = Object.assign({}, d.stat || {});
-        st.rows = (st.rows || []).slice(0, 5);
-        return recentList(st, false);
-      });
-    }).join("") + "</div>";
+    return each(function(d){
+      var st = Object.assign({}, d.stat || {});
+      st.rows = (st.rows || []).slice(0, three ? 3 : 5);
+      return recentList(st, false);
+    });
   }
   if(res.kind === "lines"){
-    return res.merged ? '<canvas class="chart-canvas"></canvas>' :
-      '<div class="cmp-two">' + [0, 1].map(function(i){ return col(i, function(){ return ""; }); }).join("") + "</div>";
+    return res.merged ? '<canvas class="chart-canvas"></canvas>' : each(function(){ return ""; });
   }
   if(res.kind === "stacked"){
     return '<div class="cmp-stack">' + res.sides.map(function(sd, i){
@@ -6540,31 +6608,40 @@ function compareBody(res, cid){
           '<div class="cmp-why">' + esc(sd.person.name + " has " + (sd.why || "nothing to show")) + "</div>");
     }).join("") + "</div>";
   }
-  /* A ranking: two lists, and what is on both marked in each. */
+  /* A ranking: a list each, and what is on anyone else's marked. */
+  var rows = three ? 5 : 10;
   function keyOf(d, j){ return ((d.labels[j] || "") + "\u001f" + ((d.subs || [])[j] || "")).toLowerCase(); }
   var sets = res.sides.map(function(sd){
     var out = {};
-    if(sd.data) (sd.data.labels || []).forEach(function(_, j){ out[keyOf(sd.data, j)] = true; });
+    if(sd.data) (sd.data.labels || []).slice(0, rows).forEach(function(_, j){ out[keyOf(sd.data, j)] = true; });
     return out;
   });
-  var common = Object.keys(sets[0]).filter(function(k){ return sets[1][k]; }).length;
+  var html = each(function(d){
+    var i = res.sides.map(function(sd){ return sd.data; }).indexOf(d);
+    return (d.labels || []).slice(0, rows).map(function(lb, j){
+      var k = keyOf(d, j);
+      var shared = sets.some(function(s, x){ return x !== i && s[k]; });
+      var uri = (d.uris || [])[j], play = uri && PLAYABLE.test(uri) ? playAttr(uri) + ' tabindex="0" role="button"' : "";
+      var v = d.values[j];
+      v = v == null ? "" : (Math.round(v * 10) / 10);
+      return '<div class="cmp-r' + (shared ? " shared" : "") + '"' + play + '><span class="n">' + (j + 1) +
+        '</span><span class="mx"><span class="tn">' + esc(lb) + "</span>" +
+        ((d.subs || [])[j] ? '<span class="ta2">' + esc(d.subs[j]) + "</span>" : "") +
+        '</span><span class="v">' + esc(v) + "</span></div>";
+    }).join("");
+  });
+  /* How much overlaps: in common for two; on all three, and on two, for three. */
+  var counts = {};
+  sets.forEach(function(s){ Object.keys(s).forEach(function(k){ counts[k] = (counts[k] || 0) + 1; }); });
+  var all = 0, some = 0;
+  Object.keys(counts).forEach(function(k){ if(counts[k] === n) all++; else if(counts[k] > 1) some++; });
   var unit = (res.sides[0].data && res.sides[0].data.y_label) || "";
-  var html = '<div class="cmp-two">' + [0, 1].map(function(i){
-    return col(i, function(d){
-      return (d.labels || []).map(function(lb, j){
-        var shared = sets[1 - i][keyOf(d, j)];
-        var uri = (d.uris || [])[j], play = uri && PLAYABLE.test(uri) ? playAttr(uri) + ' tabindex="0" role="button"' : "";
-        var v = d.values[j];
-        v = v == null ? "" : (Math.round(v * 10) / 10);
-        return '<div class="cmp-r' + (shared ? " shared" : "") + '"' + play + '><span class="n">' + (j + 1) +
-          '</span><span class="mx"><span class="tn">' + esc(lb) + "</span>" +
-          ((d.subs || [])[j] ? '<span class="ta2">' + esc(d.subs[j]) + "</span>" : "") +
-          '</span><span class="v">' + esc(v) + "</span></div>";
-      }).join("");
-    });
-  }).join("") + "</div>";
-  return html + '<div class="cmp-common">' + esc(unit) + " \u00B7 " +
-    (common ? "<b>" + common + " in common</b>" : "nothing in common") + "</div>";
+  var said = !three
+    ? (all ? "<b>" + all + " in common</b>" : "nothing in common")
+    : (all || some
+        ? (all ? "<b>" + all + " on all three</b>" : "none on all three") + (some ? " \u00B7 " + some + " on two" : "")
+        : "nothing in common");
+  return html + '<div class="cmp-common">' + esc(unit) + " \u00B7 " + said + "</div>";
 }
 
 function closePlaylist(){

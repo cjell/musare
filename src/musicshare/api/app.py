@@ -779,7 +779,8 @@ def _me() -> str:
 
 
 class CompareAsk(BaseModel):
-    to: str = Field(min_length=1, max_length=64)
+    # One person, or a list of up to compare_mod.MAX_OTHERS.
+    to: list[str] | str
     spec: ChartSpec
     q: str = Field(default="", max_length=400)
     name: str | None = Field(default=None, max_length=compare_mod.MAX_NAME)
@@ -794,7 +795,7 @@ def compare_list() -> dict[str, object]:
     """Every comparison this person is in, and how many wait on their answer."""
     me = _me()
     items = [compare_mod.view(r, me) for r in compare_mod.involving(me)]
-    waiting = sum(1 for v in items if not v["mine"] and v["status"] == "pending")
+    waiting = sum(1 for v in items if v["my_answer"] == "pending")
     return {"me": me, "items": items, "waiting": waiting}
 
 
@@ -887,18 +888,20 @@ def compare_run(cid: str) -> dict[str, object]:
     """
     me = _me()
     rec = compare_mod.get(cid)
-    if rec is None or me not in (rec["from"], rec["to"]):
+    if rec is None or not compare_mod.can_see(rec, me):
         raise HTTPException(404, "no such comparison")
-    if rec["status"] != "accepted":
-        raise HTTPException(409, f"this comparison is {rec['status']}")
+    people = compare_mod.participants(rec)
+    if compare_mod.status(rec) != "accepted" or me not in people:
+        # Nobody has said yes yet, or this person has not: either way nobody
+        # else's listening is shown to them.
+        raise HTTPException(409, "this comparison is not live for you yet")
     try:
         spec = ChartSpec.model_validate(rec["spec"])
     except ValidationError:
         return {"understood": False}
-    them = rec["to"] if me == rec["from"] else rec["from"]
     sides: list[dict[str, object]] = []
     payloads: list[dict[str, object] | None] = []
-    for uid in (me, them):
+    for uid in [me, *(u for u in people if u != me)]:
         side: dict[str, object] = {"person": compare_mod.person(uid), "data": None, "why": None}
         if not history_mod.has_any(uid):
             side["why"] = "no listening history yet"

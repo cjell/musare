@@ -55,6 +55,10 @@ def send(to="bob", spec=TOP):
     return client.post("/api/compare", json={"to": to, "spec": spec, "q": "top songs"})
 
 
+def ids(r):
+    return [s["person"]["id"] for s in r.json()["sides"]]
+
+
 def test_a_request_waits_for_the_one_it_was_sent_to(people):
     as_, ran = people
     r = send()
@@ -125,7 +129,7 @@ def test_declined_is_told_to_the_sender_only(people):
     assert client.get("/api/compare").json()["items"][0]["status"] == "declined"
 
 
-def test_either_side_ends_it_for_both(people):
+def test_one_to_one_either_side_ends_it_for_both(people):
     as_, _ = people
     cid = send().json()["id"]
     as_("bob")
@@ -178,3 +182,79 @@ def test_a_comparison_is_worked_out_once_a_minute_for_both(people):
     r = client.get(f"/api/compare/{cid}/run").json()
     assert sorted(ran) == ["alice", "bob"]
     assert [s["person"]["id"] for s in r["sides"]] == ["alice", "bob"], "still you first"
+
+
+# ---------------------------------------------------------------- three people
+
+
+def test_three_people_each_answer_for_themselves(people):
+    as_, _ = people
+    cid = send(to=["bob", "cara"]).json()["id"]
+    assert client.get(f"/api/compare/{cid}/run").status_code == 409, "nobody has said yes"
+    as_("bob")
+    client.post(f"/api/compare/{cid}/accept")
+    as_("alice")
+    assert ids(client.get(f"/api/compare/{cid}/run")) == ["alice", "bob"]
+    v = client.get("/api/compare").json()["items"][0]
+    assert v["status"] == "accepted" and [w["id"] for w in v["waiting"]] == ["cara"]
+    as_("cara")
+    assert client.get("/api/compare").json()["waiting"] == 1
+    assert client.get(f"/api/compare/{cid}/run").status_code == 409, "not hers until she says yes"
+    client.post(f"/api/compare/{cid}/accept")
+    assert ids(client.get(f"/api/compare/{cid}/run")) == ["cara", "alice", "bob"], "you first"
+
+
+def test_leaving_takes_only_you_out(people):
+    as_, _ = people
+    cid = send(to=["bob", "cara"]).json()["id"]
+    for who in ("bob", "cara"):
+        as_(who)
+        client.post(f"/api/compare/{cid}/accept")
+    as_("cara")
+    assert client.delete(f"/api/compare/{cid}").status_code == 200
+    assert client.get("/api/compare").json()["items"] == []
+    as_("alice")
+    assert ids(client.get(f"/api/compare/{cid}/run")) == ["alice", "bob"]
+
+
+def test_the_one_who_asked_ends_it_for_everyone(people):
+    as_, _ = people
+    cid = send(to=["bob", "cara"]).json()["id"]
+    as_("bob")
+    client.post(f"/api/compare/{cid}/accept")
+    as_("alice")
+    client.delete(f"/api/compare/{cid}")
+    for who in ("bob", "cara"):
+        as_(who)
+        assert client.get("/api/compare").json()["items"] == []
+
+
+def test_one_declining_leaves_the_rest(people):
+    as_, _ = people
+    cid = send(to=["bob", "cara"]).json()["id"]
+    as_("bob")
+    client.post(f"/api/compare/{cid}/decline")
+    as_("cara")
+    client.post(f"/api/compare/{cid}/accept")
+    as_("alice")
+    v = client.get("/api/compare").json()["items"][0]
+    assert v["status"] == "accepted" and [d["id"] for d in v["declined"]] == ["bob"]
+    assert ids(client.get(f"/api/compare/{cid}/run")) == ["alice", "cara"]
+
+
+def test_three_in_all_at_most(people):
+    users.save({"id": "dan", "display_name": "Dan"})
+    assert send(to=["bob", "cara", "dan"]).status_code == 422
+
+
+def test_a_comparison_from_before_groups_still_reads(tmp_path, monkeypatch):
+    store = tmp_path / "old.json"
+    store.write_text(
+        '{"compares": [{"id": "x", "from": "a", "to": "b", "status": "accepted", '
+        '"decided_at": null, "spec": {}, "q": "", "at": "2026-11-17T00:00:00+00:00"}]}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(compare, "STORE", store)
+    rec = compare.get("x")
+    assert rec["to"] == ["b"] and compare.participants(rec) == ["a", "b"]
+    assert compare.status(rec) == "accepted"
