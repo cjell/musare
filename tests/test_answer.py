@@ -490,3 +490,10 @@ def test_a_window_has_to_make_sense(fields, field):
 
 def test_windows_that_are_not_the_menu_do_not_step(history):
     assert not chartrun.steppable(ChartSpec(range="7d", last=2, last_unit="week"))
+
+
+def test_only_a_card_about_a_song_plays(history):
+    """Tapping a count of an artist or an album is not asking for a song."""
+    assert ask(answer="number", metric="plays", artists=["MTNS"]).stat["uri"] == ""
+    assert ask(answer="number", metric="plays", albums=["Salvage"]).stat["uri"] == ""
+    assert ask(answer="top", dimension="artist", limit=1).stat["uri"] == ""

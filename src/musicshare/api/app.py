@@ -794,7 +794,38 @@ def compare_remove(cid: str) -> dict[str, object]:
     return {"removed": cid}
 
 
-@app.get("/api/compare/{cid}/run", dependencies=[Depends(heavy_slot)])
+# One person's answer to one comparison, kept for a minute: both people opening
+# it, or one person flicking between tabs, is one run rather than several.
+COMPARE_TTL = 60.0
+_compare_cache: dict[tuple[str, str], tuple[float, dict[str, object]]] = {}
+_compare_lock = threading.Lock()
+
+
+def _compare_side(cid: str, uid: str, spec: ChartSpec) -> dict[str, object]:
+    """One side's answer, from the cache or worked out now.
+
+    The newest plays are fetched first and outside a heavy slot: that is a wait
+    on Supabase, not work for this machine, and holding a slot through it held
+    up every other chart on the page. The chart itself is a slot each, one side
+    at a time, so a comparison takes turns with everything else.
+    """
+    now = time.monotonic()
+    with _compare_lock:
+        for k in [k for k, (at, _) in _compare_cache.items() if now - at > COMPARE_TTL]:
+            del _compare_cache[k]
+        hit = _compare_cache.get((cid, uid))
+    if hit:
+        return hit[1]
+    with users.as_user(uid):
+        live_mod.pull_if_stale()
+        with heavy():
+            data = _chart_payload(run_chart(spec))
+    with _compare_lock:
+        _compare_cache[(cid, uid)] = (time.monotonic(), data)
+    return data
+
+
+@app.get("/api/compare/{cid}/run")
 def compare_run(cid: str) -> dict[str, object]:
     """Both answers to an accepted comparison, each from its own history.
 
@@ -819,9 +850,7 @@ def compare_run(cid: str) -> dict[str, object]:
         if not history_mod.has_any(uid):
             side["why"] = "no listening history yet"
         else:
-            with users.as_user(uid):
-                live_mod.pull_if_stale()
-                side["data"] = _chart_payload(run_chart(spec))
+            side["data"] = _compare_side(cid, uid, spec)
         sides.append(side)
         payloads.append(side["data"])  # type: ignore[arg-type]
     kind = compare_mod.kind_of(spec, payloads)

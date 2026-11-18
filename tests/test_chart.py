@@ -374,9 +374,8 @@ def test_other_charts_carry_no_artist():
     assert run(ChartSpec(dimension="artist", limit=5)).subs == []
 
 
-@pytest.mark.parametrize("dimension", ["track", "album", "artist"])
-def test_each_bar_of_songs_albums_or_artists_has_a_song_to_play(dimension):
-    d = run(ChartSpec(dimension=dimension, limit=10))
+def test_each_song_bar_has_its_song_to_play():
+    d = run(ChartSpec(dimension="track", limit=10))
     assert len(d.uris) == len(d.labels)
     assert all(u.startswith("spotify:track:") for u in d.uris if u)
     assert sum(bool(u) for u in d.uris) >= len(d.uris) - 1
@@ -398,5 +397,7 @@ def test_a_song_bar_plays_that_song():
         assert title in names
 
 
-def test_bars_of_anything_else_play_nothing():
-    assert run(ChartSpec(dimension="day_of_week")).uris == []
+@pytest.mark.parametrize("dimension", ["artist", "album", "day_of_week"])
+def test_bars_of_anything_but_songs_play_nothing(dimension):
+    """Tapping an artist is not asking for one of their songs."""
+    assert run(ChartSpec(dimension=dimension)).uris == []

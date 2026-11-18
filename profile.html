@@ -4462,7 +4462,7 @@ function artistCircles(list, down){
     var art = a[2]
       ? 'class="art photo" style="display:block;background-image:url(' + a[2] + ')"'
       : 'class="art" style="display:block;' + artStyle(a[0], 200) + '"';
-    return '<div class="rise" tabindex="0" role="button"' + playAttr(spUri("track", { uri: a[3] })) + ">" +
+    return '<div class="rise" tabindex="0" role="button">' +
       '<span class="ring"><span ' + art + "></span></span>" +
       '<span class="rn">' + esc(a[0]) + '</span><span class="rd' + (down ? " down" : "") + '">' +
       esc(a[1]) + "</span></div>";
@@ -6258,7 +6258,7 @@ document.addEventListener("keydown", function(e){
    (see compare.py); then it is live for both, under Compared in Charts, until
    either removes it. The bell says when one is waiting on you. */
 var RENAME_PENCIL = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/><path d="M14 6l4 4"/></svg>';
-var CMP = { items: [], waiting: 0, me: null, people: [], pick: null, runs: {} };
+var CMP = { items: [], waiting: 0, me: null, people: [], pick: null, runs: {}, seq: 0 };
 var CMP_TTL = 60 * 1000;
 
 function cmpLoad(){
@@ -6450,8 +6450,19 @@ function renderCompares(){
       '<span class="t">' + t + "</span></span>" +
       '<span class="acts">' + acts + "</span></div>";
   }).join("");
-  list.forEach(function(c){ if(c.status === "accepted") fillCompare(c.id); });
+  /* Worked out only while someone is looking - the Compared tab open - and
+     one at a time from the top, each shown when it is ready. Run on every
+     visit to the app, they queued up with Home and slowed both. */
+  if(!cmpShowing()) return;
+  var ids = list.filter(function(c){ return c.status === "accepted"; }).map(function(c){ return c.id; });
+  var seq = ++CMP.seq;
+  (function next(i){
+    if(i >= ids.length || seq !== CMP.seq || !cmpShowing()) return;
+    fillCompare(ids[i]).then(function(){ next(i + 1); });
+  })(0);
 }
+
+function cmpShowing(){ return !$("screenCharts").hidden && !$("chartsCmp").hidden; }
 
 function fillCompare(cid){
   var hit = CMP.runs[cid];
@@ -6461,7 +6472,7 @@ function fillCompare(cid){
       .then(function(r){ return r.ok ? r.json() : null; }).catch(function(){ return null; });
     CMP.runs[cid] = { at: Date.now(), p: p };
   }
-  p.then(function(res){
+  return p.then(function(res){
     var card = document.querySelector('[data-cmp="' + cid + '"]');
     if(!card) return;
     var body = card.querySelector("[data-cmp-body]");
@@ -6999,7 +7010,7 @@ function renderPins(p){
     var apin = ap[j];
     var ademo = (!aAny && p.artists[j]) ? p.artists[j] : null;
     if(apin){
-      ah += '<div class="artist pinbox" tabindex="0" role="button"' + playAttr(spUri("artist", apin)) + ">" +
+      ah += '<div class="artist pinbox" tabindex="0" role="button">' +
         '<div class="ring"><div ' + artAttr(apin, apin.name, hue) + "></div></div>" +
         '<div class="an">' + esc(apin.name) + '</div><div class="ameta">' +
         (apin.your_hours ? esc(apin.your_hours) + "h" : "") + "</div>" +

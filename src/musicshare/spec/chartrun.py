@@ -89,12 +89,12 @@ MAX_TABLE_ROWS = 60
 # carries both, split apart again after the query: the title is the label, short
 # enough for an axis, and the artist rides along for the hover.
 BY_ARTIST = frozenset({"track", "album"})
-# Bars that play when tapped, and what they play: the track this listener has
-# played most inside each bar - the song itself, the album's most-played song,
-# the artist's most-played song. A song rather than the album or the artist's
-# top tracks because the history has track uris and nothing else, so it costs no
-# Spotify request, and because "your song of theirs" is the more personal answer.
-PLAYABLE_BARS = frozenset({"track", "album", "artist"})
+# Bars that play when tapped: songs, and only songs. An artist or album bar
+# used to play the listener's most-played song inside it, which made tapping an
+# artist start music nobody asked for - tapping plays what was tapped, and an
+# artist is not a song. The uri is the one this listener played most under that
+# title, so a remaster or a single and its album cut play the version they know.
+PLAYABLE_BARS = frozenset({"track"})
 KEY_SEP = ""  # a control character, so no real title can contain it
 
 DIMENSIONS: dict[str, tuple[str, str]] = {
@@ -1241,7 +1241,9 @@ def _answer(spec: ChartSpec) -> ChartData:
         stat["facts"] = _facts(
             spec, con, frm, where, params, plays, hrs, hrs_unit, first, last, rated
         )
-        if spec.tracks or spec.albums or spec.artists:
+        # Only a card about a song plays one: a count of an artist or an album is
+        # not a song to tap, for the same reason as PLAYABLE_BARS.
+        if spec.tracks:
             top = con.execute(
                 f"select track_uri from {frm} where {where} and track_uri like 'spotify:track:%' "
                 "group by 1 order by count(*) desc limit 1",

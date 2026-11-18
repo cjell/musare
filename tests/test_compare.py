@@ -164,3 +164,17 @@ def test_the_kind_follows_the_answer():
     assert k(dimension="artist") == "ranked"
     assert k(dimension="hour_of_day") == "lines"
     assert k(dimension="date", grain="year", series="artist") == "stacked"
+
+
+def test_a_comparison_is_worked_out_once_a_minute_for_both(people):
+    """Both people opening it, or one opening it twice, runs each side once."""
+    as_, ran = people
+    cid = send().json()["id"]
+    as_("bob")
+    client.post(f"/api/compare/{cid}/accept")
+    client.get(f"/api/compare/{cid}/run")
+    client.get(f"/api/compare/{cid}/run")
+    as_("alice")
+    r = client.get(f"/api/compare/{cid}/run").json()
+    assert sorted(ran) == ["alice", "bob"]
+    assert [s["person"]["id"] for s in r["sides"]] == ["alice", "bob"], "still you first"
