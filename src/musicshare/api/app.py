@@ -14,13 +14,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import secrets
 import shutil
 import threading
 import time
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 
+import anyio
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field, ValidationError
@@ -61,7 +63,29 @@ from musicshare.web.render import render
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="munity")
+# ------------------------------------------------------------ worker threads
+#
+# Every sync route runs on a worker thread, and the heavy ones then wait for a
+# heavy slot (HEAVY_AT_ONCE, below) on that thread. With AnyIO's default of 40
+# threads, a burst of more than 40 heavy requests filled every thread with a
+# waiter, and the two requests holding the slots had no thread left to run on:
+# nothing could finish, nothing could start, and it stayed that way. The site
+# went down on 2026-11-18 exactly so, while /health - async, needing no thread
+# - kept saying it was fine.
+#
+# More threads than Fly will ever send requests at once (hard_limit in
+# fly.toml, checked by a test) means a request holding a slot always has a
+# thread to finish on. Waiting threads are cheap; a deadlocked server is not.
+WORKER_THREADS = 100
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    anyio.to_thread.current_default_thread_limiter().total_tokens = WORKER_THREADS
+    yield
+
+
+app = FastAPI(title="munity", lifespan=lifespan)
 
 # ------------------------------------------------------------- who is asking
 #
@@ -376,11 +400,40 @@ def _fitted() -> tuple[object, object, object]:
 # async, so it answers on the event loop rather than queueing for a worker
 # thread behind the heavy routes - a busy app is not a dead one, and a health
 # check that waits its turn tells Fly otherwise.
+# How long the worker threads may be unable to take even a no-op before the
+# process gives up and exits, so Fly starts it again.
+THREADS_STUCK_EXIT = 90.0
+_stuck_since: float | None = None
+
+
 @app.get("/health")
-async def health() -> dict[str, object]:
-    # Only whether the process answers. It once also said whether "the" user had
-    # a history, which is a fact about someone, given to anyone who asks.
-    return {"ok": True}
+async def health() -> JSONResponse:
+    """Whether the process can still do work, not merely whether it answers.
+
+    This route is async, so it answered "ok" all through the outage while every
+    real request hung. It now asks a worker thread to do nothing: if none can
+    within a few seconds the server is stuck, Fly is told so and routes around
+    it, and after THREADS_STUCK_EXIT of that the process exits so the machine
+    restarts - which is what fixed the outage, done without anyone noticing it.
+
+    Only whether the process works. It once also said whether "the" user had a
+    history, which is a fact about someone, given to anyone who asks.
+    """
+    global _stuck_since
+    try:
+        with anyio.fail_after(5):
+            await anyio.to_thread.run_sync(lambda: None)
+    except TimeoutError:
+        now = time.monotonic()
+        _stuck_since = _stuck_since or now
+        stuck = now - _stuck_since
+        log.error("worker threads have been stuck for %.0fs", stuck)
+        if stuck > THREADS_STUCK_EXIT:
+            log.error("exiting so the machine restarts")
+            os._exit(1)
+        return JSONResponse({"ok": False, "stuck_for": round(stuck)}, status_code=503)
+    _stuck_since = None
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/search")
