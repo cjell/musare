@@ -633,22 +633,40 @@ body{
 /* The answer to a question that has one but cannot be drawn. Deliberately not
    styled as a chart - no canvas, no axes - because it is not making a visual
    claim, it is showing the numbers. */
-.ctab{display:flex;flex-direction:column;gap:9px;margin-top:2px}
-.ctab-g{display:flex;gap:10px;align-items:baseline}
+.ctab{display:flex;flex-direction:column;gap:5px;margin-top:4px}
+.ctab-g{display:flex;gap:8px;align-items:flex-start}
 .ctab-b{
-  flex:0 0 54px;font-family:"IBM Plex Mono",monospace;font-size:10.5px;
-  letter-spacing:.06em;color:var(--ink-3);padding-top:1px;
+  flex:0 0 76px;font-family:"IBM Plex Mono",monospace;font-size:10px;line-height:1.35;
+  letter-spacing:.04em;color:var(--ink-2);padding-top:8px;
 }
 .ctab-l{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
-.ctab-r{display:flex;gap:7px;align-items:baseline;font-size:12.5px;min-width:0}
+/* Each row sits on a faint bar as long as its share of the biggest row in the
+   table, so a big week stands out without reading the numbers. */
+.ctab-r{
+  position:relative;display:flex;gap:8px;align-items:center;min-width:0;
+  padding:6px 8px;border-radius:7px;overflow:hidden;
+}
+.ctab-bar{
+  position:absolute;left:0;top:0;bottom:0;background:var(--accent);opacity:.09;
+  border-radius:7px;pointer-events:none;
+}
+.ctab-r > :not(.ctab-bar){position:relative}
 .ctab-n{
   flex:0 0 auto;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--ink-3);
 }
-.ctab-t{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ctab-r .mx{min-width:0;flex:1 1 auto}
+.ctab-r .tn{display:block;font-size:12.5px;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ctab-r .ta2{display:block;font-size:10.5px;color:var(--ink-3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ctab-v{
-  margin-left:auto;flex:0 0 auto;font-family:"IBM Plex Mono",monospace;
-  font-size:10.5px;color:var(--ink-3);font-variant-numeric:tabular-nums;
+  margin-left:auto;flex:0 0 auto;text-align:right;font-family:"IBM Plex Mono",monospace;
+  font-size:10.5px;color:var(--ink-2);font-variant-numeric:tabular-nums;
 }
+.ctab-p{display:block;font-size:9.5px;color:var(--ink-3);margin-top:2px}
+.ctab-r[data-play]{cursor:pointer}
+.ctab-r[data-play]:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.ctab-r.is-playing .tn{color:var(--accent)}
+.pl.chartpin.small .ctab-b{flex-basis:60px;font-size:9.5px}
+.pl.chartpin.small .ctab-r{padding:4px 6px}
 /* Two readings of one section, not two sections. Artists and songs answer the
    same question about the same month and stacking them twice would say so
    twice. */
@@ -7179,18 +7197,34 @@ function tableVal(v, unit){
 }
 
 /* Rows grouped by period. The server decides this shape, not the page and not
-   the model - see chart_for(). */
+   the model - see chart_for(). Each row is a song over its artist, like the
+   recent list, on a bar as long as its share of the table's biggest row. A
+   rank shows only when a period has more than one row. Tables saved before
+   rows carried a label and a title still read, from bucket and name. */
 function chartTable(d){
-  var out = [], cur = null, open = false;
-  (d.table || []).forEach(function(c){
+  var rows = d.table || [], out = [], cur = null, open = false;
+  var most = 0, ranked = false;
+  rows.forEach(function(c){
+    if((c.value || 0) > most) most = c.value;
+    if(c.rank > 1) ranked = true;
+  });
+  rows.forEach(function(c){
     if(c.bucket !== cur){
       if(open) out.push("</div></div>");
-      out.push('<div class="ctab-g"><div class="ctab-b">' + esc(c.bucket) + '</div><div class="ctab-l">');
+      out.push('<div class="ctab-g"><div class="ctab-b">' + esc(c.label || c.bucket) + '</div><div class="ctab-l">');
       cur = c.bucket; open = true;
     }
-    out.push('<div class="ctab-r"><span class="ctab-n">' + c.rank + '</span>' +
-      '<span class="ctab-t">' + esc(c.name) + '</span>' +
-      '<span class="ctab-v">' + esc(tableVal(c.value, d.y_label)) + "</span></div>");
+    var pct = most > 0 ? Math.max(2, Math.round((c.value || 0) / most * 100)) : 0;
+    var play = c.uri && PLAYABLE.test(c.uri) ? playAttr(c.uri) + ' tabindex="0" role="button"' : "";
+    var full = c.title && c.sub ? c.name : "";
+    var plays = d.y_label !== "plays" && c.plays
+      ? '<span class="ctab-p">' + c.plays + (c.plays === 1 ? " play" : " plays") + "</span>" : "";
+    out.push('<div class="ctab-r"' + play + (full ? ' title="' + esc(full) + '"' : "") + ">" +
+      '<span class="ctab-bar" style="width:' + pct + '%"></span>' +
+      (ranked ? '<span class="ctab-n">' + c.rank + "</span>" : "") +
+      '<span class="mx"><span class="tn">' + esc(c.title || c.name) + "</span>" +
+      (c.sub ? '<span class="ta2">' + esc(c.sub) + "</span>" : "") + "</span>" +
+      '<span class="ctab-v">' + esc(tableVal(c.value, d.y_label)) + plays + "</span></div>");
   });
   if(open) out.push("</div></div>");
   return '<div class="ctab">' + out.join("") + "</div>";

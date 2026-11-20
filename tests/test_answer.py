@@ -648,3 +648,56 @@ def test_a_scope_reaches_the_title_and_the_recent_list(calendar):
     assert d.title == f"Recent songs {chartrun.DOT} 2am"
     assert [r["name"] for r in d.stat["rows"]] == ["Late"]
     assert d.span.startswith(f"2am{DASH}3am")
+
+
+def test_a_table_row_reads_like_a_song(calendar):
+    """Title over artist, the period as people say it, plays, and the song."""
+    d = ask(
+        dimension="date",
+        grain="year",
+        per_period=True,
+        series="track",
+        limit=1,
+        metric="plays",
+        months=[12, 1, 2],
+    )
+    top = d.table[0]
+    assert (top.label, top.title, top.sub, top.plays) == ("Winter 2024", "Ice", "C", 6)
+    assert top.name == "Ice - C" and top.bucket == "2024", "the plain forms are kept"
+    assert top.uri.startswith("spotify:track:")
+    artists = ask(
+        dimension="date", grain="year", per_period=True, series="artist", limit=1, metric="plays"
+    )
+    assert artists.table[0].uri == "" and artists.table[0].sub == "", "an artist is not a song"
+
+
+def test_a_weekend_is_named_by_its_days(calendar):
+    d = ask(
+        dimension="date",
+        grain="week",
+        per_period=True,
+        series="track",
+        limit=1,
+        metric="plays",
+        days=["sat", "sun"],
+        year=2024,
+    )
+    assert [c.label for c in d.table if c.title == "Spring"] == [
+        f"Apr 20{DASH}21",
+        f"Apr 13{DASH}14",
+        f"Apr 6{DASH}7",
+    ]
+
+
+@pytest.mark.parametrize(
+    "title, short",
+    [
+        ("Gold - 2022 Remix", "Gold"),
+        ("Cowboys and Angels - 2010 Remastered Version", "Cowboys and Angels"),
+        ("Sunflower (feat. Swae Lee)", "Sunflower"),
+        ("Song (Interlude)", "Song (Interlude)"),
+        ("(What's the Story) Morning Glory?", "(What's the Story) Morning Glory?"),
+    ],
+)
+def test_a_version_tail_is_trimmed_for_reading(title, short):
+    assert chartrun.short_title(title) == short

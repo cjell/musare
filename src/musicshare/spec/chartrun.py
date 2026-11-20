@@ -9,6 +9,7 @@ this cannot be talked into running one.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any
@@ -157,12 +158,23 @@ NATURAL_ORDER = ORDERED
 
 @dataclass
 class Cell:
-    """One row of a table: which period, what placed there, and how much."""
+    """One row of a table: which period, what placed there, and how much.
+
+    `bucket` and `name` are the plain forms, kept as they were for anything
+    that reads them. The rest are for reading: the period as people say it,
+    a song's title without its version tail and its artist beneath, how many
+    plays, and the song to play when the row is tapped.
+    """
 
     bucket: str
     rank: int
     name: str
     value: float
+    label: str = ""
+    title: str = ""
+    sub: str = ""
+    plays: int = 0
+    uri: str = ""
 
 
 @dataclass
@@ -1068,9 +1080,22 @@ def _per_period(
     perfectly well downwards.
     """
     split_sql, split_params = _split_by(spec)
+    # A song or a record keeps its title and artist apart here, so the row can
+    # show one under the other; `name` is still "title - artist" for anything
+    # that reads it as before.
+    two = spec.series in BY_ARTIST
+    if two:
+        split_sql = DIMENSIONS[spec.series][0]
+    uri = (
+        "mode(track_uri) filter (where track_uri like 'spotify:track:%')"
+        if spec.series in PLAYABLE_BARS
+        else "null"
+    )
     sql = f"""
-        select bucket, name, v, rk from (
+        select bucket, name, v, rk, n, uri from (
           select {dim_sql} as bucket, {split_sql} as name, {metric_sql} as v,
+                 count(*) filter (where ms_played >= {MIN_MS}) as n,
+                 {uri} as uri,
                  row_number() over (
                    partition by {dim_sql} order by {metric_sql} desc, {split_sql}
                  ) as rk
@@ -1086,11 +1111,88 @@ def _per_period(
     # the window - so their parameters are bound twice, in that order.
     bound = dim_params + split_params + dim_params + split_params + params
     rows = con.execute(sql, bound).fetchall()
-    table = [
-        Cell(bucket=_bucket_label(spec, b), rank=int(rk), name=str(n), value=round(float(v), 2))
-        for b, n, v, rk in rows
-    ]
+    newest = rows[0][0] if rows else None
+    table = []
+    for b, n, v, rk, plays, u in rows:
+        title, sub = str(n), ""
+        if two:
+            title, _, sub = str(n).partition(KEY_SEP_SQL)
+        table.append(
+            Cell(
+                bucket=_bucket_label(spec, b),
+                rank=int(rk),
+                name=f"{title} - {sub}" if two else title,
+                value=round(float(v), 2),
+                label=_period_name(spec, b, newest),
+                title=short_title(title) if two else title,
+                sub=sub,
+                plays=int(plays or 0),
+                uri=str(u or ""),
+            )
+        )
     return [], [], [], sql.strip(), table
+
+
+# What DIMENSIONS joins a title and its artist with, as the database returns it.
+KEY_SEP_SQL = chr(31)
+
+# A version tail on a title: " - 2010 Remastered Version", " - 2022 Remix",
+# " (feat. X)", " [Live]". Only these words, so a title whose brackets are part
+# of it - "(Interlude)", "(What's the Story)" - keeps them.
+VERSION_TAIL = re.compile(
+    r"\s*(?:\s-\s|\(|\[)[^)\]]*\b(?:remaster(?:ed)?|remix|mix|version|edit|live|mono|"
+    r"stereo|demo|acoustic|feat\.?|ft\.?|with|deluxe|bonus|single|radio|extended|"
+    r"instrumental|sped up|slowed|re-?recorded)\b.*$",
+    re.IGNORECASE,
+)
+
+
+def short_title(title: str) -> str:
+    """A title as it reads on a row, without the catalogue's version tail."""
+    cut = VERSION_TAIL.sub("", title).strip()
+    return cut or title
+
+
+def _days_of(spec: ChartSpec) -> tuple[int, int]:
+    """The first and last weekday counted in a week, Monday 1 to Sunday 7."""
+    d = sorted({DAY_NUM[x] for x in spec.days if x in DAY_NUM}) or [1, 7]
+    return d[0], d[-1]
+
+
+def _period_name(spec: ChartSpec, k: Any, newest: Any) -> str:
+    """A period the way people say it: '2025', 'Summer 2025', 'Nov 2026',
+    'Nov 14-15' for a weekend, 'Sat, Nov 14'. A week or a day carries its year
+    only when it is not the newest one's, so a table that crosses New Year
+    still says which."""
+    if spec.dimension == "hour_of_day":
+        return _clock(int(k))
+    if spec.dimension == "day_of_week":
+        return DAY_WORD.get(int(k), str(k))
+    if spec.dimension != "date" or not hasattr(k, "year"):
+        return _bucket_label(spec, k)
+    grain = spec.grain or "month"
+    if grain == "year":
+        season = SEASONS.get(frozenset(spec.months))
+        if season:
+            return f"{season.title()} {k.year}"
+        if len(set(spec.months)) == 1:
+            return f"{MONTHS[spec.months[0] - 1]} {k.year}"
+        return str(k.year)
+    if grain == "month":
+        return f"{MONTHS[k.month - 1]} {k.year}"
+    year = "" if newest is None or getattr(newest, "year", k.year) == k.year else f", {k.year}"
+    start = date(k.year, k.month, k.day)
+    if grain == "day":
+        return f"{DOW[start.isoweekday()]}, {_pretty(start)}{year}"
+    first, last = _days_of(spec)
+    a, b = start + timedelta(days=first - 1), start + timedelta(days=last - 1)
+    if a == b:
+        text = _pretty(a)
+    elif a.month == b.month:
+        text = f"{_pretty(a)}{EN}{b.day}"
+    else:
+        text = f"{_pretty(a)} {EN} {_pretty(b)}"
+    return text + year
 
 
 def _split(

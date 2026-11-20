@@ -680,6 +680,19 @@ GALLERY: list[tuple[str, ChartSpec]] = [
             limit=3,
         ),
     ),
+    (
+        "table of songs",
+        ChartSpec(
+            dimension="date",
+            grain="week",
+            series="track",
+            per_period=True,
+            limit=1,
+            days=["sat", "sun"],
+            last=10,
+            last_unit="week",
+        ),
+    ),
     ("empty", ChartSpec(title="nobody", dimension="artist", artists=["no such artist anywhere"])),
 ]
 
@@ -757,7 +770,18 @@ def _chart_payload(d: ChartData) -> dict[str, object]:
         # Present when the answer exists but is not drawable - the page
         # renders rows instead of a canvas. Never both.
         "table": [
-            {"bucket": c.bucket, "rank": c.rank, "name": c.name, "value": c.value} for c in d.table
+            {
+                "bucket": c.bucket,
+                "rank": c.rank,
+                "name": c.name,
+                "value": c.value,
+                "label": c.label,
+                "title": c.title,
+                "sub": c.sub,
+                "plays": c.plays,
+                "uri": c.uri,
+            }
+            for c in d.table
         ],
     }
     # How to draw it, decided where it is tested - see spec/plot.py.
