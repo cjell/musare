@@ -37,6 +37,7 @@ from musicshare import history as history_mod
 from musicshare import home as home_mod
 from musicshare import live as live_mod
 from musicshare import media as media_mod
+from musicshare import pinstats as pinstats_mod
 from musicshare import playlists as pl_mod
 from musicshare import regions as regions_mod
 from musicshare import shows as shows_mod
@@ -108,6 +109,7 @@ VIEWABLE = (
     "/api/map",
     "/api/playlists",
     "/api/chart/pinned",
+    "/api/pins/stats",
 )
 
 
@@ -1029,6 +1031,46 @@ def chart_pinned(slot: int = Query(..., ge=0, lt=CHART_PIN_SLOTS)) -> dict[str, 
     live_mod.pull_if_stale()
     d = run_chart(spec)
     return {"understood": True, "empty": d.empty, "problems": [], "data": _chart_payload(d)}
+
+
+# ---------------------------------------------------------- pinned numbers
+#
+# Hours and plays beside a profile's pinned songs and artists. Two doors, for
+# the reason /api/chart/pinned has one: a visitor can see the numbers for what
+# the owner pinned, and cannot point an arbitrary song at someone else's
+# history. Looking at a profile (GET, ?user=) reads the pins from the owner's
+# saved profile and never from the request. Your own (POST) takes the pins
+# from the page, so a pin just made shows its number before the save lands -
+# and it only ever runs over your own history, because a POST never reads ?user.
+
+
+class PinItems(BaseModel):
+    tracks: list[dict[str, object]] = Field(default_factory=list, max_length=pinstats_mod.MAX_ITEMS)
+    artists: list[dict[str, object]] = Field(
+        default_factory=list, max_length=pinstats_mod.MAX_ITEMS
+    )
+
+
+@app.get("/api/pins/stats", dependencies=[Depends(needs_history), Depends(heavy_slot)])
+def pin_stats_saved() -> dict[str, object]:
+    """The numbers for the pins on this profile as it is saved."""
+    if not media_mod.configured():
+        return {"tracks": {}, "artists": {}}
+    try:
+        doc = media_mod.get_doc("profile") or {}
+    except Exception as e:
+        log.warning("profile read failed: %s", e)
+        raise HTTPException(502, "could not read the profile") from e
+    if isinstance(doc.get("0"), dict):
+        doc = doc["0"]
+    pins = doc.get("pins") or {}
+    return pinstats_mod.stats(pins.get("tracks"), pins.get("artists"))
+
+
+@app.post("/api/pins/stats", dependencies=[Depends(needs_history), Depends(heavy_slot)])
+def pin_stats_mine(body: PinItems) -> dict[str, object]:
+    """The numbers for pins on your own profile, as the page has them now."""
+    return pinstats_mod.stats(body.tracks, body.artists)
 
 
 @app.get("/api/home", dependencies=[Depends(needs_history), Depends(heavy_slot)])

@@ -1328,6 +1328,18 @@ details[open] summary .chev{transform:rotate(180deg)}
    item rather than to its picture. */
 .pinbox{position:relative}
 .row.pinbox .unpin{right:0;top:50%;transform:translateY(-50%)}
+/* Hours or plays beside a pin - the owner's history, worked out when the
+   profile is looked at. The unpin control sits where the number does, so in
+   edit mode the number steps left of it. */
+.row .pstat{
+  flex:none;font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  font-size:10.5px;color:var(--ink-3);
+}
+.row .pstat:empty{display:none}
+.editing .row.pinbox .pstat{margin-right:26px}
+.pstat-ctl{margin:-4px 0 10px}
+.pstat-ctl .chart-mode{margin:0}
+.pstat-ctl button[aria-pressed="true"]{color:var(--accent);cursor:default}
 .artist.pinbox .unpin{right:-2px;top:-2px}
 .pl.pinbox .unpin{right:-6px;top:-6px}
 
@@ -2090,11 +2102,13 @@ details[open] summary .chev{transform:rotate(180deg)}
 
     <section class="sec anim a1">
       <div class="sec-label"><span>Tracks</span><span class="aux" id="trackAux"></span></div>
+      <div class="pstat-ctl" id="trackStatCtl" hidden></div>
       <div class="rows" id="tracks"></div>
     </section>
 
     <section class="sec anim a2">
       <div class="sec-label"><span>Artists</span><span class="aux" id="artistAux"></span></div>
+      <div class="pstat-ctl" id="artistStatCtl" hidden></div>
       <div class="agrid" id="artists"></div>
     </section>
 
@@ -7067,6 +7081,107 @@ document.addEventListener("keydown", function(e){
   tapPlay(row);
 });
 
+/* ---------- hours or plays beside pinned songs and artists ----------
+   The owner chooses, per section, which number shows - or none - and it is
+   saved with the profile, so a visitor sees what the owner chose. The numbers
+   are the owner's, worked out by the server from their history: your own
+   profile sends its pins (so a new pin gets its number before the save lands),
+   anyone else's is read from what they saved, never from this page. */
+var PIN_STAT_MODES = ["hours", "plays", "off"];
+var PIN_STATS = {};          /* uid -> { sig, at, data } */
+var PIN_STATS_TTL = 5 * 60 * 1000;
+
+function pinStatMode(kind){
+  var c = CUSTOM[current] || {}, m = c.pinStat && c.pinStat[kind];
+  return PIN_STAT_MODES.indexOf(m) >= 0 ? m : "hours";
+}
+
+function pinStatText(st, mode){
+  if(!st || mode === "off" || !(st.plays || st.hours)) return "";
+  if(mode === "plays"){
+    var n = st.plays;
+    if(!n) return "";
+    var num = n >= 10000 ? Math.round(n / 1000) + "k" : n >= 1000 ? Math.round(n / 100) / 10 + "k" : String(n);
+    return num + (n === 1 ? " play" : " plays");
+  }
+  if(st.hours < 1) return Math.max(1, Math.round(st.hours * 60)) + " min";
+  return (st.hours >= 10 ? Math.round(st.hours) : Math.round(st.hours * 10) / 10) + "h";
+}
+
+function pinStatSig(){
+  function ids(kind){ return pinList(kind).map(function(x){ return x ? x.id : ""; }).join(","); }
+  return ids("tracks") + "|" + ids("artists");
+}
+
+function paintPinStats(){
+  var got = PIN_STATS[uidOf(current)], data = got && got.sig === pinStatSig() ? got.data : null;
+  var els = document.querySelectorAll("[data-pstat]");
+  for(var i = 0; i < els.length; i++){
+    var kind = els[i].dataset.pstat, st = data && data[kind] && data[kind][els[i].dataset.pstatId];
+    els[i].textContent = pinStatText(st, pinStatMode(kind));
+  }
+}
+
+function loadPinStats(){
+  var uid = uidOf(current), sig = pinStatSig(), got = PIN_STATS[uid];
+  if(!uid || sig === "|" || /^,*\|,*$/.test(sig)) return;
+  if(got && got.sig === sig && (got.loading || Date.now() - got.at < PIN_STATS_TTL)) return;
+  var mine = current === 0, which = current;
+  PIN_STATS[uid] = { sig: sig, at: 0, data: got && got.sig === sig ? got.data : null, loading: true };
+  function pick(kind, f){
+    return pinList(kind).filter(Boolean).map(function(x){ return f(x); });
+  }
+  var req = mine
+    ? fetch("/api/pins/stats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tracks: pick("tracks", function(x){ return { id: x.id, name: x.name, artist_name: x.artist_name }; }),
+          artists: pick("artists", function(x){ return { id: x.id, name: x.name }; })
+        })
+      })
+    : fetch(asUser("/api/pins/stats", which));
+  req.then(function(r){ return r.ok ? r.json() : null; }).then(function(res){
+    var rec = PIN_STATS[uid];
+    if(!rec || rec.sig !== sig) return;
+    rec.loading = false;
+    rec.at = Date.now();
+    if(res) rec.data = res;
+    if(current === which) paintPinStats();
+  }).catch(function(){
+    var rec = PIN_STATS[uid];
+    if(rec && rec.sig === sig){ rec.loading = false; rec.at = Date.now(); }
+  });
+}
+
+/* The owner's switch, shown only while they are editing their own profile. */
+function pinStatControls(show){
+  [["tracks", "trackStatCtl"], ["artists", "artistStatCtl"]].forEach(function(k){
+    var el = $(k[1]);
+    if(!el) return;
+    var any = pinList(k[0]).some(Boolean);
+    el.hidden = !(show && any);
+    if(el.hidden){ el.innerHTML = ""; return; }
+    var mode = pinStatMode(k[0]);
+    el.innerHTML = '<div class="chart-mode"><span class="m">Show</span><span>' +
+      PIN_STAT_MODES.map(function(m){
+        var label = m === "hours" ? "Hours" : m === "plays" ? "Plays" : "Off";
+        return '<button type="button" data-pstat-mode="' + m + '" data-pstat-kind="' + k[0] +
+          '" aria-pressed="' + (m === mode) + '">' + label + "</button>";
+      }).join(" &middot; ") + "</span></div>";
+  });
+}
+document.addEventListener("click", function(e){
+  var b = e.target.closest("[data-pstat-mode]");
+  if(!b || current !== 0 || b.getAttribute("aria-pressed") === "true") return;
+  var c = cust();
+  c.pinStat = Object.assign({}, c.pinStat || {});
+  c.pinStat[b.dataset.pstatKind] = b.dataset.pstatMode;
+  saveCustom();
+  pinStatControls(true);
+  paintPinStats();
+});
+
 function renderPins(p){
   var editing = document.body.classList.contains("editing");
   var hue = p.artHue, self = current === 0;
@@ -7086,6 +7201,7 @@ function renderPins(p){
         "<div " + artAttr(pin, pin.name, hue) + "></div>" +
         '<div class="meta"><div class="tt">' + esc(pin.name) + '</div><div class="ta">' +
         esc(pin.artist_name) + "</div></div>" +
+        '<span class="pstat" data-pstat="tracks" data-pstat-id="' + esc(pin.id) + '"></span>' +
         (self ? unpinBtn("tracks", i) : "") + "</div>";
     } else if(demo && !editing){
       th += '<div class="row" tabindex="0" role="button">' +
@@ -7107,8 +7223,8 @@ function renderPins(p){
     if(apin){
       ah += '<div class="artist pinbox" tabindex="0" role="button">' +
         '<div class="ring"><div ' + artAttr(apin, apin.name, hue) + "></div></div>" +
-        '<div class="an">' + esc(apin.name) + '</div><div class="ameta">' +
-        (apin.your_hours ? esc(apin.your_hours) + "h" : "") + "</div>" +
+        '<div class="an">' + esc(apin.name) + '</div><div class="ameta" data-pstat="artists" data-pstat-id="' +
+        esc(apin.id) + '"></div>' +
         (self ? unpinBtn("artists", j) : "") + "</div>";
     } else if(ademo && !editing){
       ah += '<div class="artist" tabindex="0" role="button">' +
@@ -7120,6 +7236,9 @@ function renderPins(p){
   }
   $("artists").innerHTML = ah;
   markPlaying();
+  pinStatControls(editing && self);
+  paintPinStats();
+  loadPinStats();
 
   /* Albums have no sample data - the section only exists once you pin one, and
      in edit mode where its empty slots are the invitation. */
