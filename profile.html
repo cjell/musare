@@ -7165,6 +7165,19 @@ function fmtVal(v){
   return v >= 100 ? Math.round(v) : Math.round(v * 10) / 10;
 }
 
+/* A value in a table with its unit. Under an hour reads in minutes - the
+   first summer of a history can be a minute long, and "0 hours" says nothing
+   was played. */
+function tableVal(v, unit){
+  if(unit === "hours" && v < 1){
+    var m = Math.round(v * 60);
+    return m < 1 ? "under 1 min" : m + " min";
+  }
+  var n = fmtVal(v);
+  if(n === 1 && /s$/.test(unit || "")) unit = unit.slice(0, -1);
+  return n + (unit ? " " + unit : "");
+}
+
 /* Rows grouped by period. The server decides this shape, not the page and not
    the model - see chart_for(). */
 function chartTable(d){
@@ -7177,7 +7190,7 @@ function chartTable(d){
     }
     out.push('<div class="ctab-r"><span class="ctab-n">' + c.rank + '</span>' +
       '<span class="ctab-t">' + esc(c.name) + '</span>' +
-      '<span class="ctab-v">' + esc(fmtVal(c.value)) + " " + esc(d.y_label) + "</span></div>");
+      '<span class="ctab-v">' + esc(tableVal(c.value, d.y_label)) + "</span></div>");
   });
   if(open) out.push("</div></div>");
   return '<div class="ctab">' + out.join("") + "</div>";
