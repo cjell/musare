@@ -88,6 +88,8 @@ SUITES: dict[str, Suite] = {
     "charts-recent-heldout": Suite(CHARTS, "charts_recent_heldout.yaml", validate_chart),
     # Written before `last` and `from_year` existed; see its header.
     "charts-window-heldout": Suite(CHARTS, "charts_window_heldout.yaml", validate_chart),
+    # Written before `months`, `hours` and `days` existed; see its header.
+    "charts-season-heldout": Suite(CHARTS, "charts_season_heldout.yaml", validate_chart),
 }
 
 

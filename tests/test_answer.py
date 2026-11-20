@@ -497,3 +497,154 @@ def test_only_a_card_about_a_song_plays(history):
     assert ask(answer="number", metric="plays", artists=["MTNS"]).stat["uri"] == ""
     assert ask(answer="number", metric="plays", albums=["Salvage"]).stat["uri"] == ""
     assert ask(answer="top", dimension="artist", limit=1).stat["uri"] == ""
+
+
+# ------------------------------------------------- parts of the year, day, week
+#
+# Plays at known local times, so which months, days and hours each lands in is
+# fixed. New York is five hours behind UTC in winter and four in summer; no
+# play is near a clock change.
+
+# (track, artist, local dates as (y, m, d), local hour)
+CALENDAR = [
+    ("Sun Song", "A", [(2023, 7, d) for d in range(1, 6)], 12),
+    ("Other", "B", [(2023, 6, 10), (2023, 6, 12)], 12),
+    ("Heat", "B", [(2024, 8, d) for d in range(5, 9)], 12),
+    ("Snow", "C", [(2022, 12, 10), (2022, 12, 11), (2022, 12, 12), (2023, 1, 10)], 12),
+    ("Ice", "C", [(2023, 12, d) for d in range(1, 7)], 12),
+    ("Late", "D", [(2024, 5, 14), (2024, 5, 15), (2024, 5, 16)], 2),
+    ("Spring", "E", [(2024, 4, 6), (2024, 4, 7), (2024, 4, 13), (2024, 4, 14), (2024, 4, 20)], 15),
+]
+
+
+@pytest.fixture
+def calendar(monkeypatch):
+    con = duckdb.connect()
+    con.execute("install icu; load icu;")
+    con.execute(
+        "create table plays (played_at timestamp, track_uri varchar, track_name varchar, "
+        "artist_name varchar, album_name varchar, ms_played bigint, platform varchar, "
+        "skipped boolean)"
+    )
+    rows = []
+    for i, (track, artist, days, hour) in enumerate(CALENDAR):
+        for y, m, d in days:
+            assert m not in (3, 11), "keep clear of the clock changes"
+            offset = 4 if 4 <= m <= 10 else 5
+            when = datetime(y, m, d, hour) + timedelta(hours=offset)
+            uri = f"spotify:track:{'c' * 21}{i}"
+            rows.append((when, uri, track, artist, "LP", 200_000, "ios", False))
+    con.executemany("insert into plays values (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    monkeypatch.setattr(chartrun, "_connect", lambda spec=None: con)
+    return con
+
+
+def test_the_calendar_falls_where_the_tests_say():
+    weekend = {(y, m, d) for _, _, days, _ in CALENDAR for y, m, d in days}
+    weekend = {x for x in weekend if datetime(*x).weekday() >= 5}
+    assert (2024, 4, 20) in weekend and (2023, 7, 3) not in weekend
+
+
+def test_songs_of_the_summer_each_year(calendar):
+    d = ask(
+        dimension="date",
+        grain="year",
+        per_period=True,
+        series="track",
+        limit=1,
+        metric="plays",
+        months=[6, 7, 8],
+    )
+    assert [(c.bucket, c.name.split(" - ")[0]) for c in d.table] == [
+        ("2024", "Heat"),
+        ("2023", "Sun Song"),
+    ]
+    assert d.title == f"Top song each year {chartrun.DOT} Summer"
+    assert d.span.startswith(f"Summer (Jun{DASH}Aug) {chartrun.DOT} All time (")
+
+
+def test_a_winter_keeps_its_december(calendar):
+    """Winter 2023 is December 2022 with January and February 2023."""
+    d = ask(answer="number", metric="plays", year=2023, months=[12, 1, 2])
+    assert d.stat["value"] == 4, "Snow's four, not January plus Ice's December"
+    by_year = ask(
+        dimension="date",
+        grain="year",
+        per_period=True,
+        series="track",
+        limit=1,
+        metric="plays",
+        months=[12, 1, 2],
+    )
+    assert [(c.bucket, c.name.split(" - ")[0]) for c in by_year.table] == [
+        ("2024", "Ice"),
+        ("2023", "Snow"),
+    ]
+
+
+def test_a_month_on_its_own_stays_in_its_year(calendar):
+    assert ask(answer="number", metric="plays", year=2023, months=[12]).stat["value"] == 6
+
+
+def test_an_hour_of_the_night(calendar):
+    d = ask(answer="top", dimension="track", metric="plays", hours=[2], limit=1)
+    assert d.stat["big"] == "Late"
+    assert "in the 2am hour" in d.stat["sentence"]
+
+
+def test_a_chart_by_hour_keeps_to_the_hours_asked(calendar):
+    d = ask(dimension="hour_of_day", metric="plays", hours=[0, 1, 2, 3])
+    assert d.labels == ["00", "01", "02", "03"] and d.values == [0.0, 0.0, 3.0, 0.0]
+
+
+def test_weekends(calendar):
+    d = ask(answer="number", metric="plays", artists=["E"], days=["sat", "sun"])
+    assert d.stat["value"] == 5
+    assert (
+        ask(answer="number", metric="plays", artists=["A"], days=["sat", "sun"]).stat["value"] == 2
+    ), "July 1st and 2nd, not the weekdays after"
+    top = ask(answer="top", dimension="artist", metric="plays", days=["sat", "sun"], limit=1)
+    assert top.stat["big"] == "E" and " on weekends" in top.stat["sentence"]
+
+
+def test_every_month_narrows_nothing(calendar):
+    everything = ask(answer="number", metric="plays").stat["value"]
+    assert (
+        ask(answer="number", metric="plays", months=list(range(1, 13))).stat["value"] == everything
+    )
+    assert chartrun._scope(ChartSpec(months=list(range(1, 13))))[1] == ""
+
+
+@pytest.mark.parametrize(
+    "fields, label",
+    [
+        ({"months": [6, 7, 8]}, f"Summer (Jun{DASH}Aug)"),
+        ({"months": [1, 12, 2]}, f"Winter (Dec{DASH}Feb)"),
+        ({"months": [12]}, "December"),
+        ({"months": [1, 3]}, "Jan, Mar"),
+        ({"months": [10, 11, 12, 1]}, f"Oct{DASH}Jan"),
+        ({"hours": [2]}, f"2am{DASH}3am"),
+        ({"hours": [0, 1, 2, 3]}, f"12am{DASH}4am"),
+        ({"hours": [23, 0]}, f"11pm{DASH}1am"),
+        ({"hours": [8, 20]}, f"8am{DASH}9am, 8pm{DASH}9pm"),
+        ({"days": ["sat", "sun"]}, "Weekends"),
+        ({"days": ["mon", "tue", "wed", "thu", "fri"]}, "Weekdays"),
+        ({"days": ["fri"]}, "Fridays"),
+        (
+            {"months": [6, 7, 8], "days": ["fri"]},
+            f"Summer (Jun{DASH}Aug) {chartrun.DOT} Fridays",
+        ),
+    ],
+)
+def test_a_part_is_said_plainly(fields, label):
+    assert chartrun._scope(ChartSpec(**fields))[1] == label
+
+
+def test_a_scope_reaches_the_title_and_the_recent_list(calendar):
+    assert chartrun.plain_title(ChartSpec(dimension="track", days=["sat", "sun"])) == (
+        f"Top songs {chartrun.DOT} Weekends"
+    )
+    d = ask(answer="recent", limit=3, hours=[2])
+    assert d.title == f"Recent songs {chartrun.DOT} 2am"
+    assert [r["name"] for r in d.stat["rows"]] == ["Late"]
+    assert d.span.startswith(f"2am{DASH}3am")

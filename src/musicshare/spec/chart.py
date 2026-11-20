@@ -30,7 +30,7 @@ can be computed, computing it beats asking for it.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -55,6 +55,13 @@ DATA_FIRST_YEAR = 2018
 # - so the same set answers both questions, which is why it lives here rather
 # than being written out twice.
 ORDERED = frozenset({"date", "hour_of_day", "day_of_week"})
+
+# Parts of every year, day and week. Whole numbers and short day names rather
+# than words like "summer": the word is the model's to read, and what it
+# means in months is then a fact on the spec that can be checked and said.
+Month = Annotated[int, Field(ge=1, le=12)]
+Hour = Annotated[int, Field(ge=0, le=23)]
+Day = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 
 
 class ChartSpec(BaseModel):
@@ -141,9 +148,12 @@ class ChartSpec(BaseModel):
             "do I listen to', 'what am I into', 'what kind of music do I play most' - "
             "anything asking what the listening is made of rather than which acts are "
             "in it. "
-            "'hour_of_day' for questions about times of day ('2am', 'mornings'), "
-            "'day_of_week' for weekdays and weekends, 'platform' for phone versus "
-            "desktop. Otherwise the thing being ranked. "
+            "'hour_of_day' when the times of day are what is being compared - 'what "
+            "time of day do I listen most', 'my listening by hour' - and "
+            "'day_of_week' when the days are, 'platform' for phone versus desktop. "
+            "Asking what is played at one time - 'at 2am', 'on weekends', 'in the "
+            "summer' - narrows with hours, days or months and keeps the dimension on "
+            "what is being ranked. Otherwise the thing being ranked. "
             "A question about what was played - which acts, which songs - ranks them, "
             "and narrowing it to a period does not make time the dimension: 'my "
             "artists last month' is one bar per artist over the last month."
@@ -215,6 +225,46 @@ class ChartSpec(BaseModel):
         description=(
             "The last year of that span, included: 'from 2020 to 2022' is 2022. Null "
             "when the span runs to now - 'since 2023' - and whenever from_year is null."
+        ),
+    )
+    months: list[Month] = Field(
+        default_factory=list,
+        description=(
+            "Only these months of every year, as numbers 1 to 12, when the question "
+            "is about a part of the year rather than one stretch of time: 'summer' is "
+            "[6, 7, 8], 'winter' [12, 1, 2], 'spring' [3, 4, 5], 'autumn' or 'fall' "
+            "[9, 10, 11], 'every December' or 'in Decembers' [12], 'back to school' "
+            "[8, 9]. Seasons are the northern hemisphere's. "
+            "It narrows what is counted and combines with everything else: 'my songs "
+            "of the summer each year' is a per_period table by year with these set, "
+            "and 'December 2023' is year 2023 with [12]. "
+            "Empty when no part of the year is named. A recent stretch is a window, "
+            "not this: 'last month', 'this summer so far' as 'the last 3 months' and "
+            "'the past year' go in range or last."
+        ),
+    )
+    hours: list[Hour] = Field(
+        default_factory=list,
+        description=(
+            "Only these hours of the day, 0 to 23 in the listener's own time, when "
+            "the question narrows to a time of day: 'at 2am' is [2], 'late at night' "
+            "and 'after midnight' [0, 1, 2, 3], 'in the morning' [6, 7, 8, 9, 10, 11], "
+            "'in the evening' [18, 19, 20, 21, 22, 23]. Hour 2 is 2:00 to 2:59. "
+            "This is a filter on what is counted, and is not dimension 'hour_of_day', "
+            "which puts the hours along the bottom: 'what do I play at 2am' ranks "
+            "songs with this [2], 'what time of day do I listen most' is dimension "
+            "'hour_of_day' with this empty. Empty when no time of day is named."
+        ),
+    )
+    days: list[Day] = Field(
+        default_factory=list,
+        description=(
+            "Only these days of the week: 'on weekends' is ['sat', 'sun'], 'on "
+            "weekdays' ['mon', 'tue', 'wed', 'thu', 'fri'], 'on Fridays' ['fri']. "
+            "As with hours, a filter rather than dimension 'day_of_week': 'my top "
+            "artist on weekends' ranks artists with this set, and 'which day do I "
+            "listen most' is dimension 'day_of_week' with this empty. Empty when no "
+            "day is named."
         ),
     )
     artists: list[str] = Field(

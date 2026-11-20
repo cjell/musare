@@ -308,11 +308,11 @@ def _where(
     if not windowed:
         pass
     elif spec.year is not None:
-        clauses.append(f"year({LOCAL_TS}) = {int(spec.year)}")
+        clauses.append(f"year({_year_ts(spec)}) = {int(spec.year)}")
     elif spec.from_year is not None:
-        clauses.append(f"year({LOCAL_TS}) >= {int(spec.from_year)}")
+        clauses.append(f"year({_year_ts(spec)}) >= {int(spec.from_year)}")
         if spec.to_year is not None:
-            clauses.append(f"year({LOCAL_TS}) <= {int(spec.to_year)}")
+            clauses.append(f"year({_year_ts(spec)}) <= {int(spec.to_year)}")
     elif spec.last is not None and spec.last_unit in UNITS:
         # Anchored on the newest play, like the menu's relative windows.
         clauses.append(
@@ -322,7 +322,7 @@ def _where(
     elif spec.range == "today":
         clauses.append(_day(back))
     elif spec.range == "this_year":
-        clauses.append(f"year({LOCAL_TS}) = year(current_date)")
+        clauses.append(f"year({_year_ts(spec)}) = year(current_date)")
     elif spec.range in RANGES:
         anchor = "(select max(played_at) from plays)"
         step = STEP_DAYS.get(spec.range)
@@ -333,6 +333,7 @@ def _where(
             clauses.append(f"played_at < {anchor} - interval {back * step} day")
         else:
             clauses.append(f"played_at >= {anchor} - {RANGES[spec.range]}")
+    clauses += _parts(spec)
     if spec.artists:
         # The only user-supplied strings that reach the query, and they are bound.
         marks = ", ".join("?" for _ in spec.artists)
@@ -363,6 +364,174 @@ def _where(
     if spec.dimension == "genre" or spec.series == "genre":
         clauses.append("g.genre is not null")
     return " and ".join(clauses), params
+
+
+# ------------------------------------------------- parts of the year, day, week
+#
+# "My songs of the summer each year" is not one stretch of time: it is June to
+# August of every year, so it is a filter beside the window rather than a
+# window. The model reads the words; what they came to - months 6, 7, 8 - is on
+# the spec, and every answer says it, so a misread is visible on the card.
+
+DAY_NUM = {"mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6, "sun": 7}
+DAY_WORD = {
+    1: "Monday",
+    2: "Tuesday",
+    3: "Wednesday",
+    4: "Thursday",
+    5: "Friday",
+    6: "Saturday",
+    7: "Sunday",
+}
+MONTH_NAMES = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
+SEASONS = {
+    frozenset({12, 1, 2}): "winter",
+    frozenset({3, 4, 5}): "spring",
+    frozenset({6, 7, 8}): "summer",
+    frozenset({9, 10, 11}): "autumn",
+}
+EN = chr(0x2013)
+DOT = chr(0x00B7)
+
+
+def _in(expr: str, xs: list[int]) -> str:
+    return f"{expr} in ({', '.join(str(int(x)) for x in sorted(set(xs)))})"
+
+
+def _parts(spec: ChartSpec) -> list[str]:
+    """The clauses for months, hours and days. Validated integers and an enum,
+    so they are written in rather than bound, like the year. All twelve months,
+    or every hour, narrows nothing and is left out."""
+    out = []
+    if spec.months and len(set(spec.months)) < 12:
+        out.append(_in(f"month({LOCAL_TS})", spec.months))
+    if spec.hours and len(set(spec.hours)) < 24:
+        out.append(_in(f"hour({LOCAL_TS})", spec.hours))
+    days = [DAY_NUM[d] for d in spec.days if d in DAY_NUM]
+    if days and len(set(days)) < 7:
+        out.append(_in(f"isodow({LOCAL_TS})", days))
+    return out
+
+
+def _wrap(spec: ChartSpec) -> int:
+    """How many months at the end of a year belong to the next one.
+
+    A winter runs December to February, so "winter 2023" and the 2023 row of
+    "my winter songs each year" mean December 2022 with January and February
+    2023 - not two halves of different winters. Only when the months chosen
+    run across New Year; a year's own months stay in it.
+    """
+    m = set(spec.months)
+    if not (12 in m and 1 in m) or len(m) >= 12:
+        return 0
+    n = 0
+    while 12 - n in m:
+        n += 1
+    return n
+
+
+def _year_ts(spec: ChartSpec) -> str:
+    """The local time as a year is counted for this spec - moved on by the
+    months that belong to the next year when the chosen months wrap."""
+    n = _wrap(spec)
+    return f"({LOCAL_TS} + interval {n} month)" if n else LOCAL_TS
+
+
+def _runs(xs: list[int], first: int, size: int) -> list[list[int]]:
+    """Consecutive stretches, joined across the end - December into January,
+    11pm into midnight."""
+    runs: list[list[int]] = []
+    for x in sorted(set(xs)):
+        if runs and x == runs[-1][-1] + 1:
+            runs[-1].append(x)
+        else:
+            runs.append([x])
+    if len(runs) > 1 and runs[0][0] == first and runs[-1][-1] == first + size - 1:
+        runs[0] = runs.pop() + runs[0]
+    return runs
+
+
+def _clock(h: int) -> str:
+    h %= 24
+    return f"{h % 12 or 12}{'am' if h < 12 else 'pm'}"
+
+
+# Each of these says its part three ways: inside a sentence, as a label, and as
+# a word or two for a title. Empty strings when the spec does not narrow it.
+
+
+def _months_words(spec: ChartSpec) -> tuple[str, str, str]:
+    m = set(spec.months)
+    if not m or len(m) >= 12:
+        return "", "", ""
+    if len(m) == 1:
+        name = MONTH_NAMES[next(iter(m)) - 1]
+        return f" in {name}", name, name
+    span = ", ".join(
+        MONTHS[r[0] - 1] if len(r) == 1 else f"{MONTHS[r[0] - 1]}{EN}{MONTHS[r[-1] - 1]}"
+        for r in _runs(list(m), 1, 12)
+    )
+    season = SEASONS.get(frozenset(m))
+    if season:
+        return f" in {season} ({span})", f"{season.title()} ({span})", season.title()
+    return f" in {span}", span, span
+
+
+def _hours_words(spec: ChartSpec) -> tuple[str, str, str]:
+    h = set(spec.hours)
+    if not h or len(h) >= 24:
+        return "", "", ""
+    runs = _runs(list(h), 0, 24)
+    spans = [f"{_clock(r[0])}{EN}{_clock(r[-1] + 1)}" for r in runs]
+    if len(runs) == 1 and len(runs[0]) == 1:
+        one = _clock(runs[0][0])
+        return f" in the {one} hour", spans[0], one
+    if len(runs) == 1:
+        a, b = _clock(runs[0][0]), _clock(runs[0][-1] + 1)
+        return f" between {a} and {b}", spans[0], spans[0]
+    joined = ", ".join(spans)
+    return f" at {joined}", joined, joined
+
+
+def _days_words(spec: ChartSpec) -> tuple[str, str, str]:
+    d = {DAY_NUM[x] for x in spec.days if x in DAY_NUM}
+    if not d or len(d) >= 7:
+        return "", "", ""
+    if d == {6, 7}:
+        return " on weekends", "Weekends", "Weekends"
+    if d == {1, 2, 3, 4, 5}:
+        return " on weekdays", "Weekdays", "Weekdays"
+    if len(d) == 1:
+        name = DAY_WORD[next(iter(d))] + "s"
+        return f" on {name}", name, name
+    names = ", ".join(DOW[x] for x in sorted(d))
+    return f" on {names}", names, names
+
+
+def _scope(spec: ChartSpec) -> tuple[str, str, str]:
+    """Months, days and hours together: ' in summer (Jun-Aug) on weekends',
+    'Summer (Jun-Aug) . Weekends', and 'Summer . Weekends'."""
+    parts = [f(spec) for f in (_months_words, _days_words, _hours_words)]
+    parts = [x for x in parts if x[1]]
+    joint = f" {DOT} "
+    return (
+        "".join(x[0] for x in parts),
+        joint.join(x[1] for x in parts),
+        joint.join(x[2] for x in parts),
+    )
 
 
 # A name as typed against a name as stored. Case, punctuation, "&" for "and",
@@ -440,7 +609,8 @@ def _axis(spec: ChartSpec) -> tuple[str, str, str, str, list[Any]]:
     """The dimension's SQL, its label, how the rows come back, and its parameters."""
     if spec.dimension == "date":
         grain = GRAINS[spec.grain or "month"]
-        return f"date_trunc('{grain}', {LOCAL_TS})", grain, "order by 1", "", []
+        ts = _year_ts(spec) if grain == "year" else LOCAL_TS
+        return f"date_trunc('{grain}', {ts})", grain, "order by 1", "", []
     dim_sql, x_label = DIMENSIONS[spec.dimension]
     params: list[Any] = []
     if spec.dimension == "genre":
@@ -582,7 +752,9 @@ def run(spec: ChartSpec, back: int = 0, scale_over: int = 0) -> ChartData:
     # The window in dates, so an answer over the wrong one is visible on it.
     # A list of recent plays is newest first already; "all time" on it would
     # only say that nothing narrowed it.
-    unwindowed = spec.range == "all" and spec.year is None and spec.from_year is None
+    unwindowed = (
+        spec.range == "all" and spec.year is None and spec.from_year is None and not _scope(spec)[1]
+    )
     if (
         spec.understood
         and not d.window
@@ -832,7 +1004,8 @@ def _every_hour(
     if spec.range == "today" and spec.year is None and back == 0:
         now = con.execute(f"select hour(current_timestamp AT TIME ZONE '{LOCAL}')").fetchone()
         last = int(now[0])
-    hours = [f"{h:02d}" for h in range(last + 1)]
+    keep = set(spec.hours) if spec.hours else set(range(24))
+    hours = [f"{h:02d}" for h in range(last + 1) if h in keep]
     return hours, [have.get(h, 0.0) for h in hours]
 
 
@@ -1020,7 +1193,17 @@ KIND_WORD = {"track": "song", "album": "album"}
 
 
 def _period(spec: ChartSpec) -> tuple[str, str]:
-    """The window as part of a sentence, and as a label on its own."""
+    """The window as part of a sentence, and as a label on its own - with the
+    months, days or hours it is narrowed to in front, so an answer about summers
+    says summers."""
+    in_text, label = _window_words(spec)
+    s_in, s_label, _ = _scope(spec)
+    if not s_label:
+        return in_text, label
+    return s_in + in_text, f"{s_label} {DOT} {label}" if label else s_label
+
+
+def _window_words(spec: ChartSpec) -> tuple[str, str]:
     if spec.year is not None:
         return f" in {spec.year}", str(spec.year)
     if spec.from_year is not None:
@@ -1694,6 +1877,8 @@ def _recent(spec: ChartSpec) -> ChartData:
     title = f"Last {len(out)} {things}" if len(out) == want > 1 else f"Recent {things}"
     if spec.tracks and who:
         title = f"Recent plays of {who}"
+    if _scope(spec)[2]:
+        title = f"{title} {DOT} {_scope(spec)[2]}"
     if out:
         sentence = ""
     elif missing:
@@ -1705,7 +1890,9 @@ def _recent(spec: ChartSpec) -> ChartData:
     stat: dict[str, Any] = {
         "answer": "recent",
         "metric": "plays",
-        "period": period_label if spec.range != "all" or spec.year else "Recent plays",
+        "period": period_label
+        if spec.range != "all" or spec.year or _scope(spec)[1]
+        else "Recent plays",
         "subject": who,
         "found": bool(out),
         "rows": out,
@@ -1820,7 +2007,14 @@ def _named(spec: ChartSpec) -> str:
 
 
 def plain_title(spec: ChartSpec) -> str:
-    """What the answer is, in a few plain words."""
+    """What the answer is, in a few plain words - and, when it is narrowed to a
+    part of the year, day or week, which: 'Top songs each year . Summer'."""
+    base = _plain_title(spec)
+    short = _scope(spec)[2]
+    return f"{base} {DOT} {short}" if short else base
+
+
+def _plain_title(spec: ChartSpec) -> str:
     spec = effective(spec)
     named = _named(spec)
     if spec.answer in ("first_played", "last_played"):

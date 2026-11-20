@@ -461,3 +461,20 @@
 - input: top songs from the last year
   expect: {range: 12mo, last: null}
   tags: [window, negative]
+
+# Parts of the year, day and week. Held-out set: charts_season_heldout.yaml.
+- input: my top song every summer
+  expect: {per_period: true, series: track, dimension: date, grain: year, limit: 1, months: [6, 7, 8]}
+  tags: [season, months, per_period]
+
+- input: how much did I listen on weekdays this year
+  expect: {answer: number, range: this_year, days: [mon, tue, wed, thu, fri]}
+  tags: [season, days, number]
+
+- input: top artists after midnight
+  expect: {dimension: artist, hours: [0, 1, 2, 3]}
+  tags: [season, hours]
+
+- input: which day of the week do I listen most
+  expect: {answer: top, dimension: day_of_week, days: []}
+  tags: [season, negative]

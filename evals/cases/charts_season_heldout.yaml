@@ -1,0 +1,46 @@
+# Held-out set for parts of the year, the day and the week.
+#
+# Written before `months`, `hours` and `days` existed and before their
+# descriptions. Run ONCE, after the descriptions are done. Kept small on
+# purpose: every run costs credit.
+#
+# The question that prompted it: "what are my songs of the summer each year?"
+# had a ranking per year to land on but no way to say "only June to August".
+# Summer is part of every year, not one stretch of time, so it is a filter, not
+# a window. The negatives check a plain period still goes to range/year.
+
+# ----------------------------------------------------------- months of year
+- input: what are my songs of the summer each year?
+  expect: {per_period: true, series: track, dimension: date, grain: year, months: [6, 7, 8]}
+  tags: [months, per_period]
+
+- input: how many hours did I listen in December 2023
+  expect: {answer: number, year: 2023, months: [12]}
+  tags: [months, number]
+
+- input: my top artists in the winter
+  expect: {dimension: artist, months: [12, 1, 2]}
+  tags: [months, winter]
+
+# ------------------------------------------------------------ hours of day
+- input: what songs do I play at 2am
+  expect: {dimension: track, hours: [2]}
+  tags: [hours]
+
+# ------------------------------------------------------------- days of week
+- input: my most played artist on weekends
+  expect: {answer: top, dimension: artist, days: [sat, sun]}
+  tags: [days, top]
+
+- input: compare drake and sza on fridays by hour
+  expect: {dimension: hour_of_day, series: artist, days: [fri]}
+  tags: [days, series]
+
+# --------------------------------------------------------------- negatives
+- input: top songs last month
+  expect: {range: 30d, months: [], hours: [], days: []}
+  tags: [negative]
+
+- input: what time of day do I listen most
+  expect: {answer: top, dimension: hour_of_day, hours: []}
+  tags: [negative, hours]
