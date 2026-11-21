@@ -898,6 +898,22 @@ body{
 .swatch.any:focus-within{outline:2px solid var(--ink);outline-offset:2px}
 /* "Match theme": the frame takes the profile colour, shown as a ring of it. */
 .swatch.match{background:var(--ground);box-shadow:inset 0 0 0 3px var(--accent)}
+/* Choosing the genre badges: the chosen ones first, then your top genres to
+   add, then your own words. */
+.gb-pick{display:flex;flex-direction:column;gap:10px}
+.gb-row{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+.gb-chip{
+  font:inherit;font-size:12.5px;padding:5px 11px;border-radius:999px;cursor:pointer;
+  background:none;border:1px solid var(--line-2);color:var(--ink-2);
+}
+.gb-chip.on{color:var(--ink);border-color:var(--ink-3);background:rgba(244,241,250,.06)}
+.gb-chip.on::after{content:" \00d7";color:var(--ink-3)}
+.gb-chip:disabled{opacity:.4;cursor:default}
+.gb-chip:focus-visible,.gb-auto:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+.gb-note{font-size:11.5px;color:var(--ink-3)}
+.gb-auto{font:inherit;font-size:11.5px;background:none;border:0;padding:0;color:var(--ink-2);text-decoration:underline;cursor:pointer}
+.gb-own{display:flex;gap:7px}
+.gb-own .txt{flex:1;min-width:0}
 .frames{display:flex;gap:12px}
 .frame-opt{
   width:52px;height:52px;border-radius:50%;cursor:pointer;flex:none;padding:2.5px;
@@ -1345,8 +1361,7 @@ details[open] summary .chev{transform:rotate(180deg)}
   font-size:10.5px;color:var(--ink-3);
 }
 .row .pstat:empty{display:none}
-.pst-in.sep:not(:empty)::before{content:" \00b7\00a0"}
-.row.pinbox .ta,.row.pinbox .pstat,.artist.pinbox .ameta,.pl.pinbox .pm{color:var(--accent-soft,var(--ink-3))}
+.row.pinbox .pstat,.artist.pinbox .ameta,.pl.pinbox .pm{color:var(--accent-soft,var(--ink-3))}
 .editing .row.pinbox .pstat{margin-right:26px}
 .pstat-ctl{margin:-4px 0 10px}
 .pstat-ctl .chart-mode{margin:0}
@@ -2475,6 +2490,14 @@ details[open] summary .chev{transform:rotate(180deg)}
         <div class="swatches" id="ringSwatches"></div>
       </div>
       <div class="srow col">
+        <div class="k">Genre badges</div>
+        <div class="gb-pick" id="genreBadges"></div>
+      </div>
+      <div class="srow col">
+        <div class="k">Badge colour</div>
+        <div class="swatches" id="genSwatches"></div>
+      </div>
+      <div class="srow col">
         <div class="k">Name</div>
         <input class="txt" id="custName" maxlength="28" autocomplete="off">
       </div>
@@ -3444,7 +3467,8 @@ function render(i){
   var own = HEX_COLOR.test(c.accent || "") ? c.accent : "";
   var accent = own || p.accent;
   var accentRGB = hexRGB(accent).join(",");
-  var genRGB = own ? genFrom(accent).join(",") : p.genRGB;
+  var genRGB = HEX_COLOR.test(c.genColor || "") ? hexRGB(c.genColor).join(",")
+    : own ? genFrom(accent).join(",") : p.genRGB;
   var gen = "rgb(" + genRGB + ")";
 
   var phone = $("phone");
@@ -3501,8 +3525,8 @@ function render(i){
   /* Computed from listening (see applyCard), plus the identity badges a person
      writes about themselves, which live in their document. */
   p.badges = (data(i).badges || []).concat((c.idBadges || []).map(function(l){ return { t: "id", l: l }; }));
-  $("topGenres").innerHTML = p.genres.slice(0, 3).map(function(g, i){
-    return '<button type="button" class="gen' + (i === 0 ? " gen-1" : "") + '">' + g + "</button>";
+  $("topGenres").innerHTML = genreBadges(c, p).map(function(g, i){
+    return '<button type="button" class="gen' + (i === 0 ? " gen-1" : "") + '">' + esc(g) + "</button>";
   }).join("");
 
   var VISIBLE = 5;
@@ -3578,7 +3602,7 @@ function render(i){
   $("axR").textContent = p.map.r;
 
   $("moreLabel").textContent = "More about " + p.name.split(" ")[0];
-  $("genres").innerHTML = p.genres.map(function(g){ return '<span class="chip">' + g + "</span>"; }).join("");
+  $("genres").innerHTML = p.genres.map(function(g){ return '<span class="chip">' + esc(g) + "</span>"; }).join("");
   $("makesLink").textContent = c.makes || p.makes;
 
   paintNow();
@@ -5564,6 +5588,50 @@ function colourSwatches(fixed, current, what, extra){
     '"></label>';
 }
 
+/* The genre badges on a profile: the owner's own choice when they have made
+   one (up to three, in their order, their words allowed), the top three from
+   their listening otherwise. An empty choice is a choice - no badges. */
+var GENRE_BADGES = 3, GENRE_BADGE_LEN = 24;
+function cleanBadge(g){ return String(g || "").replace(/\s+/g, " ").trim().slice(0, GENRE_BADGE_LEN); }
+function genreBadges(c, p){
+  if(Array.isArray(c.genreBadges)){
+    return c.genreBadges.map(cleanBadge).filter(Boolean).slice(0, GENRE_BADGES);
+  }
+  return (p.genres || []).slice(0, GENRE_BADGES);
+}
+function paintGenrePicker(){
+  var p = PROFILES[current], c = CUSTOM[current] || {};
+  var chosen = genreBadges(c, p), full = chosen.length >= GENRE_BADGES;
+  var lower = chosen.map(function(g){ return g.toLowerCase(); });
+  var offer = (p.genres || []).filter(function(g){ return lower.indexOf(String(g).toLowerCase()) < 0; });
+  $("genreBadges").innerHTML =
+    '<div class="gb-row">' + (chosen.length
+      ? chosen.map(function(g, i){
+          return '<button type="button" class="gb-chip on" data-gb-drop="' + i + '" aria-label="Remove ' +
+            esc(g) + '">' + esc(g) + "</button>";
+        }).join("")
+      : '<span class="gb-note">No genre badges</span>') + "</div>" +
+    (offer.length ? '<div class="gb-row"><span class="gb-note">Add</span>' + offer.map(function(g){
+      return '<button type="button" class="gb-chip" data-gb-add="' + esc(g) + '"' + (full ? " disabled" : "") +
+        ">+ " + esc(g) + "</button>";
+    }).join("") + "</div>" : "") +
+    '<div class="gb-own"><input class="txt" id="gbOwn" maxlength="' + GENRE_BADGE_LEN +
+    '" placeholder="Your own words" autocomplete="off"' + (full ? " disabled" : "") + ">" +
+    '<button type="button" class="gb-chip" id="gbOwnAdd"' + (full ? " disabled" : "") + ">Add</button></div>" +
+    (Array.isArray(c.genreBadges)
+      ? '<div><button type="button" class="gb-auto" id="gbAuto">Use my top genres again</button></div>'
+      : '<div class="gb-note">Showing your top three from this year. Remove one or add your own to choose.</div>');
+}
+function setGenreBadges(list){
+  var seen = {}, out = [];
+  list.map(cleanBadge).forEach(function(g){
+    var k = g.toLowerCase();
+    if(g && !seen[k] && out.length < GENRE_BADGES){ seen[k] = true; out.push(g); }
+  });
+  cust().genreBadges = out;
+  saveCustom(); render(current); paintGenrePicker();
+}
+
 function syncSheet(){
   var p = PROFILES[current], c = CUSTOM[current] || {};
   var acc = (HEX_COLOR.test(c.accent || "") ? c.accent : p.accent), fr = c.frame || p.frame;
@@ -5573,6 +5641,15 @@ function syncSheet(){
     '<button class="swatch match" type="button" data-c="" aria-pressed="' + !ring +
     '" aria-label="Frame matches the theme colour" title="Match theme" style="box-shadow:inset 0 0 0 3px ' +
     acc + '"></button>');
+  /* "Match theme" for badges is the colour worked out from the theme, shown as
+     it will look rather than as the theme itself. */
+  var gc = HEX_COLOR.test(c.genColor || "") ? c.genColor : "";
+  var autoGen = HEX_COLOR.test(c.accent || "") ? "rgb(" + genFrom(acc).join(",") + ")" : "rgb(" + p.genRGB + ")";
+  $("genSwatches").innerHTML = colourSwatches([], gc, "Badge",
+    '<button class="swatch match" type="button" data-c="" aria-pressed="' + !gc +
+    '" aria-label="Badges match the theme" title="Match theme" style="box-shadow:inset 0 0 0 3px ' +
+    autoGen + '"></button>');
+  paintGenrePicker();
   [].forEach.call($("frames").children, function(b){
     b.setAttribute("aria-pressed", b.dataset.f === fr ? "true" : "false");
   });
@@ -5615,16 +5692,46 @@ $("ringSwatches").addEventListener("click", function(e){
   else delete cust().ring;
   saveCustom(); render(current); syncSheet();
 });
+$("genSwatches").addEventListener("click", function(e){
+  var b = e.target.closest("button.swatch");
+  if(!b) return;
+  if(b.dataset.c) cust().genColor = b.dataset.c;
+  else delete cust().genColor;
+  saveCustom(); render(current); syncSheet();
+});
+$("genreBadges").addEventListener("click", function(e){
+  var p = PROFILES[current], now = genreBadges(CUSTOM[current] || {}, p);
+  var drop = e.target.closest("[data-gb-drop]"), add = e.target.closest("[data-gb-add]");
+  if(drop){
+    var i = +drop.dataset.gbDrop;
+    setGenreBadges(now.filter(function(_, j){ return j !== i; }));
+  } else if(add){
+    setGenreBadges(now.concat([add.dataset.gbAdd]));
+  } else if(e.target.closest("#gbOwnAdd")){
+    var v = cleanBadge($("gbOwn").value);
+    if(v) setGenreBadges(now.concat([v]));
+  } else if(e.target.closest("#gbAuto")){
+    delete cust().genreBadges;
+    saveCustom(); render(current); paintGenrePicker();
+  }
+});
+$("genreBadges").addEventListener("keydown", function(e){
+  if(e.key !== "Enter" || e.target.id !== "gbOwn") return;
+  e.preventDefault();
+  var v = cleanBadge(e.target.value);
+  if(v) setGenreBadges(genreBadges(CUSTOM[current] || {}, PROFILES[current]).concat([v]));
+});
 /* "change", not "input": a picker reports every step of a drag, and redrawing
    the swatches on each would close it under the person using it. */
-["swatches", "ringSwatches"].forEach(function(id){
+["swatches", "ringSwatches", "genSwatches"].forEach(function(id){
   $(id).addEventListener("change", function(e){
     var inp = e.target.closest && e.target.closest("[data-any-colour]");
     if(!inp || !HEX_COLOR.test(inp.value)) return;
     var hex = inp.value.toLowerCase();
     rememberColor(hex);
     if(id === "swatches") cust().accent = hex;
-    else cust().ring = hex;
+    else if(id === "ringSwatches") cust().ring = hex;
+    else cust().genColor = hex;
     saveCustom(); render(current); syncSheet();
   });
 });
@@ -7348,10 +7455,8 @@ function renderPins(p){
     if(bpin){
       bh += '<div class="pl pinbox" tabindex="0" role="button" data-album="' + k + '">' +
         "<div " + artAttr(bpin, bpin.name, hue) + "></div>" +
-        '<div class="pn">' + esc(bpin.name) + '</div><div class="pm">' +
-        esc((bpin.release_date || "").slice(0, 4)) +
-        '<span class="pst-in' + (bpin.release_date ? " sep" : "") + '" data-pstat="albums" data-pstat-id="' +
-        esc(bpin.id) + '"></span></div>' +
+        '<div class="pn">' + esc(bpin.name) + '</div><div class="pm" data-pstat="albums" data-pstat-id="' +
+        esc(bpin.id) + '"></div>' +
         (self ? unpinBtn("albums", k) : "") + "</div>";
     } else if(editing && self){
       bh += slotCell("albums", k, "slot-sq", "pl", "pn", "pm");
