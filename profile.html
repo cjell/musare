@@ -1345,6 +1345,7 @@ details[open] summary .chev{transform:rotate(180deg)}
   font-size:10.5px;color:var(--ink-3);
 }
 .row .pstat:empty{display:none}
+.pst-in.sep:not(:empty)::before{content:" \00b7\00a0"}
 .row.pinbox .ta,.row.pinbox .pstat,.artist.pinbox .ameta,.pl.pinbox .pm{color:var(--accent-soft,var(--ink-3))}
 .editing .row.pinbox .pstat{margin-right:26px}
 .pstat-ctl{margin:-4px 0 10px}
@@ -2137,6 +2138,7 @@ details[open] summary .chev{transform:rotate(180deg)}
 
     <section class="sec anim a3" id="albumSection">
       <div class="sec-label"><span>Albums</span><span class="aux" id="albumAux"></span></div>
+      <div class="pstat-ctl" id="albumStatCtl" hidden></div>
       <div class="plgrid" id="albums"></div>
     </section>
 
@@ -2147,6 +2149,7 @@ details[open] summary .chev{transform:rotate(180deg)}
       <div class="sec-label"><span>Playlists</span>
         <button class="sec-toggle" type="button" id="plToggle" aria-expanded="false" aria-controls="playlists">Show all</button>
       </div>
+      <div class="pstat-ctl" id="playlistStatCtl" hidden></div>
       <div class="plgrid" id="playlists"></div>
       <button class="pl-collapse" type="button" id="plCollapse" hidden>Show less</button>
     </section>
@@ -6940,9 +6943,10 @@ function renderShelf(){
     var art = x[2]
       ? 'class="art photo" style="background-image:url(' + x[2] + ')"'
       : 'class="art" style="' + artStyle(x[0], p.artHue) + '"';
-    return '<div class="pl' + (kill ? " pinbox" : "") + '" tabindex="0" role="button" data-pl="' + at +
+    return '<div class="pl pinbox" tabindex="0" role="button" data-pl="' + at +
            '"><div ' + art + "></div>" + kill +
-           '<div class="pn">' + esc(x[0]) + '</div><div class="pm">' + esc(x[1]) + "</div></div>";
+           '<div class="pn">' + esc(x[0]) + '</div><div class="pm" data-pstat="playlists" data-pstat-id="' +
+           esc(x[3] || "") + '" data-pstat-fallback="' + esc(x[1]) + '">' + esc(x[1]) + "</div></div>";
   }
 
   /* Walked slot by slot, like every other pinned section. It used to compact the
@@ -6976,6 +6980,7 @@ function renderShelf(){
      profile before choosing any. Edit mode's empty slots are the invitation. */
   PL_SHELF = shelf;
   $("playlists").innerHTML = ph;
+  paintPinStats();
   $("plSection").hidden = !lAny && !(editing && self);
   setPlaylists(false);
 }
@@ -7155,23 +7160,41 @@ document.addEventListener("keydown", function(e){
   tapPlay(row);
 });
 
-/* ---------- hours or plays beside pinned songs and artists ----------
-   The owner chooses, per section, which number shows - or none - and it is
-   saved with the profile, so a visitor sees what the owner chose. The numbers
-   are the owner's, worked out by the server from their history: your own
-   profile sends its pins (so a new pin gets its number before the save lands),
-   anyone else's is read from what they saved, never from this page. */
-var PIN_STAT_MODES = ["hours", "plays", "off"];
+/* ---------- numbers beside pinned songs, artists, albums and playlists ----------
+   The owner chooses, per section, which shows - hours, plays, since when, or
+   nothing - and it is saved with the profile, so a visitor sees what the owner
+   chose. The numbers are the owner's, worked out by the server from their
+   history: your own profile sends its pins (so a new pin gets its number before
+   the save lands), anyone else's is read from what they saved, never from this
+   page. A playlist has its song count and the day it was started instead. */
+var PIN_STAT_MODES = {
+  tracks: ["hours", "plays", "since", "off"],
+  artists: ["hours", "plays", "since", "off"],
+  albums: ["hours", "plays", "since", "off"],
+  playlists: ["songs", "since", "off"]
+};
+var PIN_STAT_LABEL = { hours: "Hours", plays: "Plays", since: "Since", songs: "Songs", off: "Off" };
+var PIN_STAT_CTL = { tracks: "trackStatCtl", artists: "artistStatCtl", albums: "albumStatCtl",
+                     playlists: "playlistStatCtl" };
+var PIN_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 var PIN_STATS = {};          /* uid -> { sig, at, data } */
 var PIN_STATS_TTL = 5 * 60 * 1000;
 
 function pinStatMode(kind){
-  var c = CUSTOM[current] || {}, m = c.pinStat && c.pinStat[kind];
-  return PIN_STAT_MODES.indexOf(m) >= 0 ? m : "hours";
+  var c = CUSTOM[current] || {}, m = c.pinStat && c.pinStat[kind], modes = PIN_STAT_MODES[kind] || ["off"];
+  return modes.indexOf(m) >= 0 ? m : modes[0];
 }
 
 function pinStatText(st, mode){
-  if(!st || mode === "off" || !(st.plays || st.hours)) return "";
+  if(!st || mode === "off") return "";
+  if(mode === "since"){
+    var d = /^(\d{4})-(\d{2})/.exec(st.first || "");
+    return d ? "since " + PIN_MONTHS[+d[2] - 1] + " " + d[1] : "";
+  }
+  if(mode === "songs"){
+    return st.songs == null ? "" : st.songs + (st.songs === 1 ? " song" : " songs");
+  }
+  if(!(st.plays || st.hours)) return "";
   if(mode === "plays"){
     var n = st.plays;
     if(!n) return "";
@@ -7184,21 +7207,26 @@ function pinStatText(st, mode){
 
 function pinStatSig(){
   function ids(kind){ return pinList(kind).map(function(x){ return x ? x.id : ""; }).join(","); }
-  return ids("tracks") + "|" + ids("artists");
+  return ["tracks", "artists", "albums", "playlists"].map(ids).join("|");
 }
 
+/* Fills every number on the page from what has arrived. A playlist keeps the
+   count it was pinned with until the live one is in. */
 function paintPinStats(){
   var got = PIN_STATS[uidOf(current)], data = got && got.sig === pinStatSig() ? got.data : null;
   var els = document.querySelectorAll("[data-pstat]");
   for(var i = 0; i < els.length; i++){
-    var kind = els[i].dataset.pstat, st = data && data[kind] && data[kind][els[i].dataset.pstatId];
-    els[i].textContent = pinStatText(st, pinStatMode(kind));
+    var kind = els[i].dataset.pstat, mode = pinStatMode(kind);
+    var st = data && data[kind] && data[kind][els[i].dataset.pstatId];
+    var txt = pinStatText(st, mode);
+    if(!txt && mode === "songs" && !st) txt = els[i].dataset.pstatFallback || "";
+    els[i].textContent = txt;
   }
 }
 
 function loadPinStats(){
   var uid = uidOf(current), sig = pinStatSig(), got = PIN_STATS[uid];
-  if(!uid || sig === "|" || /^,*\|,*$/.test(sig)) return;
+  if(!uid || /^[,|]*$/.test(sig)) return;
   if(got && got.sig === sig && (got.loading || Date.now() - got.at < PIN_STATS_TTL)) return;
   var mine = current === 0, which = current;
   PIN_STATS[uid] = { sig: sig, at: 0, data: got && got.sig === sig ? got.data : null, loading: true };
@@ -7211,7 +7239,9 @@ function loadPinStats(){
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tracks: pick("tracks", function(x){ return { id: x.id, name: x.name, artist_name: x.artist_name }; }),
-          artists: pick("artists", function(x){ return { id: x.id, name: x.name }; })
+          artists: pick("artists", function(x){ return { id: x.id, name: x.name }; }),
+          albums: pick("albums", function(x){ return { id: x.id, name: x.name, artist_name: x.artist_name }; }),
+          playlists: pick("playlists", function(x){ return { id: x.id }; })
         })
       })
     : fetch(asUser("/api/pins/stats", which));
@@ -7230,18 +7260,17 @@ function loadPinStats(){
 
 /* The owner's switch, shown only while they are editing their own profile. */
 function pinStatControls(show){
-  [["tracks", "trackStatCtl"], ["artists", "artistStatCtl"]].forEach(function(k){
-    var el = $(k[1]);
+  Object.keys(PIN_STAT_CTL).forEach(function(kind){
+    var el = $(PIN_STAT_CTL[kind]);
     if(!el) return;
-    var any = pinList(k[0]).some(Boolean);
+    var any = pinList(kind).some(Boolean);
     el.hidden = !(show && any);
     if(el.hidden){ el.innerHTML = ""; return; }
-    var mode = pinStatMode(k[0]);
+    var mode = pinStatMode(kind);
     el.innerHTML = '<div class="chart-mode"><span class="m">Show</span><span>' +
-      PIN_STAT_MODES.map(function(m){
-        var label = m === "hours" ? "Hours" : m === "plays" ? "Plays" : "Off";
-        return '<button type="button" data-pstat-mode="' + m + '" data-pstat-kind="' + k[0] +
-          '" aria-pressed="' + (m === mode) + '">' + label + "</button>";
+      PIN_STAT_MODES[kind].map(function(m){
+        return '<button type="button" data-pstat-mode="' + m + '" data-pstat-kind="' + kind +
+          '" aria-pressed="' + (m === mode) + '">' + PIN_STAT_LABEL[m] + "</button>";
       }).join(" &middot; ") + "</span></div>";
   });
 }
@@ -7310,9 +7339,6 @@ function renderPins(p){
   }
   $("artists").innerHTML = ah;
   markPlaying();
-  pinStatControls(editing && self);
-  paintPinStats();
-  loadPinStats();
 
   /* Albums have no sample data - the section only exists once you pin one, and
      in edit mode where its empty slots are the invitation. */
@@ -7323,7 +7349,9 @@ function renderPins(p){
       bh += '<div class="pl pinbox" tabindex="0" role="button" data-album="' + k + '">' +
         "<div " + artAttr(bpin, bpin.name, hue) + "></div>" +
         '<div class="pn">' + esc(bpin.name) + '</div><div class="pm">' +
-        esc((bpin.release_date || "").slice(0, 4)) + "</div>" +
+        esc((bpin.release_date || "").slice(0, 4)) +
+        '<span class="pst-in' + (bpin.release_date ? " sep" : "") + '" data-pstat="albums" data-pstat-id="' +
+        esc(bpin.id) + '"></span></div>' +
         (self ? unpinBtn("albums", k) : "") + "</div>";
     } else if(editing && self){
       bh += slotCell("albums", k, "slot-sq", "pl", "pn", "pm");
@@ -7369,6 +7397,9 @@ function renderPins(p){
   $("albums").innerHTML = bh;
   $("albumSection").hidden = !bAny && !(editing && self);
   $("albumAux").textContent = bAny ? bp.filter(Boolean).length + " pinned" : "";
+  pinStatControls(editing && self);
+  paintPinStats();
+  loadPinStats();
 }
 
 function fmtVal(v){

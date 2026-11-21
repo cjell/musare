@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from musicshare import pinstats
+from musicshare import playlists as pl_mod
 from musicshare.api import app as app_mod
 from musicshare.spec import chartrun
 
@@ -51,7 +52,7 @@ def plays(monkeypatch):
 
 def test_a_song_counts_with_its_versions_and_not_namesakes(plays):
     got = pinstats.stats([{"id": "zz", "name": "fears", "artist_name": "MTNS"}], [])
-    assert got["tracks"]["zz"] == {"hours": 0.4, "plays": 6}
+    assert got["tracks"]["zz"] == {"hours": 0.4, "plays": 6, "first": "2024-12-31"}
 
 
 def test_the_id_matches_on_its_own(plays):
@@ -77,7 +78,11 @@ def test_never_played_is_zero_and_junk_is_skipped(plays):
     got = pinstats.stats(
         [{"id": "n", "name": "Nothing", "artist_name": "Nobody"}, {"name": "no id"}, "junk"], None
     )
-    assert got == {"tracks": {"n": {"hours": 0.0, "plays": 0}}, "artists": {}}
+    assert got == {
+        "tracks": {"n": {"hours": 0.0, "plays": 0, "first": None}},
+        "artists": {},
+        "albums": {},
+    }
 
 
 @pytest.fixture
@@ -108,3 +113,64 @@ def test_too_many_pins_are_refused(api):
 
 def test_the_numbers_are_viewable_like_a_profile():
     assert "/api/pins/stats" in app_mod.VIEWABLE
+
+
+def test_an_album_is_its_title_and_artist(plays):
+    got = pinstats.stats([], [], [{"id": "al", "name": "lp", "artist_name": "mtns"}])
+    assert got["albums"]["al"]["plays"] == 6, "MTNS's plays off LP, not Other Band's"
+
+
+def test_first_played_is_the_first_real_listen(plays):
+    """Plays run an hour apart from midnight UTC on New Year's Day - still New
+    Year's Eve in New York, where Fears was first played (see above). Flume's
+    first real listen is the ninth play; the ten-second one after it is not."""
+    got = pinstats.stats(
+        [{"id": "y", "name": "Yonkers", "artist_name": "Tyler, The Creator"}],
+        [{"id": "f", "name": "Flume"}],
+    )
+    assert got["tracks"]["y"]["first"] == "2025-01-01"
+    assert got["artists"]["f"]["first"] == "2025-01-01"
+
+
+def test_saved_playlists_are_counted_too(api, monkeypatch):
+    seen = {}
+
+    def info(ids, uid=None):
+        seen["ids"] = ids
+        return {i: {"songs": 12, "first": "2021-03-14"} for i in ids}
+
+    monkeypatch.setattr(app_mod.pl_mod, "pin_info", info)
+    r = client.post("/api/pins/stats", json={"playlists": [{"id": "p1"}, {"name": "no id"}]})
+    assert r.json()["playlists"] == {"p1": {"songs": 12, "first": "2021-03-14"}}
+    assert seen["ids"] == ["p1"]
+
+
+def test_a_playlist_is_dated_by_its_earliest_song(tmp_path, monkeypatch):
+    pages = [
+        {
+            "total": 3,
+            "items": [{"added_at": "2022-05-01T10:00:00Z"}, {"added_at": "1970-01-01T00:00:00Z"}],
+        },
+        {"total": 3, "items": [{"added_at": "2021-03-14T09:00:00Z"}]},
+    ]
+    calls = []
+
+    def get(path, params=None, uid=None):
+        calls.append(params["offset"])
+        return pages[len(calls) - 1]
+
+    monkeypatch.setattr(pl_mod, "_get", get)
+    monkeypatch.setattr(pl_mod, "mine", lambda uid=None: [{"id": "p1", "tracks": 3}])
+    monkeypatch.setattr(pl_mod.users, "cache", lambda name, uid=None: tmp_path / name)
+    assert pl_mod.pin_info(["p1"]) == {"p1": {"songs": 3, "first": "2021-03-14"}}
+    assert calls == [0, 2], "steps by what came back; the 1970 placeholder is not a date"
+    calls.clear()
+    assert pl_mod.pin_info(["p1"])["p1"]["first"] == "2021-03-14"
+    assert calls == [], "a day's cache: Spotify is not asked again"
+
+
+def test_a_playlist_that_cannot_be_read_has_no_date(tmp_path, monkeypatch):
+    monkeypatch.setattr(pl_mod, "_get", lambda path, params=None, uid=None: None)
+    monkeypatch.setattr(pl_mod, "mine", lambda uid=None: [{"id": "p1", "tracks": 7}])
+    monkeypatch.setattr(pl_mod.users, "cache", lambda name, uid=None: tmp_path / name)
+    assert pl_mod.pin_info(["p1", "gone"]) == {"p1": {"songs": 7, "first": None}}

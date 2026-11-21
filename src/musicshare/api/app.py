@@ -1049,13 +1049,38 @@ class PinItems(BaseModel):
     artists: list[dict[str, object]] = Field(
         default_factory=list, max_length=pinstats_mod.MAX_ITEMS
     )
+    albums: list[dict[str, object]] = Field(default_factory=list, max_length=pinstats_mod.MAX_ITEMS)
+    playlists: list[dict[str, object]] = Field(default_factory=list, max_length=pl_mod.MAX_PINNED)
 
 
-@app.get("/api/pins/stats", dependencies=[Depends(needs_history), Depends(heavy_slot)])
+def _pin_numbers(pins: dict) -> dict[str, object]:
+    """Both kinds of number for a set of pins. The history query takes a heavy
+    slot; the playlists ask Spotify, and do it outside one, so a slow answer
+    from Spotify never holds a slot others are waiting on."""
+    with heavy():
+        out: dict[str, object] = dict(
+            pinstats_mod.stats(pins.get("tracks"), pins.get("artists"), pins.get("albums"))
+        )
+    ids = [
+        str(p.get("id"))
+        for p in (pins.get("playlists") or [])
+        if isinstance(p, dict) and p.get("id")
+    ]
+    try:
+        out["playlists"] = pl_mod.pin_info(ids) if ids else {}
+    except live_mod.NoToken:
+        out["playlists"] = {}
+    except Exception as e:
+        log.warning("pinned playlists failed: %s", e)
+        out["playlists"] = {}
+    return out
+
+
+@app.get("/api/pins/stats", dependencies=[Depends(needs_history)])
 def pin_stats_saved() -> dict[str, object]:
     """The numbers for the pins on this profile as it is saved."""
     if not media_mod.configured():
-        return {"tracks": {}, "artists": {}}
+        return {"tracks": {}, "artists": {}, "albums": {}, "playlists": {}}
     try:
         doc = media_mod.get_doc("profile") or {}
     except Exception as e:
@@ -1064,13 +1089,13 @@ def pin_stats_saved() -> dict[str, object]:
     if isinstance(doc.get("0"), dict):
         doc = doc["0"]
     pins = doc.get("pins") or {}
-    return pinstats_mod.stats(pins.get("tracks"), pins.get("artists"))
+    return _pin_numbers(pins if isinstance(pins, dict) else {})
 
 
-@app.post("/api/pins/stats", dependencies=[Depends(needs_history), Depends(heavy_slot)])
+@app.post("/api/pins/stats", dependencies=[Depends(needs_history)])
 def pin_stats_mine(body: PinItems) -> dict[str, object]:
     """The numbers for pins on your own profile, as the page has them now."""
-    return pinstats_mod.stats(body.tracks, body.artists)
+    return _pin_numbers(body.model_dump())
 
 
 @app.get("/api/home", dependencies=[Depends(needs_history), Depends(heavy_slot)])

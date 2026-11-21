@@ -122,6 +122,72 @@ def mine(
     return out[:limit] if limit else out
 
 
+# When each pinned playlist was started. Spotify keeps no creation date, so
+# this is the day its earliest song was added - which is the day it was made
+# unless that song was later taken out. Only the ids and dates go in, so the
+# answer is asked for once a day per playlist, with the fewest fields Spotify
+# will send.
+DATES_NAME = "playlist_dates.json"
+DATES_TTL = 24 * 3600
+MAX_DATE_PAGES = 10
+MAX_PINNED = 12
+
+
+def first_added(playlist_id: str, uid: str | None = None) -> str | None:
+    """The day the earliest song still in this playlist was added. None for
+    a playlist this account cannot read - anyone else's answers 403."""
+    first: str | None = None
+    offset = 0
+    for _ in range(MAX_DATE_PAGES):
+        page = _get(
+            f"/playlists/{playlist_id}/items",
+            {"limit": PAGE, "offset": offset, "fields": "total,items(added_at)"},
+            uid,
+        )
+        if not page:
+            return first
+        rows = page.get("items") or []
+        for row in rows:
+            at = str((row or {}).get("added_at") or "")[:10]
+            # Very old playlists carry a 1970 placeholder for songs added before
+            # Spotify kept the date; that is not when anything was added.
+            if len(at) == 10 and at > "2000" and (first is None or at < first):
+                first = at
+        offset += len(rows)
+        if offset >= (page.get("total") or 0) or not rows:
+            break
+    return first
+
+
+def pin_info(ids: list[str], uid: str | None = None) -> dict[str, dict[str, Any]]:
+    """{id: {"songs", "first"}} for pinned playlists: the count as it is now,
+    and the day each was started. Nothing for a playlist the account no
+    longer has."""
+    ids = list(dict.fromkeys(str(x) for x in ids if x))[:MAX_PINNED]
+    if not ids:
+        return {}
+    counts = {p["id"]: p["tracks"] for p in mine(uid=uid) if p.get("id") in ids}
+    cache_file = users.cache(DATES_NAME, uid)
+    try:
+        dates = json.loads(cache_file.read_text(encoding="utf-8")) if cache_file.exists() else {}
+    except ValueError:
+        dates = {}
+    now, changed = time.time(), False
+    out: dict[str, dict[str, Any]] = {}
+    for pid in ids:
+        rec = dates.get(pid)
+        if not isinstance(rec, dict) or now - float(rec.get("at") or 0) > DATES_TTL:
+            rec = {"first": first_added(pid, uid), "at": now}
+            dates[pid] = rec
+            changed = True
+        if pid in counts or rec.get("first"):
+            out[pid] = {"songs": counts.get(pid), "first": rec.get("first")}
+    if changed:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(json.dumps(dates), encoding="utf-8")
+    return out
+
+
 def tracks(playlist_id: str, limit: int = 100, uid: str | None = None) -> list[dict[str, Any]]:
     """What is in one playlist.
 
