@@ -1416,6 +1416,14 @@ details[open] summary .chev{transform:rotate(180deg)}
 .st-chip[aria-pressed="true"]{border-color:var(--accent-line);background:var(--accent-tint);color:var(--accent)}
 .st-swatch{width:20px;height:20px;border-radius:50%;border:2px solid transparent;cursor:pointer;padding:0}
 .st-swatch[aria-pressed="true"]{border-color:var(--ink)}
+/* Any colour at all: the device's own picker, behind a rainbow swatch. The
+   input fills the swatch and is invisible, so tapping the swatch is tapping it. */
+.st-any{
+  position:relative;overflow:hidden;display:inline-block;box-sizing:border-box;
+  background:conic-gradient(#ff4d4d,#ffb84d,#f5ff4d,#4dff88,#4dd2ff,#6e4dff,#ff4dd8,#ff4d4d);
+}
+.st-any input{position:absolute;inset:-4px;width:calc(100% + 8px);height:calc(100% + 8px);opacity:0;cursor:pointer;border:0;padding:0}
+.st-any:focus-within{outline:2px solid var(--accent);outline-offset:2px}
 .st-chip:focus-visible,.st-swatch:focus-visible,.st-open:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 /* Live or frozen, on every saved chart: a pink dot, or the day it was frozen. */
 .chart-mode{
@@ -7418,6 +7426,30 @@ function barValues(plan, color, font){
 var STYLE_HEX = { pink: SWATCHES[0], orange: SWATCHES[1], teal: SWATCHES[2],
                   blue: SWATCHES[3], purple: SWATCHES[4], yellow: SWATCHES[5] };
 var STYLE_COLORS = ["accent", "pink", "orange", "teal", "blue", "purple", "yellow"];
+var HEX_COLOR = /^#[0-9a-f]{6}$/i;
+var RECENT_COLORS = 3;
+
+/* A chart's colour as something to paint with: a named swatch, or any colour
+   picked, as hex. Null means the profile's own colour. */
+function chartColor(c){
+  if(!c) return null;
+  if(STYLE_HEX[c]) return STYLE_HEX[c];
+  return HEX_COLOR.test(c) ? c : null;
+}
+
+/* The last few colours picked, newest first, kept with your own profile so
+   they follow you to another device. */
+function recentColors(){
+  var r = (CUSTOM[0] && CUSTOM[0].recentColors) || [];
+  return r.filter(function(c){ return HEX_COLOR.test(c); }).slice(0, RECENT_COLORS);
+}
+function rememberColor(hex){
+  var mine = CUSTOM[0] || (CUSTOM[0] = {});
+  hex = hex.toLowerCase();
+  mine.recentColors = [hex].concat(recentColors().filter(function(c){ return c !== hex; }))
+    .slice(0, RECENT_COLORS);
+  saveCustom();
+}
 var OPEN_STYLE = null;
 
 function plainStyle(st){
@@ -7491,12 +7523,22 @@ function stylePanel(s, styles){
     html += row("Type", chips("type", types, st.type || "auto"));
   }
   if(styles.color){
+    var cur = st.color || "accent", custom = HEX_COLOR.test(cur) ? cur.toLowerCase() : "";
+    /* The colour this chart has now stays among the swatches even after newer
+       picks have pushed it out of the recent ones. */
+    var recent = recentColors();
+    if(custom && recent.indexOf(custom) < 0) recent = [custom].concat(recent).slice(0, RECENT_COLORS);
     html += row("Colour", STYLE_COLORS.map(function(c){
       var bg = c === "accent" ? "var(--accent)" : STYLE_HEX[c];
       return '<button type="button" class="st-swatch" data-st-key="color" data-st-val="' + c +
-        '" aria-pressed="' + ((st.color || "accent") === c) + '" aria-label="' + c +
+        '" aria-pressed="' + (cur === c) + '" aria-label="' + c +
         (c === "accent" ? " (your profile colour)" : "") + '" style="background:' + bg + '"></button>';
-    }).join(""));
+    }).concat(recent.map(function(c){
+      return '<button type="button" class="st-swatch" data-st-key="color" data-st-val="' + c +
+        '" aria-pressed="' + (custom === c) + '" aria-label="' + c + '" style="background:' + c + '"></button>';
+    })).join("") +
+      '<label class="st-swatch st-any" title="Any colour"><input type="color" data-st-any value="' +
+      (custom || "#7c5cff") + '" aria-label="Pick any colour"></label>');
   }
   if(styles.gridlines){
     html += row("Gridlines", chips("gridlines", [["fewer", "Fewer"], ["normal", "Normal"], ["more", "More"]],
@@ -7583,6 +7625,16 @@ document.addEventListener("click", function(e){
   var panel = opt.closest(".chart-style");
   if(panel) applyStyle(panel.dataset.stScope, panel.dataset.stId, opt.dataset.stKey, opt.dataset.stVal);
 });
+/* "change", not "input": the picker reports every step of a drag, and redrawing
+   the panel on each one would close the picker under the person using it. */
+document.addEventListener("change", function(e){
+  var inp = e.target.closest && e.target.closest("[data-st-any]");
+  if(!inp || !HEX_COLOR.test(inp.value)) return;
+  var panel = inp.closest(".chart-style");
+  if(!panel) return;
+  rememberColor(inp.value);
+  applyStyle(panel.dataset.stScope, panel.dataset.stId, "color", inp.value.toLowerCase());
+});
 
 /* A heatmap is a grid of cells rather than a canvas drawing: Chart.js has no
    shape for one, and cells made of elements keep the labels readable and the
@@ -7590,7 +7642,7 @@ document.addEventListener("click", function(e){
    how dark each one is against the largest. */
 function heatGrid(plan){
   var css = getComputedStyle(document.querySelector(".phone"));
-  var accent = (plan.color && STYLE_HEX[plan.color]) ||
+  var accent = chartColor(plan.color) ||
     css.getPropertyValue("--accent").trim() || "#E74094";
   /* Past eight columns a cell is too narrow for its number, and the shade is
      the reading anyway - the value stays in the tooltip. */
@@ -7757,7 +7809,7 @@ function plotChart(cv, plan){
   var ink3 = css.getPropertyValue("--ink-3").trim() || "#635C7A";
   var ink2 = css.getPropertyValue("--ink-2").trim() || "#A9A2BE";
   var font = { family: '"IBM Plex Mono", monospace', size: 9 };
-  if(plan.color && STYLE_HEX[plan.color]){ accent = STYLE_HEX[plan.color]; tint = hexAlpha(accent, 0.16); }
+  if(chartColor(plan.color)){ accent = chartColor(plan.color); tint = hexAlpha(accent, 0.16); }
 
   cv.width = cv.clientWidth || (cv.parentNode && cv.parentNode.clientWidth) || 320;
   cv.height = compact ? (plan.kind === "hbar" ? plan.labels.length * 19 + 6 : 96) : (plan.height || 150);

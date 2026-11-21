@@ -50,8 +50,9 @@ RUNNING = payload(labels=["a", "b"], values=[1.0, 2.0], chart="line", cumulative
 def test_a_style_is_a_menu_and_nothing_else():
     with pytest.raises(pydantic.ValidationError):
         ChartStyle(type="pie")
-    with pytest.raises(pydantic.ValidationError):
-        ChartStyle(color="#ff0000")
+    for bad in ("red", "#ff00", "#ff00000", "ff0000", "#gg0000", "url(x)"):
+        with pytest.raises(pydantic.ValidationError):
+            ChartStyle(color=bad)
     with pytest.raises(pydantic.ValidationError):
         ChartStyle(sql="drop table plays")
 
@@ -148,3 +149,14 @@ def test_the_plan_endpoint_still_takes_bare_numbers_from_old_saved_charts():
 def test_a_style_off_the_menu_is_refused():
     r = client.post("/api/chart/plan", json={"data": HOURS, "style": {"color": "chartreuse"}})
     assert r.status_code == 422
+
+
+def test_any_colour_as_hex_or_a_named_one():
+    assert ChartStyle(color="#3fa7D6").color == "#3fa7D6"
+    assert ChartStyle(color="#000000").color == "#000000", "too dark is the person's call"
+    assert ChartStyle(color="teal").color == "teal"
+    p = plan(
+        {"chart": "bar", "labels": ["a", "b"], "values": [2.0, 1.0], "x_label": "artist"},
+        ChartStyle(color="#3fa7d6"),
+    )
+    assert p["color"] == "#3fa7d6" and p["style"]["color"] == "#3fa7d6"

@@ -29,9 +29,9 @@ from __future__ import annotations
 import math
 import re
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, StringConstraints
 
 # Bars that name things rather than positions on a scale. Their labels are words,
 # which do not fit under vertical bars at phone width, so the bars lie on their side.
@@ -78,13 +78,19 @@ class ChartStyle(BaseModel):
     what lets looks be personal without growing the model's job.
 
     Every field is a short menu, like the spec's, so no stored style can ask for a
-    drawing that does not exist.
+    drawing that does not exist. Colour is the one exception: a named swatch, or
+    any colour at all as six hex digits. The pattern is the whole check - it is a
+    colour or it is refused - and a colour too dark to read on the page is the
+    person's to choose.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     type: Literal["auto", "bar", "line", "area", "grouped", "stacked", "share", "heatmap"] = "auto"
-    color: Literal["accent", "pink", "orange", "teal", "blue", "purple", "yellow"] = "accent"
+    color: (
+        Literal["accent", "pink", "orange", "teal", "blue", "purple", "yellow"]
+        | Annotated[str, StringConstraints(pattern=r"^#[0-9a-fA-F]{6}$")]
+    ) = "accent"
     gridlines: Literal["fewer", "normal", "more"] = "normal"
     values: Literal["auto", "show", "hide"] = "auto"
 
