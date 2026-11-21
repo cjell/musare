@@ -300,13 +300,13 @@ body{
 .ring .art{width:100%;height:100%;border-radius:50%}
 /* Frames are a cosmetic the user picks, applied to all their artists.
    Set once on the grid so a profile reads as one consistent choice. */
-.fr-thin .ring{border-color:var(--accent-line)}
+.fr-thin .ring{border-color:var(--ring-line,var(--accent-line))}
 .fr-double .ring{
-  border-color:var(--accent-line);
-  box-shadow:0 0 0 2.5px var(--ground),0 0 0 4px var(--accent-line);
+  border-color:var(--ring-line,var(--accent-line));
+  box-shadow:0 0 0 2.5px var(--ground),0 0 0 4px var(--ring-line,var(--accent-line));
 }
-.fr-thick .ring{border-width:3px;border-color:var(--accent-line)}
-.artist:hover .ring{border-color:var(--accent)}
+.fr-thick .ring{border-width:3px;border-color:var(--ring-line,var(--accent-line))}
+.artist:hover .ring{border-color:var(--ring,var(--accent))}
 .artist .an{
   font-size:10.5px;font-weight:500;margin-top:9px;line-height:1.3;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
@@ -889,6 +889,15 @@ body{
 }
 .swatch[aria-pressed="true"]{border-color:var(--ink)}
 .swatch:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+/* Any colour: the device's own picker behind a rainbow swatch, as on charts. */
+.swatch.any{
+  position:relative;overflow:hidden;padding:0;
+  background:conic-gradient(#ff4d4d,#ffb84d,#f5ff4d,#4dff88,#4dd2ff,#6e4dff,#ff4dd8,#ff4d4d);
+}
+.swatch.any input{position:absolute;inset:-4px;width:calc(100% + 8px);height:calc(100% + 8px);opacity:0;cursor:pointer;border:0;padding:0}
+.swatch.any:focus-within{outline:2px solid var(--ink);outline-offset:2px}
+/* "Match theme": the frame takes the profile colour, shown as a ring of it. */
+.swatch.match{background:var(--ground);box-shadow:inset 0 0 0 3px var(--accent)}
 .frames{display:flex;gap:12px}
 .frame-opt{
   width:52px;height:52px;border-radius:50%;cursor:pointer;flex:none;padding:2.5px;
@@ -1336,6 +1345,7 @@ details[open] summary .chev{transform:rotate(180deg)}
   font-size:10.5px;color:var(--ink-3);
 }
 .row .pstat:empty{display:none}
+.row.pinbox .ta,.row.pinbox .pstat,.artist.pinbox .ameta,.pl.pinbox .pm{color:var(--accent-soft,var(--ink-3))}
 .editing .row.pinbox .pstat{margin-right:26px}
 .pstat-ctl{margin:-4px 0 10px}
 .pstat-ctl .chart-mode{margin:0}
@@ -2458,6 +2468,10 @@ details[open] summary .chev{transform:rotate(180deg)}
         </div>
       </div>
       <div class="srow col">
+        <div class="k">Frame colour</div>
+        <div class="swatches" id="ringSwatches"></div>
+      </div>
+      <div class="srow col">
         <div class="k">Name</div>
         <input class="txt" id="custName" maxlength="28" autocomplete="off">
       </div>
@@ -3060,6 +3074,11 @@ var PL_COLLAPSED = 6;
    localStorage. Every viewer customizes their own copy, so testing this costs
    nobody a photo upload. */
 var SWATCHES = ["#E74094","#FF9D2E","#4FD6C0","#7FA9FF","#C08BFF","#FFD84D"];
+/* Any colour anyone picks is stored as six hex digits, and nothing else is
+   used as one. Up here because a profile is drawn before the chart code below
+   has run. */
+var HEX_COLOR = /^#[0-9a-f]{6}$/i;
+var RECENT_COLORS = 3;
 /* CUSTOM[i] is profile i's saved document. Only CUSTOM[0], yours, is ever
    written; anyone else's is fetched to be looked at. The local copy is kept per
    account, so two people signing in on one computer never share one. */
@@ -3417,15 +3436,26 @@ function render(i){
   useMap(i);
   useNow(i);
 
-  var accent = c.accent || p.accent;
+  /* Any colour at all, but only a colour: a friend's saved profile is read
+     here too, and a value that is not six hex digits never reaches the CSS. */
+  var own = HEX_COLOR.test(c.accent || "") ? c.accent : "";
+  var accent = own || p.accent;
   var accentRGB = hexRGB(accent).join(",");
-  var genRGB = c.accent ? genFrom(accent).join(",") : p.genRGB;
+  var genRGB = own ? genFrom(accent).join(",") : p.genRGB;
   var gen = "rgb(" + genRGB + ")";
 
   var phone = $("phone");
   phone.style.setProperty("--accent", accent);
   phone.style.setProperty("--accent-tint", "rgba(" + accentRGB + ",.13)");
   phone.style.setProperty("--accent-line", "rgba(" + accentRGB + ",.30)");
+  phone.style.setProperty("--accent-soft", "rgba(" + accentRGB + ",.72)");
+  if(HEX_COLOR.test(c.ring || "")){
+    phone.style.setProperty("--ring", c.ring);
+    phone.style.setProperty("--ring-line", c.ring);
+  } else {
+    phone.style.removeProperty("--ring");
+    phone.style.removeProperty("--ring-line");
+  }
   phone.style.setProperty("--gen", gen);
   phone.style.setProperty("--gen-tint", "rgba(" + genRGB + ",.13)");
   phone.style.setProperty("--gen-line", "rgba(" + genRGB + ",.34)");
@@ -5513,17 +5543,33 @@ $("showSegs").addEventListener("click", function(e){
 });
 
 /* ---------- customize sheet ---------- */
-$("swatches").innerHTML = SWATCHES.map(function(h){
-  return '<button class="swatch" type="button" data-c="' + h + '" aria-pressed="false" ' +
-         'aria-label="Accent ' + h + '" style="background:' + h + '"></button>';
-}).join("");
+/* A row of colours: the fixed ones, the last few picked anywhere (charts
+   included), and a rainbow swatch for any colour. The one in use stays among
+   them even after newer picks push it out of the recent ones. */
+function colourSwatches(fixed, current, what, extra){
+  current = (current || "").toLowerCase();
+  var list = fixed.map(function(h){ return h.toLowerCase(); });
+  var recent = recentColors().filter(function(h){ return list.indexOf(h) < 0; });
+  if(HEX_COLOR.test(current) && list.indexOf(current) < 0 && recent.indexOf(current) < 0)
+    recent = [current].concat(recent).slice(0, RECENT_COLORS);
+  return (extra || "") + list.concat(recent).map(function(h){
+    return '<button class="swatch" type="button" data-c="' + h + '" aria-pressed="' + (h === current) +
+      '" aria-label="' + what + " " + h + '" style="background:' + h + '"></button>';
+  }).join("") +
+    '<label class="swatch any" title="Any colour"><input type="color" data-any-colour value="' +
+    (HEX_COLOR.test(current) ? current : "#7c5cff") + '" aria-label="Pick any ' + what.toLowerCase() +
+    '"></label>';
+}
 
 function syncSheet(){
   var p = PROFILES[current], c = CUSTOM[current] || {};
-  var acc = c.accent || p.accent, fr = c.frame || p.frame;
-  [].forEach.call($("swatches").children, function(b){
-    b.setAttribute("aria-pressed", b.dataset.c.toLowerCase() === acc.toLowerCase() ? "true" : "false");
-  });
+  var acc = (HEX_COLOR.test(c.accent || "") ? c.accent : p.accent), fr = c.frame || p.frame;
+  var ring = HEX_COLOR.test(c.ring || "") ? c.ring : "";
+  $("swatches").innerHTML = colourSwatches(SWATCHES, acc, "Accent");
+  $("ringSwatches").innerHTML = colourSwatches([], ring, "Frame",
+    '<button class="swatch match" type="button" data-c="" aria-pressed="' + !ring +
+    '" aria-label="Frame matches the theme colour" title="Match theme" style="box-shadow:inset 0 0 0 3px ' +
+    acc + '"></button>');
   [].forEach.call($("frames").children, function(b){
     b.setAttribute("aria-pressed", b.dataset.f === fr ? "true" : "false");
   });
@@ -5554,10 +5600,30 @@ document.addEventListener("keydown", function(e){
 });
 
 $("swatches").addEventListener("click", function(e){
-  var b = e.target.closest(".swatch");
+  var b = e.target.closest("button.swatch");
   if(!b) return;
   cust().accent = b.dataset.c;
   saveCustom(); render(current); syncSheet();
+});
+$("ringSwatches").addEventListener("click", function(e){
+  var b = e.target.closest("button.swatch");
+  if(!b) return;
+  if(b.dataset.c) cust().ring = b.dataset.c;
+  else delete cust().ring;
+  saveCustom(); render(current); syncSheet();
+});
+/* "change", not "input": a picker reports every step of a drag, and redrawing
+   the swatches on each would close it under the person using it. */
+["swatches", "ringSwatches"].forEach(function(id){
+  $(id).addEventListener("change", function(e){
+    var inp = e.target.closest && e.target.closest("[data-any-colour]");
+    if(!inp || !HEX_COLOR.test(inp.value)) return;
+    var hex = inp.value.toLowerCase();
+    rememberColor(hex);
+    if(id === "swatches") cust().accent = hex;
+    else cust().ring = hex;
+    saveCustom(); render(current); syncSheet();
+  });
 });
 $("frames").addEventListener("click", function(e){
   var b = e.target.closest(".frame-opt");
@@ -7426,8 +7492,6 @@ function barValues(plan, color, font){
 var STYLE_HEX = { pink: SWATCHES[0], orange: SWATCHES[1], teal: SWATCHES[2],
                   blue: SWATCHES[3], purple: SWATCHES[4], yellow: SWATCHES[5] };
 var STYLE_COLORS = ["accent", "pink", "orange", "teal", "blue", "purple", "yellow"];
-var HEX_COLOR = /^#[0-9a-f]{6}$/i;
-var RECENT_COLORS = 3;
 
 /* A chart's colour as something to paint with: a named swatch, or any colour
    picked, as hex. Null means the profile's own colour. */
